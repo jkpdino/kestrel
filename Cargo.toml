@@ -1,0 +1,21 @@
+[package]
+name = "kestrel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kestrel-lexer = { path = "lib/kestrel-lexer" }
+kestrel-parser = { path = "lib/kestrel-parser" }
+kestrel-syntax-tree = { path = "lib/kestrel-syntax-tree" }
+chumsky = "0.11.1"
+logos = "0.15.1"
+
+
+[workspace]
+members = [
+    "lib/kestrel-span",
+    "lib/kestrel-lexer",
+    "lib/kestrel-parser",
+    "lib/kestrel-syntax-tree",
+    "lib/semantic-tree"
+]

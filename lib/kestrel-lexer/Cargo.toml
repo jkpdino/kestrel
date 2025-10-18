@@ -1,0 +1,9 @@
+[package]
+name = "kestrel-lexer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+logos = "0.14"
+unicode-xid = "0.2"
+kestrel-span = { path = "../kestrel-span" }
