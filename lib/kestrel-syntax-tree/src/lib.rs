@@ -39,6 +39,7 @@ pub enum SyntaxKind {
     Root,
     SourceFile,
     DeclarationItem,
+    ClassDeclaration,
     ImportDeclaration,
     ImportItem,
     ModuleDeclaration,
@@ -55,12 +56,17 @@ pub enum SyntaxKind {
 
     // Keywords
     As,
+    Class,
     Else,
+    Fileprivate,
     Fn,
     If,
     Import,
+    Internal,
     Let,
     Module,
+    Private,
+    Public,
 
     // Braces
     LParen,
@@ -105,12 +111,17 @@ impl From<Token> for SyntaxKind {
             Token::Boolean => SyntaxKind::Boolean,
             Token::Null => SyntaxKind::Null,
             Token::As => SyntaxKind::As,
+            Token::Class => SyntaxKind::Class,
             Token::Else => SyntaxKind::Else,
+            Token::Fileprivate => SyntaxKind::Fileprivate,
             Token::Fn => SyntaxKind::Fn,
             Token::If => SyntaxKind::If,
             Token::Import => SyntaxKind::Import,
+            Token::Internal => SyntaxKind::Internal,
             Token::Let => SyntaxKind::Let,
             Token::Module => SyntaxKind::Module,
+            Token::Private => SyntaxKind::Private,
+            Token::Public => SyntaxKind::Public,
             Token::LParen => SyntaxKind::LParen,
             Token::RParen => SyntaxKind::RParen,
             Token::LBrace => SyntaxKind::LBrace,
@@ -142,6 +153,7 @@ impl Language for KestrelLanguage {
         const ROOT: u16 = SyntaxKind::Root as u16;
         const SOURCE_FILE: u16 = SyntaxKind::SourceFile as u16;
         const DECLARATION_ITEM: u16 = SyntaxKind::DeclarationItem as u16;
+        const CLASS_DECLARATION: u16 = SyntaxKind::ClassDeclaration as u16;
         const IMPORT_DECLARATION: u16 = SyntaxKind::ImportDeclaration as u16;
         const IMPORT_ITEM: u16 = SyntaxKind::ImportItem as u16;
         const MODULE_DECLARATION: u16 = SyntaxKind::ModuleDeclaration as u16;
@@ -153,12 +165,17 @@ impl Language for KestrelLanguage {
         const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
         const NULL: u16 = SyntaxKind::Null as u16;
         const AS: u16 = SyntaxKind::As as u16;
+        const CLASS: u16 = SyntaxKind::Class as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
+        const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
         const FN: u16 = SyntaxKind::Fn as u16;
         const IF: u16 = SyntaxKind::If as u16;
         const IMPORT: u16 = SyntaxKind::Import as u16;
+        const INTERNAL: u16 = SyntaxKind::Internal as u16;
         const LET: u16 = SyntaxKind::Let as u16;
         const MODULE: u16 = SyntaxKind::Module as u16;
+        const PRIVATE: u16 = SyntaxKind::Private as u16;
+        const PUBLIC: u16 = SyntaxKind::Public as u16;
         const LPAREN: u16 = SyntaxKind::LParen as u16;
         const RPAREN: u16 = SyntaxKind::RParen as u16;
         const LBRACE: u16 = SyntaxKind::LBrace as u16;
@@ -181,6 +198,7 @@ impl Language for KestrelLanguage {
             ROOT => SyntaxKind::Root,
             SOURCE_FILE => SyntaxKind::SourceFile,
             DECLARATION_ITEM => SyntaxKind::DeclarationItem,
+            CLASS_DECLARATION => SyntaxKind::ClassDeclaration,
             IMPORT_DECLARATION => SyntaxKind::ImportDeclaration,
             IMPORT_ITEM => SyntaxKind::ImportItem,
             MODULE_DECLARATION => SyntaxKind::ModuleDeclaration,
@@ -192,12 +210,17 @@ impl Language for KestrelLanguage {
             BOOLEAN => SyntaxKind::Boolean,
             NULL => SyntaxKind::Null,
             AS => SyntaxKind::As,
+            CLASS => SyntaxKind::Class,
             ELSE => SyntaxKind::Else,
+            FILEPRIVATE => SyntaxKind::Fileprivate,
             FN => SyntaxKind::Fn,
             IF => SyntaxKind::If,
             IMPORT => SyntaxKind::Import,
+            INTERNAL => SyntaxKind::Internal,
             LET => SyntaxKind::Let,
             MODULE => SyntaxKind::Module,
+            PRIVATE => SyntaxKind::Private,
+            PUBLIC => SyntaxKind::Public,
             LPAREN => SyntaxKind::LParen,
             RPAREN => SyntaxKind::RParen,
             LBRACE => SyntaxKind::LBrace,

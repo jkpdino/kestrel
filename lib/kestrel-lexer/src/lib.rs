@@ -91,17 +91,32 @@ pub enum Token {
     Null,
 
     // ===== Declaration Keywords =====
+    #[token("class")]
+    Class,
+
+    #[token("fileprivate")]
+    Fileprivate,
+
     #[token("fn")]
     Fn,
 
     #[token("import")]
     Import,
 
+    #[token("internal")]
+    Internal,
+
     #[token("let")]
     Let,
 
     #[token("module")]
     Module,
+
+    #[token("private")]
+    Private,
+
+    #[token("public")]
+    Public,
 
     // ===== Statement Keywords =====
     #[token("as")]
@@ -441,5 +456,53 @@ mod tests {
         assert_eq!(tokens[9].value, Token::Comma);
         assert_eq!(tokens[10].value, Token::Identifier); // E
         assert_eq!(tokens[11].value, Token::RParen);
+    }
+
+    #[test]
+    fn test_class_declaration() {
+        let source = "class Foo { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .collect();
+
+        assert_eq!(tokens.len(), 4);
+        assert_eq!(tokens[0].value, Token::Class);
+        assert_eq!(tokens[1].value, Token::Identifier); // Foo
+        assert_eq!(tokens[2].value, Token::LBrace);
+        assert_eq!(tokens[3].value, Token::RBrace);
+    }
+
+    #[test]
+    fn test_class_with_visibility() {
+        let source = "public class Foo { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .collect();
+
+        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens[0].value, Token::Public);
+        assert_eq!(tokens[1].value, Token::Class);
+        assert_eq!(tokens[2].value, Token::Identifier); // Foo
+        assert_eq!(tokens[3].value, Token::LBrace);
+        assert_eq!(tokens[4].value, Token::RBrace);
+
+        // Test other visibility modifiers
+        let source = "private class Bar { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .collect();
+        assert_eq!(tokens[0].value, Token::Private);
+
+        let source = "fileprivate class Baz { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .collect();
+        assert_eq!(tokens[0].value, Token::Fileprivate);
+
+        let source = "internal class Qux { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .collect();
+        assert_eq!(tokens[0].value, Token::Internal);
     }
 }

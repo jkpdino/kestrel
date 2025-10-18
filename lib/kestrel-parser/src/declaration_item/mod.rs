@@ -5,6 +5,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::module::{ModuleDeclaration, parse_module_declaration};
 use crate::import::{ImportDeclaration, parse_import_declaration};
+use crate::class::{ClassDeclaration, parse_class_declaration};
 use crate::event::EventSink;
 
 /// Represents a declaration item - a top-level unit of code in a Kestrel file
@@ -12,6 +13,7 @@ use crate::event::EventSink;
 pub enum DeclarationItem {
     Module(ModuleDeclaration),
     Import(ImportDeclaration),
+    Class(ClassDeclaration),
 }
 
 impl DeclarationItem {
@@ -20,6 +22,7 @@ impl DeclarationItem {
         match self {
             DeclarationItem::Module(decl) => &decl.span,
             DeclarationItem::Import(decl) => &decl.span,
+            DeclarationItem::Class(decl) => &decl.span,
         }
     }
 
@@ -28,6 +31,7 @@ impl DeclarationItem {
         match self {
             DeclarationItem::Module(decl) => &decl.syntax,
             DeclarationItem::Import(decl) => &decl.syntax,
+            DeclarationItem::Class(decl) => &decl.syntax,
         }
     }
 }
@@ -37,6 +41,7 @@ impl DeclarationItem {
 enum DeclarationItemData {
     Module(Span, Vec<Span>),
     Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>),
+    Class(Option<(Token, Span)>, Span, Span, Span, Span),
 }
 
 /// Internal Chumsky parser for module path segments
@@ -111,12 +116,47 @@ fn import_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Span>, 
         })
 }
 
+/// Internal parser for optional visibility modifier
+fn visibility_parser_internal() -> impl Parser<Token, Option<(Token, Span)>, Error = Simple<Token>> + Clone {
+    filter_map(|span, token| match token {
+        Token::Public | Token::Private | Token::Internal | Token::Fileprivate => {
+            Ok((token, span))
+        }
+        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+    })
+    .or_not()
+}
+
+/// Internal parser for class declaration
+fn class_declaration_parser_internal() -> impl Parser<
+    Token,
+    (Option<(Token, Span)>, Span, Span, Span, Span),
+    Error = Simple<Token>,
+> + Clone {
+    visibility_parser_internal()
+        .then(just(Token::Class).map_with_span(|_, span| span))
+        .then(filter_map(|span, token| match token {
+            Token::Identifier => Ok(span),
+            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+        }))
+        .then(just(Token::LBrace).map_with_span(|_, span| span))
+        .then(just(Token::RBrace).map_with_span(|_, span| span))
+        .map(
+            |((((visibility, class_span), name_span), lbrace_span), rbrace_span)| {
+                (visibility, class_span, name_span, lbrace_span, rbrace_span)
+            },
+        )
+}
+
 /// Internal Chumsky parser for a single declaration item
 fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData, Error = Simple<Token>> + Clone {
     module_declaration_parser_internal()
         .map(|(span, path)| DeclarationItemData::Module(span, path))
         .or(import_declaration_parser_internal()
             .map(|(import_span, path, alias, items)| DeclarationItemData::Import(import_span, path, alias, items)))
+        .or(class_declaration_parser_internal()
+            .map(|(visibility, class_span, name_span, lbrace_span, rbrace_span)|
+                DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, rbrace_span)))
 }
 
 /// Internal Chumsky parser for multiple declaration items
@@ -128,13 +168,14 @@ fn declaration_items_parser_internal() -> impl Parser<Token, Vec<DeclarationItem
 
 /// Parse a declaration item and emit events
 /// This is the primary event-driven parser function
-/// Tries to parse as a module declaration first, then as an import declaration
+/// Tries to parse as a module declaration first, then import, then class
 pub fn parse_declaration_item<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
-    // Clone the iterator so we can try module parser first, then import parser
-    let tokens_clone = tokens.clone();
+    // Clone the iterator so we can try multiple parsers
+    let tokens_clone1 = tokens.clone();
+    let tokens_clone2 = tokens.clone();
 
     // Try parsing as module declaration
     let module_result = {
@@ -161,7 +202,7 @@ where
     // If module parsing failed, try import declaration
     if module_result {
         let mut temp_sink = EventSink::new();
-        parse_import_declaration(source, tokens_clone, &mut temp_sink);
+        parse_import_declaration(source, tokens_clone1, &mut temp_sink);
 
         // Check if there were errors
         let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error(_)));
@@ -177,10 +218,29 @@ where
             }
             return;
         }
-
-        // Both failed - emit error
-        sink.error("Expected module or import declaration".to_string());
     }
+
+    // If import parsing failed, try class declaration
+    let mut temp_sink = EventSink::new();
+    parse_class_declaration(source, tokens_clone2, &mut temp_sink);
+
+    // Check if there were errors
+    let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error(_)));
+    if !has_errors {
+        // Success! Copy events to the main sink
+        for event in temp_sink.into_events() {
+            match event {
+                crate::event::Event::StartNode(kind) => sink.start_node(kind),
+                crate::event::Event::AddToken(kind, span) => sink.add_token(kind, span),
+                crate::event::Event::FinishNode => sink.finish_node(),
+                crate::event::Event::Error(msg) => sink.error(msg),
+            }
+        }
+        return;
+    }
+
+    // All failed - emit error
+    sink.error("Expected module, import, or class declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -210,6 +270,10 @@ where
                     DeclarationItemData::Import(import_span, path_segments, alias, items) => {
                         // Emit import declaration events
                         emit_import_declaration(sink, import_span, &path_segments, alias, items);
+                    }
+                    DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, rbrace_span) => {
+                        // Emit class declaration events
+                        emit_class_declaration(sink, visibility, class_span, name_span, lbrace_span, rbrace_span);
                     }
                 }
             }
@@ -279,6 +343,38 @@ fn emit_import_declaration(
         sink.add_token(SyntaxKind::Identifier, alias_span);
     }
 
+    sink.finish_node();
+}
+
+/// Emit events for a class declaration
+/// Helper function used by parse_source_file
+fn emit_class_declaration(
+    sink: &mut EventSink,
+    visibility: Option<(Token, Span)>,
+    class_span: Span,
+    name_span: Span,
+    lbrace_span: Span,
+    rbrace_span: Span,
+) {
+    sink.start_node(SyntaxKind::ClassDeclaration);
+
+    // Emit visibility modifier if present
+    if let Some((vis_token, vis_span)) = visibility {
+        let vis_kind = match vis_token {
+            Token::Public => SyntaxKind::Public,
+            Token::Private => SyntaxKind::Private,
+            Token::Internal => SyntaxKind::Internal,
+            Token::Fileprivate => SyntaxKind::Fileprivate,
+            _ => unreachable!("visibility_parser_internal only returns visibility tokens"),
+        };
+        sink.add_token(vis_kind, vis_span);
+    }
+
+    sink.add_token(SyntaxKind::Class, class_span);
+    sink.add_token(SyntaxKind::Identifier, name_span);
+    sink.add_token(SyntaxKind::LBrace, lbrace_span);
+    // TODO: Add support for declaration items in the body
+    sink.add_token(SyntaxKind::RBrace, rbrace_span);
     sink.finish_node();
 }
 

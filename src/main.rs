@@ -80,6 +80,8 @@ fn main() {
         "tests/declaration_item/basic.ks",
         "tests/module/basic.ks",
         "tests/import/basic.ks",
+        "tests/class/basic.ks",
+        "tests/class/edge_cases.ks",
     ];
 
     for file in test_files {
