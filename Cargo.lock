@@ -149,6 +149,7 @@ dependencies = [
  "chumsky 0.11.1",
  "kestrel-lexer",
  "kestrel-parser",
+ "kestrel-semantic-tree-builder",
  "kestrel-syntax-tree",
  "logos 0.15.1",
 ]
@@ -170,6 +171,24 @@ dependencies = [
  "kestrel-lexer",
  "kestrel-span",
  "kestrel-syntax-tree",
+]
+
+[[package]]
+name = "kestrel-semantic-tree"
+version = "0.1.0"
+dependencies = [
+ "kestrel-span",
+ "semantic-tree",
+]
+
+[[package]]
+name = "kestrel-semantic-tree-builder"
+version = "0.1.0"
+dependencies = [
+ "kestrel-semantic-tree",
+ "kestrel-span",
+ "kestrel-syntax-tree",
+ "semantic-tree",
 ]
 
 [[package]]
@@ -369,6 +388,9 @@ dependencies = [
 [[package]]
 name = "semantic-tree"
 version = "0.1.0"
+dependencies = [
+ "kestrel-span",
+]
 
 [[package]]
 name = "semver"

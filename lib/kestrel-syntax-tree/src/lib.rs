@@ -40,10 +40,13 @@ pub enum SyntaxKind {
     SourceFile,
     DeclarationItem,
     ClassDeclaration,
+    ClassBody,
     ImportDeclaration,
     ImportItem,
     ModuleDeclaration,
     ModulePath,
+    Name,
+    Visibility,
 
     // ===== Tokens (Terminals) =====
     // Literals
@@ -154,10 +157,13 @@ impl Language for KestrelLanguage {
         const SOURCE_FILE: u16 = SyntaxKind::SourceFile as u16;
         const DECLARATION_ITEM: u16 = SyntaxKind::DeclarationItem as u16;
         const CLASS_DECLARATION: u16 = SyntaxKind::ClassDeclaration as u16;
+        const CLASS_BODY: u16 = SyntaxKind::ClassBody as u16;
         const IMPORT_DECLARATION: u16 = SyntaxKind::ImportDeclaration as u16;
         const IMPORT_ITEM: u16 = SyntaxKind::ImportItem as u16;
         const MODULE_DECLARATION: u16 = SyntaxKind::ModuleDeclaration as u16;
         const MODULE_PATH: u16 = SyntaxKind::ModulePath as u16;
+        const NAME: u16 = SyntaxKind::Name as u16;
+        const VISIBILITY: u16 = SyntaxKind::Visibility as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
@@ -199,10 +205,13 @@ impl Language for KestrelLanguage {
             SOURCE_FILE => SyntaxKind::SourceFile,
             DECLARATION_ITEM => SyntaxKind::DeclarationItem,
             CLASS_DECLARATION => SyntaxKind::ClassDeclaration,
+            CLASS_BODY => SyntaxKind::ClassBody,
             IMPORT_DECLARATION => SyntaxKind::ImportDeclaration,
             IMPORT_ITEM => SyntaxKind::ImportItem,
             MODULE_DECLARATION => SyntaxKind::ModuleDeclaration,
             MODULE_PATH => SyntaxKind::ModulePath,
+            NAME => SyntaxKind::Name,
+            VISIBILITY => SyntaxKind::Visibility,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
             INTEGER => SyntaxKind::Integer,

@@ -1,0 +1,10 @@
+[package]
+name = "kestrel-semantic-tree-builder"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
+kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-span = { path = "../kestrel-span" }
+semantic-tree = { path = "../semantic-tree" }

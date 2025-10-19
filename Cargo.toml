@@ -7,6 +7,7 @@ edition = "2021"
 kestrel-lexer = { path = "lib/kestrel-lexer" }
 kestrel-parser = { path = "lib/kestrel-parser" }
 kestrel-syntax-tree = { path = "lib/kestrel-syntax-tree" }
+kestrel-semantic-tree-builder = { path = "lib/kestrel-semantic-tree-builder" }
 chumsky = "0.11.1"
 logos = "0.15.1"
 
@@ -17,5 +18,6 @@ members = [
     "lib/kestrel-lexer",
     "lib/kestrel-parser",
     "lib/kestrel-syntax-tree",
-    "lib/semantic-tree"
-]
+    "lib/semantic-tree",
+    "lib/kestrel-semantic-tree"
+, "lib/kestrel-semantic-tree-builder"]

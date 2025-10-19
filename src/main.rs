@@ -1,6 +1,5 @@
 use kestrel_lexer::lex;
-use kestrel_parser::{Parser, parse_source_file};
-use kestrel_syntax_tree::SyntaxNode;
+use kestrel_parser::{parse_source_file, Parser};
 use std::fs;
 
 fn parse_file(path: &str) {
@@ -46,42 +45,29 @@ fn parse_file(path: &str) {
         println!();
     }
 
-    println!("--- Syntax Tree ---");
-    println!("Root: {:?}", result.tree.kind());
-    println!("Children: {} declarations\n", result.tree.children().count());
+    // Build semantic tree
+    let semantic_tree = kestrel_semantic_tree_builder::build_semantic_tree(&result.tree, &content);
 
-    // Show each declaration
-    for (i, child) in result.tree.children().enumerate() {
-        println!("{}", "-".repeat(70));
-        println!("Declaration #{}: {:?}", i + 1, child.kind());
-        println!("{}", "-".repeat(70));
-        print_compact_tree(&child, &content, 0);
-        println!();
-    }
-}
+    // Print semantic tree (shows hierarchy)
+    println!("--- Semantic Tree ---");
+    kestrel_semantic_tree_builder::print_semantic_tree(&semantic_tree);
 
-fn print_compact_tree(node: &SyntaxNode, source: &str, indent: usize) {
-    let indent_str = "  ".repeat(indent);
+    // Print symbol table
+    println!("\n--- Symbol Table ---");
+    kestrel_semantic_tree_builder::print_symbol_table(&semantic_tree);
 
-    // Print current node
-    for element in node.children_with_tokens() {
-        if let Some(child_node) = element.as_node() {
-            println!("{}└─ {:?}", indent_str, child_node.kind());
-            print_compact_tree(child_node, source, indent + 1);
-        } else if let Some(token) = element.as_token() {
-            let text = token.text();
-            println!("{}└─ {:?} '{}'", indent_str, token.kind(), text);
-        }
-    }
+    println!();
 }
 
 fn main() {
     let test_files = vec![
-        "tests/declaration_item/basic.ks",
-        "tests/module/basic.ks",
-        "tests/import/basic.ks",
-        "tests/class/basic.ks",
-        "tests/class/edge_cases.ks",
+        //"tests/declaration_item/basic.ks",
+        //"tests/module/basic.ks",
+        //"tests/import/basic.ks",
+        //"tests/class/basic.ks",
+        //"tests/class/edge_cases.ks",
+        "tests/mixed.ks",
+        "tests/class/nested.ks",
     ];
 
     for file in test_files {

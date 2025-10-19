@@ -26,6 +26,8 @@ impl ClassDeclaration {
     /// Get the class name from this declaration
     pub fn name(&self) -> Option<String> {
         self.syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::Name)?
             .children_with_tokens()
             .filter_map(|elem| elem.into_token())
             .find(|tok| tok.kind() == SyntaxKind::Identifier)
@@ -34,7 +36,11 @@ impl ClassDeclaration {
 
     /// Get the visibility modifier if present
     pub fn visibility(&self) -> Option<SyntaxKind> {
-        self.syntax
+        let visibility_node = self.syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::Visibility)?;
+
+        visibility_node
             .children_with_tokens()
             .filter_map(|elem| elem.into_token())
             .find(|tok| {
@@ -47,6 +53,26 @@ impl ClassDeclaration {
                 )
             })
             .map(|tok| tok.kind())
+    }
+
+    /// Get child declaration items (nested classes, imports, modules)
+    pub fn children(&self) -> Vec<SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::ClassBody)
+            .map(|body| {
+                body.children()
+                    .filter(|child| {
+                        matches!(
+                            child.kind(),
+                            SyntaxKind::ClassDeclaration
+                                | SyntaxKind::ImportDeclaration
+                                | SyntaxKind::ModuleDeclaration
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -62,11 +88,117 @@ fn visibility_parser_internal(
     .or_not()
 }
 
+/// Raw parsed data for a declaration item inside a class body
+#[derive(Debug, Clone)]
+enum DeclarationItemData {
+    Module(Span, Vec<Span>),
+    Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>),
+    Class(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
+}
+
+/// Internal Chumsky parser for module path segments
+fn module_path_parser_internal() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
+    filter_map(|span, token| match token {
+        Token::Identifier => Ok(span),
+        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+    })
+    .separated_by(just(Token::Dot))
+    .at_least(1)
+}
+
+/// Internal Chumsky parser for module declaration
+fn module_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Span>), Error = Simple<Token>> + Clone {
+    just(Token::Module)
+        .map_with_span(|_, span| span)
+        .then(module_path_parser_internal())
+}
+
+/// Internal parser for import item (identifier or identifier as alias)
+fn import_item_parser_internal() -> impl Parser<Token, (Span, Option<Span>), Error = Simple<Token>> + Clone {
+    filter_map(|span, token| match token {
+        Token::Identifier => Ok(span),
+        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+    })
+    .then(
+        just(Token::As)
+            .ignore_then(filter_map(|span, token| match token {
+                Token::Identifier => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .or_not()
+    )
+}
+
+/// Internal parser for import items list
+fn import_items_parser_internal() -> impl Parser<Token, Vec<(Span, Option<Span>)>, Error = Simple<Token>> + Clone {
+    just(Token::LParen)
+        .ignore_then(
+            import_item_parser_internal()
+                .separated_by(just(Token::Comma))
+                .at_least(1)
+        )
+        .then_ignore(just(Token::RParen))
+}
+
+/// Internal parser for import declaration
+fn import_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>), Error = Simple<Token>> + Clone {
+    just(Token::Import)
+        .map_with_span(|_, span| span)
+        .then(module_path_parser_internal())
+        .then(
+            just(Token::As)
+                .ignore_then(filter_map(|span, token| match token {
+                    Token::Identifier => Ok(span),
+                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                }))
+                .map(|alias| (Some(alias), None))
+                .or(
+                    just(Token::Dot)
+                        .ignore_then(import_items_parser_internal())
+                        .map(|items| (None, Some(items)))
+                )
+                .or_not()
+        )
+        .map(|((import_span, path_segments), alias_or_items)| {
+            let (alias, items) = match alias_or_items {
+                Some((alias, items)) => (alias, items),
+                None => (None, None),
+            };
+            (import_span, path_segments, alias, items)
+        })
+}
+
+/// Internal parser for a single declaration item
+fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData, Error = Simple<Token>> + Clone {
+    recursive(|declaration_item| {
+        let module_parser = module_declaration_parser_internal()
+            .map(|(span, path)| DeclarationItemData::Module(span, path));
+
+        let import_parser = import_declaration_parser_internal()
+            .map(|(import_span, path, alias, items)| DeclarationItemData::Import(import_span, path, alias, items));
+
+        let class_parser = visibility_parser_internal()
+            .then(just(Token::Class).map_with_span(|_, span| span))
+            .then(filter_map(|span, token| match token {
+                Token::Identifier => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .then(just(Token::LBrace).map_with_span(|_, span| span))
+            .then(declaration_item.repeated())
+            .then(just(Token::RBrace).map_with_span(|_, span| span))
+            .map(|(((((visibility, class_span), name_span), lbrace_span), body), rbrace_span)| {
+                DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span)
+            });
+
+        module_parser.or(import_parser).or(class_parser)
+    })
+}
+
 /// Internal Chumsky parser for class declaration
-/// Returns: (visibility, class_span, name_span, lbrace_span, rbrace_span)
+/// Returns: (visibility, class_span, name_span, lbrace_span, body, rbrace_span)
 fn class_declaration_parser_internal() -> impl Parser<
     Token,
-    (Option<(Token, Span)>, Span, Span, Span, Span),
+    (Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
     Error = Simple<Token>,
 > + Clone {
     visibility_parser_internal()
@@ -76,10 +208,11 @@ fn class_declaration_parser_internal() -> impl Parser<
             _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
         }))
         .then(just(Token::LBrace).map_with_span(|_, span| span))
+        .then(declaration_item_parser_internal().repeated())
         .then(just(Token::RBrace).map_with_span(|_, span| span))
         .map(
-            |((((visibility, class_span), name_span), lbrace_span), rbrace_span)| {
-                (visibility, class_span, name_span, lbrace_span, rbrace_span)
+            |(((((visibility, class_span), name_span), lbrace_span), body), rbrace_span)| {
+                (visibility, class_span, name_span, lbrace_span, body, rbrace_span)
             },
         )
 }
@@ -94,13 +227,14 @@ where
     let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
 
     match class_declaration_parser_internal().parse(stream) {
-        Ok((visibility, class_span, name_span, lbrace_span, rbrace_span)) => {
+        Ok((visibility, class_span, name_span, lbrace_span, body, rbrace_span)) => {
             emit_class_declaration(
                 sink,
                 visibility,
                 class_span,
                 name_span,
                 lbrace_span,
+                body,
                 rbrace_span,
             );
         }
@@ -121,11 +255,13 @@ fn emit_class_declaration(
     class_span: Span,
     name_span: Span,
     lbrace_span: Span,
+    body: Vec<DeclarationItemData>,
     rbrace_span: Span,
 ) {
     sink.start_node(SyntaxKind::ClassDeclaration);
 
-    // Emit visibility modifier if present
+    // Always emit Visibility node (may be empty)
+    sink.start_node(SyntaxKind::Visibility);
     if let Some((vis_token, vis_span)) = visibility {
         let vis_kind = match vis_token {
             Token::Public => SyntaxKind::Public,
@@ -136,12 +272,115 @@ fn emit_class_declaration(
         };
         sink.add_token(vis_kind, vis_span);
     }
+    sink.finish_node(); // Finish Visibility
 
     sink.add_token(SyntaxKind::Class, class_span);
+
+    // Emit Name node wrapping the identifier
+    sink.start_node(SyntaxKind::Name);
     sink.add_token(SyntaxKind::Identifier, name_span);
+    sink.finish_node(); // Finish Name
+
+    // Emit ClassBody node wrapping the body content
+    sink.start_node(SyntaxKind::ClassBody);
     sink.add_token(SyntaxKind::LBrace, lbrace_span);
-    // TODO: Add support for declaration items in the body
+
+    // Emit nested declaration items
+    for item_data in body {
+        emit_declaration_item(sink, item_data);
+    }
+
     sink.add_token(SyntaxKind::RBrace, rbrace_span);
+    sink.finish_node(); // Finish ClassBody
+
+    sink.finish_node(); // Finish ClassDeclaration
+}
+
+/// Emit events for a declaration item
+/// Helper function used by emit_class_declaration
+fn emit_declaration_item(sink: &mut EventSink, item_data: DeclarationItemData) {
+    match item_data {
+        DeclarationItemData::Module(module_span, path_segments) => {
+            sink.start_node(SyntaxKind::ModuleDeclaration);
+            sink.add_token(SyntaxKind::Module, module_span);
+            emit_module_path(sink, &path_segments);
+            sink.finish_node();
+        }
+        DeclarationItemData::Import(import_span, path_segments, alias, items) => {
+            emit_import_declaration(sink, import_span, &path_segments, alias, items);
+        }
+        DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span) => {
+            emit_class_declaration(sink, visibility, class_span, name_span, lbrace_span, body, rbrace_span);
+        }
+    }
+}
+
+/// Emit events for a module path
+/// Helper function
+fn emit_module_path(sink: &mut EventSink, path_segments: &[Span]) {
+    sink.start_node(SyntaxKind::ModulePath);
+    for (i, segment_span) in path_segments.iter().enumerate() {
+        if i > 0 {
+            let prev_end = path_segments[i - 1].end;
+            sink.add_token(SyntaxKind::Dot, prev_end..prev_end + 1);
+        }
+        sink.add_token(SyntaxKind::Identifier, segment_span.clone());
+    }
+    sink.finish_node();
+}
+
+/// Emit events for an import declaration
+/// Helper function
+fn emit_import_declaration(
+    sink: &mut EventSink,
+    import_span: Span,
+    path_segments: &[Span],
+    alias: Option<Span>,
+    items: Option<Vec<(Span, Option<Span>)>>,
+) {
+    sink.start_node(SyntaxKind::ImportDeclaration);
+    sink.add_token(SyntaxKind::Import, import_span);
+    emit_module_path(sink, path_segments);
+
+    if let Some(items_list) = &items {
+        let last_segment_end = path_segments.last().unwrap().end;
+        sink.add_token(SyntaxKind::Dot, last_segment_end..last_segment_end + 1);
+        sink.add_token(SyntaxKind::LParen, last_segment_end + 1..last_segment_end + 2);
+
+        for (i, (name_span, alias_span)) in items_list.iter().enumerate() {
+            if i > 0 {
+                let prev_end = if let Some(alias_s) = items_list.get(i - 1).and_then(|(_, alias)| alias.as_ref()) {
+                    alias_s.end
+                } else {
+                    items_list.get(i - 1).unwrap().0.end
+                };
+                sink.add_token(SyntaxKind::Comma, prev_end..prev_end + 1);
+            }
+
+            sink.start_node(SyntaxKind::ImportItem);
+            sink.add_token(SyntaxKind::Identifier, name_span.clone());
+
+            if let Some(alias_s) = alias_span {
+                let as_start = name_span.end + 1;
+                sink.add_token(SyntaxKind::As, as_start..as_start + 2);
+                sink.add_token(SyntaxKind::Identifier, alias_s.clone());
+            }
+            sink.finish_node();
+        }
+
+        let last_item = items_list.last().unwrap();
+        let last_item_end = if let Some(alias_s) = &last_item.1 {
+            alias_s.end
+        } else {
+            last_item.0.end
+        };
+        sink.add_token(SyntaxKind::RParen, last_item_end..last_item_end + 1);
+    } else if let Some(alias_span) = alias {
+        let as_start = path_segments.last().unwrap().end + 1;
+        sink.add_token(SyntaxKind::As, as_start..as_start + 2);
+        sink.add_token(SyntaxKind::Identifier, alias_span);
+    }
+
     sink.finish_node();
 }
 
@@ -255,5 +494,106 @@ mod tests {
 
         assert_eq!(decl.name(), Some("Quux".to_string()));
         assert_eq!(decl.visibility(), Some(SyntaxKind::Fileprivate));
+    }
+
+    #[test]
+    fn test_class_declaration_with_nested_class() {
+        let source = "class Outer { class Inner { } }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_class_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = ClassDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        assert_eq!(decl.name(), Some("Outer".to_string()));
+        assert_eq!(decl.visibility(), None);
+
+        // Check that there is one nested class
+        let children = decl.children();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].kind(), SyntaxKind::ClassDeclaration);
+
+        // Check the nested class name using the Name node
+        let nested_name = children[0]
+            .children()
+            .find(|n| n.kind() == SyntaxKind::Name)
+            .and_then(|name_node| {
+                name_node
+                    .children_with_tokens()
+                    .filter_map(|elem| elem.into_token())
+                    .find(|tok| tok.kind() == SyntaxKind::Identifier)
+                    .map(|tok| tok.text().to_string())
+            });
+        assert_eq!(nested_name, Some("Inner".to_string()));
+    }
+
+    #[test]
+    fn test_class_declaration_with_multiple_nested_classes() {
+        let source = "class Container { class First { } class Second { } }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_class_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = ClassDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        assert_eq!(decl.name(), Some("Container".to_string()));
+
+        // Check that there are two nested classes
+        let children = decl.children();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].kind(), SyntaxKind::ClassDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::ClassDeclaration);
+    }
+
+    #[test]
+    fn test_class_declaration_deeply_nested() {
+        let source = "class A { class B { class C { } } }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_class_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = ClassDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        assert_eq!(decl.name(), Some("A".to_string()));
+
+        // Check nested structure
+        let children = decl.children();
+        assert_eq!(children.len(), 1);
+
+        // Check B has one child (C) - need to look inside ClassBody
+        let b_class_body = children[0]
+            .children()
+            .find(|n| n.kind() == SyntaxKind::ClassBody)
+            .expect("ClassBody should exist");
+
+        let b_children: Vec<_> = b_class_body
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::ClassDeclaration)
+            .collect();
+        assert_eq!(b_children.len(), 1);
     }
 }
