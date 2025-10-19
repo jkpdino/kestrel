@@ -1,9 +1,8 @@
-use chumsky::prelude::*;
-use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::event::{EventSink, TreeBuilder};
+use crate::common::module_path_parser_internal;
 
 /// Represents a module path like A.B.C
 ///
@@ -26,7 +25,7 @@ impl ModulePath {
     /// This is a convenience function that emits events and builds the tree
     pub fn new(source: &str, segments: Vec<Span>) -> Self {
         let mut sink = EventSink::new();
-        emit_module_path(&mut sink, &segments);
+        crate::common::emit_module_path(&mut sink, &segments);
         Self::from_events(source, sink.into_events())
     }
 
@@ -52,29 +51,20 @@ impl ModulePath {
     }
 }
 
-/// Internal Chumsky parser for module path
-/// Returns the spans of identifier segments
-fn module_path_parser_internal() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
-    filter_map(|span, token| match token {
-        Token::Identifier => Ok(span),
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    })
-    .separated_by(just(Token::Dot))
-    .at_least(1)
-}
-
 /// Parse a module path and emit events
 /// This is the primary event-driven parser function
 pub fn parse_module_path<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
-    I: Iterator<Item = (Token, Span)> + Clone,
+    I: Iterator<Item = (kestrel_lexer::Token, Span)> + Clone,
 {
+    use chumsky::prelude::*;
+
     let end_pos = source.len();
     let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
 
     match module_path_parser_internal().parse(stream) {
         Ok(segments) => {
-            emit_module_path(sink, &segments);
+            crate::common::emit_module_path(sink, &segments);
         }
         Err(errors) => {
             // Emit error events for each parse error
@@ -85,17 +75,4 @@ where
             }
         }
     }
-}
-
-/// Emit events for a module path
-/// Internal helper function
-pub(crate) fn emit_module_path(sink: &mut EventSink, segments: &[Span]) {
-    sink.start_node(SyntaxKind::ModulePath);
-    for (i, span) in segments.iter().enumerate() {
-        if i > 0 {
-            sink.add_token(SyntaxKind::Dot, span.start - 1..span.start);
-        }
-        sink.add_token(SyntaxKind::Identifier, span.clone());
-    }
-    sink.finish_node();
 }

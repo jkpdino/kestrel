@@ -3,5 +3,4 @@ pub enum KestrelSymbolKind {
     Class,
     Module,
     SourceFile,
-    Fn,
 }

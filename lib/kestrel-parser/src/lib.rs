@@ -58,6 +58,7 @@
 //! ```
 
 pub mod event;
+pub mod common;
 pub mod module;
 pub mod import;
 pub mod class;

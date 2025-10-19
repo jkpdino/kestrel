@@ -1,7 +1,6 @@
 mod path;
 
 pub use path::{ModulePath, parse_module_path};
-pub(crate) use path::emit_module_path;
 
 use chumsky::prelude::*;
 use kestrel_lexer::Token;
@@ -9,6 +8,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
+use crate::common::{module_declaration_parser_internal, emit_module_path};
 
 /// Represents a module declaration: module A.B.C
 ///
@@ -45,23 +45,6 @@ impl ModuleDeclaration {
             .map(|node| ModulePath { syntax: node })
             .expect("ModuleDeclaration must have a ModulePath child")
     }
-}
-
-/// Internal Chumsky parser for module path segments
-fn module_path_parser_internal() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
-    filter_map(|span, token| match token {
-        Token::Identifier => Ok(span),
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    })
-    .separated_by(just(Token::Dot))
-    .at_least(1)
-}
-
-/// Internal Chumsky parser for module declaration
-fn module_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Span>), Error = Simple<Token>> + Clone {
-    just(Token::Module)
-        .map_with_span(|_, span| span)
-        .then(module_path_parser_internal())
 }
 
 /// Parse a module declaration and emit events

@@ -4,6 +4,11 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
+use crate::common::{
+    module_declaration_parser_internal,
+    visibility_parser_internal, import_declaration_parser_internal,
+    emit_module_path, emit_import_declaration,
+};
 
 /// Represents a class declaration: (visibility)? class Name { ... }
 ///
@@ -76,96 +81,12 @@ impl ClassDeclaration {
     }
 }
 
-/// Internal Chumsky parser for optional visibility modifier
-fn visibility_parser_internal(
-) -> impl Parser<Token, Option<(Token, Span)>, Error = Simple<Token>> + Clone {
-    filter_map(|span, token| match token {
-        Token::Public | Token::Private | Token::Internal | Token::Fileprivate => {
-            Ok((token, span))
-        }
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    })
-    .or_not()
-}
-
 /// Raw parsed data for a declaration item inside a class body
 #[derive(Debug, Clone)]
 enum DeclarationItemData {
     Module(Span, Vec<Span>),
     Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>),
     Class(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
-}
-
-/// Internal Chumsky parser for module path segments
-fn module_path_parser_internal() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
-    filter_map(|span, token| match token {
-        Token::Identifier => Ok(span),
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    })
-    .separated_by(just(Token::Dot))
-    .at_least(1)
-}
-
-/// Internal Chumsky parser for module declaration
-fn module_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Span>), Error = Simple<Token>> + Clone {
-    just(Token::Module)
-        .map_with_span(|_, span| span)
-        .then(module_path_parser_internal())
-}
-
-/// Internal parser for import item (identifier or identifier as alias)
-fn import_item_parser_internal() -> impl Parser<Token, (Span, Option<Span>), Error = Simple<Token>> + Clone {
-    filter_map(|span, token| match token {
-        Token::Identifier => Ok(span),
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    })
-    .then(
-        just(Token::As)
-            .ignore_then(filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            }))
-            .or_not()
-    )
-}
-
-/// Internal parser for import items list
-fn import_items_parser_internal() -> impl Parser<Token, Vec<(Span, Option<Span>)>, Error = Simple<Token>> + Clone {
-    just(Token::LParen)
-        .ignore_then(
-            import_item_parser_internal()
-                .separated_by(just(Token::Comma))
-                .at_least(1)
-        )
-        .then_ignore(just(Token::RParen))
-}
-
-/// Internal parser for import declaration
-fn import_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>), Error = Simple<Token>> + Clone {
-    just(Token::Import)
-        .map_with_span(|_, span| span)
-        .then(module_path_parser_internal())
-        .then(
-            just(Token::As)
-                .ignore_then(filter_map(|span, token| match token {
-                    Token::Identifier => Ok(span),
-                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-                }))
-                .map(|alias| (Some(alias), None))
-                .or(
-                    just(Token::Dot)
-                        .ignore_then(import_items_parser_internal())
-                        .map(|items| (None, Some(items)))
-                )
-                .or_not()
-        )
-        .map(|((import_span, path_segments), alias_or_items)| {
-            let (alias, items) = match alias_or_items {
-                Some((alias, items)) => (alias, items),
-                None => (None, None),
-            };
-            (import_span, path_segments, alias, items)
-        })
 }
 
 /// Internal parser for a single declaration item
@@ -315,75 +236,6 @@ fn emit_declaration_item(sink: &mut EventSink, item_data: DeclarationItemData) {
             emit_class_declaration(sink, visibility, class_span, name_span, lbrace_span, body, rbrace_span);
         }
     }
-}
-
-/// Emit events for a module path
-/// Helper function
-fn emit_module_path(sink: &mut EventSink, path_segments: &[Span]) {
-    sink.start_node(SyntaxKind::ModulePath);
-    for (i, segment_span) in path_segments.iter().enumerate() {
-        if i > 0 {
-            let prev_end = path_segments[i - 1].end;
-            sink.add_token(SyntaxKind::Dot, prev_end..prev_end + 1);
-        }
-        sink.add_token(SyntaxKind::Identifier, segment_span.clone());
-    }
-    sink.finish_node();
-}
-
-/// Emit events for an import declaration
-/// Helper function
-fn emit_import_declaration(
-    sink: &mut EventSink,
-    import_span: Span,
-    path_segments: &[Span],
-    alias: Option<Span>,
-    items: Option<Vec<(Span, Option<Span>)>>,
-) {
-    sink.start_node(SyntaxKind::ImportDeclaration);
-    sink.add_token(SyntaxKind::Import, import_span);
-    emit_module_path(sink, path_segments);
-
-    if let Some(items_list) = &items {
-        let last_segment_end = path_segments.last().unwrap().end;
-        sink.add_token(SyntaxKind::Dot, last_segment_end..last_segment_end + 1);
-        sink.add_token(SyntaxKind::LParen, last_segment_end + 1..last_segment_end + 2);
-
-        for (i, (name_span, alias_span)) in items_list.iter().enumerate() {
-            if i > 0 {
-                let prev_end = if let Some(alias_s) = items_list.get(i - 1).and_then(|(_, alias)| alias.as_ref()) {
-                    alias_s.end
-                } else {
-                    items_list.get(i - 1).unwrap().0.end
-                };
-                sink.add_token(SyntaxKind::Comma, prev_end..prev_end + 1);
-            }
-
-            sink.start_node(SyntaxKind::ImportItem);
-            sink.add_token(SyntaxKind::Identifier, name_span.clone());
-
-            if let Some(alias_s) = alias_span {
-                let as_start = name_span.end + 1;
-                sink.add_token(SyntaxKind::As, as_start..as_start + 2);
-                sink.add_token(SyntaxKind::Identifier, alias_s.clone());
-            }
-            sink.finish_node();
-        }
-
-        let last_item = items_list.last().unwrap();
-        let last_item_end = if let Some(alias_s) = &last_item.1 {
-            alias_s.end
-        } else {
-            last_item.0.end
-        };
-        sink.add_token(SyntaxKind::RParen, last_item_end..last_item_end + 1);
-    } else if let Some(alias_span) = alias {
-        let as_start = path_segments.last().unwrap().end + 1;
-        sink.add_token(SyntaxKind::As, as_start..as_start + 2);
-        sink.add_token(SyntaxKind::Identifier, alias_span);
-    }
-
-    sink.finish_node();
 }
 
 #[cfg(test)]
