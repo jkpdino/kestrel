@@ -30,7 +30,10 @@ pub enum Event {
     /// Finish the current syntax node
     FinishNode,
     /// A parse error occurred
-    Error(String),
+    Error {
+        message: String,
+        span: Option<Span>,
+    },
 }
 
 /// Collects events during parsing
@@ -62,9 +65,19 @@ impl EventSink {
         self.events.push(Event::FinishNode);
     }
 
-    /// Record a parse error
-    pub fn error(&mut self, message: String) {
-        self.events.push(Event::Error(message));
+    /// Record a parse error with an optional span
+    pub fn error(&mut self, message: String, span: Option<Span>) {
+        self.events.push(Event::Error { message, span });
+    }
+
+    /// Record a parse error at a specific span
+    pub fn error_at(&mut self, message: String, span: Span) {
+        self.events.push(Event::Error { message, span: Some(span) });
+    }
+
+    /// Record a parse error without a specific span
+    pub fn error_no_span(&mut self, message: String) {
+        self.events.push(Event::Error { message, span: None });
     }
 
     /// Get the collected events
@@ -126,7 +139,7 @@ impl<'src> TreeBuilder<'src> {
                     builder.finish_node();
                     self.pos += 1;
                 }
-                Event::Error(_message) => {
+                Event::Error { .. } => {
                     // Skip error events when building the tree
                     // Errors can be extracted from the event list separately
                     self.pos += 1;

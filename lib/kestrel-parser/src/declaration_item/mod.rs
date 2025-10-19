@@ -153,7 +153,12 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
     })
 }
 
-/// Internal Chumsky parser for multiple declaration items
+/// Internal Chumsky parser for multiple declaration items with error recovery
+///
+/// This parser attempts to parse multiple declarations. When a single declaration fails,
+/// Chumsky's error recovery will collect the error and the `.repeated()` combinator will
+/// continue attempting to parse subsequent declarations. This allows the parser to report
+/// multiple errors in a single pass.
 fn declaration_items_parser_internal() -> impl Parser<Token, Vec<DeclarationItemData>, Error = Simple<Token>> + Clone {
     declaration_item_parser_internal()
         .repeated()
@@ -177,7 +182,7 @@ where
         parse_module_declaration(source, tokens, &mut temp_sink);
 
         // Check if there were errors
-        let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error(_)));
+        let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
         if !has_errors {
             // Success! Copy events to the main sink
             for event in temp_sink.into_events() {
@@ -185,7 +190,7 @@ where
                     crate::event::Event::StartNode(kind) => sink.start_node(kind),
                     crate::event::Event::AddToken(kind, span) => sink.add_token(kind, span),
                     crate::event::Event::FinishNode => sink.finish_node(),
-                    crate::event::Event::Error(msg) => sink.error(msg),
+                    crate::event::Event::Error { message, span } => sink.error(message, span),
                 }
             }
             return;
@@ -199,7 +204,7 @@ where
         parse_import_declaration(source, tokens_clone1, &mut temp_sink);
 
         // Check if there were errors
-        let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error(_)));
+        let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
         if !has_errors {
             // Success! Copy events to the main sink
             for event in temp_sink.into_events() {
@@ -207,7 +212,7 @@ where
                     crate::event::Event::StartNode(kind) => sink.start_node(kind),
                     crate::event::Event::AddToken(kind, span) => sink.add_token(kind, span),
                     crate::event::Event::FinishNode => sink.finish_node(),
-                    crate::event::Event::Error(msg) => sink.error(msg),
+                    crate::event::Event::Error { message, span } => sink.error(message, span),
                 }
             }
             return;
@@ -219,7 +224,7 @@ where
     parse_class_declaration(source, tokens_clone2, &mut temp_sink);
 
     // Check if there were errors
-    let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error(_)));
+    let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
     if !has_errors {
         // Success! Copy events to the main sink
         for event in temp_sink.into_events() {
@@ -227,14 +232,14 @@ where
                 crate::event::Event::StartNode(kind) => sink.start_node(kind),
                 crate::event::Event::AddToken(kind, span) => sink.add_token(kind, span),
                 crate::event::Event::FinishNode => sink.finish_node(),
-                crate::event::Event::Error(msg) => sink.error(msg),
+                crate::event::Event::Error { message, span } => sink.error(message, span),
             }
         }
         return;
     }
 
-    // All failed - emit error
-    sink.error("Expected module, import, or class declaration".to_string());
+    // All failed - emit error (no specific span available since all parsers failed)
+    sink.error_no_span("Expected module, import, or class declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -275,7 +280,9 @@ where
         Err(errors) => {
             // Emit error events for each parse error
             for error in errors {
-                sink.error(format!("Parse error: {:?}", error));
+                // Chumsky errors have span information
+                let span = error.span();
+                sink.error_at(format!("Parse error: {:?}", error), span);
             }
         }
     }

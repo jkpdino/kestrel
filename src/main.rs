@@ -1,5 +1,6 @@
 use kestrel_lexer::lex;
 use kestrel_parser::{parse_source_file, Parser};
+use kestrel_reporting::DiagnosticContext;
 use std::fs;
 
 fn parse_file(path: &str) {
@@ -47,10 +48,18 @@ fn parse_file(path: &str) {
 
     // Build semantic tree
     let mut semantic_tree = kestrel_semantic_tree_builder::SemanticTree::new();
-    kestrel_semantic_tree_builder::add_file_to_tree(&mut semantic_tree, path, &result.tree, &content);
+    let mut diagnostics = DiagnosticContext::new();
+    let file_id = diagnostics.add_file(path.to_string(), content.clone());
+    kestrel_semantic_tree_builder::add_file_to_tree(&mut semantic_tree, path, &result.tree, &content, &mut diagnostics, file_id);
+
+    // Check for module validation errors
+    if diagnostics.len() > 0 {
+        println!("\n--- Module Validation Errors ---");
+        diagnostics.emit().unwrap();
+    }
 
     // Print semantic tree (shows hierarchy)
-    println!("--- Semantic Tree ---");
+    println!("\n--- Semantic Tree ---");
     kestrel_semantic_tree_builder::print_semantic_tree(&semantic_tree);
 
     // Print symbol table

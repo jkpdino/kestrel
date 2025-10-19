@@ -68,12 +68,13 @@ impl Compilation {
             for error in &parse_result.errors {
                 let error_diag = ParseErrorDiagnostic {
                     message: error.message.clone(),
+                    span: error.span.clone(),
                 };
                 diagnostics.throw(error_diag, file_id);
             }
 
-            // Phase 3: Add file to the unified semantic tree
-            add_file_to_tree(&mut semantic_tree, &name, &parse_result.tree, &source);
+            // Phase 3: Add file to the unified semantic tree (emits module validation diagnostics)
+            add_file_to_tree(&mut semantic_tree, &name, &parse_result.tree, &source, &mut diagnostics, file_id);
 
             // Create source file
             let source_file = SourceFile::new(
@@ -140,12 +141,22 @@ impl IntoDiagnostic for LexError {
 /// Parse error diagnostic
 struct ParseErrorDiagnostic {
     message: String,
+    span: Option<std::ops::Range<usize>>,
 }
 
 impl IntoDiagnostic for ParseErrorDiagnostic {
-    fn into_diagnostic(&self, _file_id: usize) -> Diagnostic<usize> {
-        // Note: Parse errors currently don't have spans, so we create a message-only diagnostic
-        Diagnostic::error()
-            .with_message(&self.message)
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let mut diagnostic = Diagnostic::error()
+            .with_message(&self.message);
+
+        // Add span label if available
+        if let Some(span) = &self.span {
+            diagnostic = diagnostic.with_labels(vec![
+                Label::primary(file_id, span.clone())
+                    .with_message("error occurred here")
+            ]);
+        }
+
+        diagnostic
     }
 }

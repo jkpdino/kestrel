@@ -155,6 +155,7 @@ dependencies = [
  "chumsky 0.11.1",
  "kestrel-lexer",
  "kestrel-parser",
+ "kestrel-reporting",
  "kestrel-semantic-tree",
  "kestrel-semantic-tree-builder",
  "kestrel-span",
@@ -216,6 +217,7 @@ name = "kestrel-semantic-tree-builder"
 version = "0.1.0"
 dependencies = [
  "downcast-rs",
+ "kestrel-reporting",
  "kestrel-semantic-tree",
  "kestrel-span",
  "kestrel-syntax-tree",

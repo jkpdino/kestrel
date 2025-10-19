@@ -1,18 +1,21 @@
 mod resolver;
 mod resolvers;
 mod utils;
+mod diagnostics;
 pub mod path_resolver;
 
 use std::sync::Arc;
 
+use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_span::Spanned;
+use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder, SymbolTable};
 
+use crate::diagnostics::{NoModuleDeclarationError, ModuleNotFirstError, MultipleModuleDeclarationsError};
 use crate::resolver::ResolverRegistry;
 
 /// Represents the root of a semantic tree
@@ -80,13 +83,16 @@ impl RootSymbol {
 /// - Exactly one module declaration must be present
 /// - It must be the first statement in the file
 ///
+/// Emits diagnostics instead of panicking. Returns None if validation fails,
+/// but processing can continue (declarations will be placed under root).
+///
 /// Returns: Option<(ModuleDeclaration node, path segments)>
 fn validate_and_extract_module_declaration(
     syntax: &SyntaxNode,
     source: &str,
+    diagnostics: &mut DiagnosticContext,
+    file_id: usize,
 ) -> Option<(SyntaxNode, Vec<String>)> {
-    use kestrel_semantic_tree::symbol::module::ModuleSymbol;
-
     // Find all module declarations
     let module_decls: Vec<SyntaxNode> = syntax
         .children()
@@ -96,17 +102,20 @@ fn validate_and_extract_module_declaration(
     // Validate count
     match module_decls.len() {
         0 => {
-            // No module declaration - error at first declaration or beginning of file
-            let first_decl = syntax.children().next();
-            let position = first_decl
-                .map(|n| {
-                    let start: usize = n.text_range().start().into();
-                    let end: usize = n.text_range().end().into();
-                    let preview_end = end.min(source.len()).min(start + 20);
-                    format!("at line starting with '{}'", &source[start..preview_end])
-                })
-                .unwrap_or_else(|| "at beginning of file".to_string());
-            panic!("No module declaration found in file. Every file must start with a module declaration (e.g., 'module MyModule') {}", position);
+            // No module declaration - emit diagnostic
+            let span = if let Some(first_decl) = syntax.children().next() {
+                // Point to the first declaration
+                let start: usize = first_decl.text_range().start().into();
+                let end: usize = first_decl.text_range().end().into();
+                start..end.min(start + 1)
+            } else {
+                // Point to beginning of file
+                0..1
+            };
+
+            let error = NoModuleDeclarationError { span };
+            diagnostics.throw(error, file_id);
+            None
         }
         1 => {
             // Exactly one - check if it's first
@@ -115,10 +124,19 @@ fn validate_and_extract_module_declaration(
 
             if let Some(first) = first_child {
                 if first.kind() != SyntaxKind::ModuleDeclaration {
-                    panic!(
-                        "Module declaration must be the first statement in the file. Found {:?} before module declaration.",
-                        first.kind()
-                    );
+                    // Module is not first - emit diagnostic but continue processing
+                    let first_start: usize = first.text_range().start().into();
+                    let first_end: usize = first.text_range().end().into();
+                    let module_start: usize = module_decl.text_range().start().into();
+                    let module_end: usize = module_decl.text_range().end().into();
+
+                    let error = ModuleNotFirstError {
+                        module_span: module_start..module_end,
+                        first_item_span: first_start..first_end,
+                        first_item_kind: format!("{:?}", first.kind()),
+                    };
+                    diagnostics.throw(error, file_id);
+                    // Continue processing despite error
                 }
             }
 
@@ -139,11 +157,42 @@ fn validate_and_extract_module_declaration(
             Some((module_decl.clone(), path_segments))
         }
         _ => {
-            // Multiple module declarations
-            panic!(
-                "Multiple module declarations found. Only one module declaration is allowed per file. Found {} declarations.",
-                module_decls.len()
-            );
+            // Multiple module declarations - emit diagnostic
+            let first_decl = &module_decls[0];
+            let first_start: usize = first_decl.text_range().start().into();
+            let first_end: usize = first_decl.text_range().end().into();
+
+            let duplicate_spans: Vec<Span> = module_decls
+                .iter()
+                .skip(1)
+                .map(|decl| {
+                    let start: usize = decl.text_range().start().into();
+                    let end: usize = decl.text_range().end().into();
+                    start..end
+                })
+                .collect();
+
+            let error = MultipleModuleDeclarationsError {
+                first_span: first_start..first_end,
+                duplicate_spans,
+                count: module_decls.len(),
+            };
+            diagnostics.throw(error, file_id);
+
+            // Return first module to allow partial processing
+            let module_path_node = first_decl
+                .children()
+                .find(|child| child.kind() == SyntaxKind::ModulePath)
+                .expect("ModuleDeclaration must have ModulePath child");
+
+            let path_segments: Vec<String> = module_path_node
+                .children_with_tokens()
+                .filter_map(|elem| elem.into_token())
+                .filter(|tok| tok.kind() == SyntaxKind::Identifier)
+                .map(|tok| tok.text().to_string())
+                .collect();
+
+            Some((first_decl.clone(), path_segments))
         }
     }
 }
@@ -210,11 +259,16 @@ fn build_module_hierarchy(
 ///
 /// This processes a single source file and adds its symbols to the tree.
 /// The file's declarations are placed under a SourceFile symbol within the module hierarchy.
+///
+/// If module validation fails, diagnostics are emitted but processing continues with
+/// declarations placed directly under the root.
 pub fn add_file_to_tree(
     tree: &mut SemanticTree,
     file_name: &str,
     syntax: &SyntaxNode,
     source: &str,
+    diagnostics: &mut DiagnosticContext,
+    file_id: usize,
 ) {
     use kestrel_semantic_tree::symbol::source_file::SourceFileSymbol;
 
@@ -223,10 +277,11 @@ pub fn add_file_to_tree(
     // Clone root to avoid borrow conflicts
     let root = tree.root().clone();
 
-    // Step 1: Validate and extract module declaration
-    let module_decl_and_path = validate_and_extract_module_declaration(syntax, source);
+    // Step 1: Validate and extract module declaration (emits diagnostics on error)
+    let module_decl_and_path = validate_and_extract_module_declaration(syntax, source, diagnostics, file_id);
 
     // Step 2: Build/find module hierarchy and get the module where file should be placed
+    // If validation failed (None), place declarations directly under root
     let parent_module = if let Some((_module_decl, path_segments)) = module_decl_and_path {
         build_module_hierarchy(&root, &path_segments, tree.symbol_table_mut())
     } else {
@@ -356,10 +411,8 @@ fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
         .iter()
         .find(|b| matches!(b.kind(), KestrelBehaviorKind::Visibility))
         .and_then(|b| {
-            // Downcast to VisibilityBehavior
-            let behavior_any = b.as_ref() as *const dyn semantic_tree::behavior::Behavior<KestrelLanguage>;
-            let behavior_any = behavior_any as *const VisibilityBehavior;
-            unsafe { behavior_any.as_ref() }
+            // Safe downcast to VisibilityBehavior using downcast_ref
+            b.as_ref().downcast_ref::<VisibilityBehavior>()
         })
         .and_then(|vb| vb.visibility())
         .map(|v| format!(" [{}]", v))

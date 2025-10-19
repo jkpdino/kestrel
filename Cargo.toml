@@ -9,6 +9,7 @@ kestrel-parser = { path = "lib/kestrel-parser" }
 kestrel-syntax-tree = { path = "lib/kestrel-syntax-tree" }
 kestrel-semantic-tree = { path = "lib/kestrel-semantic-tree" }
 kestrel-semantic-tree-builder = { path = "lib/kestrel-semantic-tree-builder" }
+kestrel-reporting = { path = "lib/kestrel-reporting" }
 kestrel-span = { path = "lib/kestrel-span" }
 semantic-tree = { path = "lib/semantic-tree" }
 chumsky = "0.11.1"

@@ -241,7 +241,9 @@ where
         Err(errors) => {
             // Emit error events for each parse error
             for error in errors {
-                sink.error(format!("Parse error: {:?}", error));
+                // Chumsky errors have span information
+                let span = error.span();
+                sink.error_at(format!("Parse error: {:?}", error), span);
             }
         }
     }
