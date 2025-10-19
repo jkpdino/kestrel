@@ -641,31 +641,104 @@ Now your feature is fully integrated! The semantic tree builder will:
 
 # Step 8: Create Test Files
 
-Create Kestrel language test files demonstrating the feature.
+Create comprehensive test files in the `tests/{feature}/` directory that test your feature in realistic scenarios.
 
-## Directory Structure
+## What to Test
 
+### 1. Basic Standalone Usage
+Start with simple, isolated examples of your feature working on its own.
+
+### 2. Visibility Modifiers
+If your feature supports visibility (`public`, `private`, `internal`, `fileprivate`), test each modifier.
+
+### 3. Feature Interactions (CRITICAL)
+Test how your feature works WITH other features:
+- If your feature can contain other declarations (like classes can), test it containing functions, classes, modules, etc.
+- If your feature can be nested inside other declarations, test it inside classes, modules, etc.
+- Create realistic files mixing your feature with imports, classes, functions, modules
+- Example: Functions should be tested inside classes, classes should contain functions, etc.
+
+### 4. Nesting (if applicable)
+If your feature supports nesting:
+- Single-level nesting
+- Deep nesting (3-5 levels)
+- Multiple siblings
+- Mixing visibility modifiers in nested structures
+
+### 5. Edge Cases
+- Unicode identifiers (café, 世界, αβγ, Привет)
+- Very long identifiers
+- Single-character identifiers
+- Maximum nesting depth
+- Many siblings (10+ declarations)
+- Whitespace variations
+
+### 6. Error Cases
+Document invalid syntax in comments with `// ERROR:` prefix explaining what should fail.
+
+## Test File Principles
+
+**Progressive Complexity**: Start simple, build up to realistic complexity
+```kestrel
+// Simple case
+{feature} Basic
+
+// Add visibility
+public {feature} WithVisibility
+
+// Add nesting
+public {feature} WithNesting {
+  {feature} Nested
+}
+
+// Realistic scenario mixing multiple features
+public {feature} Realistic {
+  class Helper {}
+  fn utility() {}
+  private {feature} Internal
+}
 ```
-tests/
-  {feature}/
-    basic.ks           # Basic usage examples
-    edge_cases.ks      # Edge cases
-    nested.ks          # Nesting (if applicable)
-```
 
-## Example: Basic Test File
+**Real-World Scenarios**: Write code developers would actually use, not just minimal examples
 
-`tests/{feature}/basic.ks`:
+**Feature Composition**: Show your feature working alongside imports, modules, classes, functions in the same file
+
+**Comments**: Explain what each test demonstrates and why it matters
+
+## Example Test File Structure
 
 ```kestrel
-// Basic {feature} declaration
-{feature} Example
+// Basic usage
+{feature} Simple
 
-// With visibility modifier
-public {feature} PublicExample
+// All visibility modifiers
+public {feature} Public
+private {feature} Private
+internal {feature} Internal
 
-// With private visibility
-private {feature} PrivateExample
+// Nesting
+{feature} Outer {
+  {feature} Inner
+}
+
+// Mixed with other features
+class Container {
+  {feature} Nested
+  fn method() {}
+}
+
+{feature} WithFunctions {
+  fn helper() {}
+  class NestedClass {}
+}
+
+// Edge cases
+{feature} 世界
+{feature} VeryLongIdentifierName
+
+// ERROR: Invalid cases (commented out)
+// {feature} missing-identifier
+// {feature} 123InvalidStart
 ```
 
 # Step 9: Run Tests
@@ -853,7 +926,12 @@ See the Class implementation as a reference:
 - [ ] Add to `declaration_item/mod.rs`:
   - [ ] Add to `DeclarationItem` enum
   - [ ] Add to `DeclarationItemData` enum
-  - [ ] Update parser and event emission
+  - [ ] **CRITICAL: Add internal Chumsky parser to `declaration_item_parser_internal()`**
+    - Create a `{feature}_parser` variable following the same pattern as `class_parser` or `fn_parser`
+    - Add it to the `.or()` chain at the end: `module_parser.or(import_parser).or(class_parser).or({feature}_parser)`
+    - Without this, your feature will NOT show up in the semantic tree (0 top-level symbols)
+  - [ ] Add event emission in `parse_source_file()` match statement
+  - [ ] Add event emission in `emit_declaration_item_internal()` helper function
 
 ## Semantic Symbol (Step 5)
 - [ ] Add to `KestrelSymbolKind` enum in `symbol/kind.rs`

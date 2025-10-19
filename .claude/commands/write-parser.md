@@ -467,96 +467,104 @@ for error in result.errors {
 
 # Step 6: Create Kestrel Language Test Files
 
-Create integration test files written in Kestrel to test the feature.
+Create comprehensive test files in the `tests/{feature}/` directory that test your feature in realistic scenarios.
 
-## Directory Structure
+## What to Test
 
+### 1. Basic Standalone Usage
+Start with simple, isolated examples of your feature working on its own.
+
+### 2. Visibility Modifiers
+If your feature supports visibility (`public`, `private`, `internal`, `fileprivate`), test each modifier.
+
+### 3. Feature Interactions (CRITICAL)
+Test how your feature works WITH other features:
+- If your feature can contain other declarations (like classes can), test it containing functions, classes, modules, etc.
+- If your feature can be nested inside other declarations, test it inside classes, modules, etc.
+- Create realistic files mixing your feature with imports, classes, functions, modules
+- Example: Functions should be tested inside classes, classes should contain functions, etc.
+
+### 4. Nesting (if applicable)
+If your feature supports nesting:
+- Single-level nesting
+- Deep nesting (3-5 levels)
+- Multiple siblings
+- Mixing visibility modifiers in nested structures
+
+### 5. Edge Cases
+- Unicode identifiers (café, 世界, αβγ, Привет)
+- Very long identifiers
+- Single-character identifiers
+- Maximum nesting depth
+- Many siblings (10+ declarations)
+- Whitespace variations
+
+### 6. Error Cases
+Document invalid syntax in comments with `// ERROR:` prefix explaining what should fail.
+
+## Test File Principles
+
+**Progressive Complexity**: Start simple, build up to realistic complexity
+```kestrel
+// Simple case
+{feature} Basic
+
+// Add visibility
+public {feature} WithVisibility
+
+// Add nesting
+public {feature} WithNesting {
+  {feature} Nested
+}
+
+// Realistic scenario mixing multiple features
+public {feature} Realistic {
+  class Helper {}
+  fn utility() {}
+  private {feature} Internal
+}
 ```
-tests/
-  {feature}/
-    basic.ks           # Basic usage examples
-    edge_cases.ks      # Edge cases and corner cases
-    errors.ks          # Expected error cases (if applicable)
-```
 
-## Test File Conventions
+**Real-World Scenarios**: Write code developers would actually use, not just minimal examples
 
-**File**: `tests/{feature}/basic.ks`
+**Feature Composition**: Show your feature working alongside imports, modules, classes, functions in the same file
 
-Write actual Kestrel code demonstrating the feature:
+**Comments**: Explain what each test demonstrates and why it matters
+
+## Example Test File Structure
 
 ```kestrel
-// Basic usage of {feature}
-module Test.Feature
+// Basic usage
+{feature} Simple
 
-// Example 1: Simple case
-{feature example}
+// All visibility modifiers
+public {feature} Public
+private {feature} Private
+internal {feature} Internal
 
-// Example 2: Complex case
-{more complex example}
-```
+// Nesting
+{feature} Outer {
+  {feature} Inner
+}
 
-**File**: `tests/{feature}/edge_cases.ks`
+// Mixed with other features
+class Container {
+  {feature} Nested
+  fn method() {}
+}
 
-Test boundary conditions and unusual but valid cases:
+{feature} WithFunctions {
+  fn helper() {}
+  class NestedClass {}
+}
 
-```kestrel
-module Test.Feature.EdgeCases
+// Edge cases
+{feature} 世界
+{feature} VeryLongIdentifierName
 
-// Edge case 1: Minimal valid usage
-{minimal example}
-
-// Edge case 2: Maximum complexity
-{complex example with many parts}
-
-// Edge case 3: Unicode identifiers
-{example with café or αβγ}
-```
-
-**File**: `tests/{feature}/errors.ks` (optional)
-
-Document expected error cases with comments:
-
-```kestrel
-module Test.Feature.Errors
-
-// ERROR: Should fail - missing required component
-// {invalid example}
-
-// ERROR: Should fail - wrong syntax
-// {another invalid example}
-```
-
-## Test File Guidelines
-
-1. **Start with module declaration**: Every test file should begin with `module Test.{Feature}`
-2. **Use comments liberally**: Explain what each test demonstrates
-3. **Show variety**: Include simple, complex, and edge cases
-4. **Be realistic**: Write code that would actually be used
-5. **Test interactions**: Show how the feature works with other features
-6. **Keep files focused**: Each file should test one aspect (basic usage, edge cases, errors)
-
-## Example: Module Feature
-
-`tests/module/basic.ks`:
-```kestrel
-// Basic module declarations
-module A
-
-// Nested module path
-module A.B.C
-
-// Unicode module names
-module Café.αβγ.世界
-```
-
-`tests/module/edge_cases.ks`:
-```kestrel
-// Single segment module
-module Main
-
-// Very long module path
-module A.B.C.D.E.F.G.H.I.J.K
+// ERROR: Invalid cases (commented out)
+// {feature} missing-identifier
+// {feature} 123InvalidStart
 ```
 
 # Step 7: Test Everything
@@ -689,10 +697,55 @@ See the implementation of `module` as a reference:
   - [ ] Re-export parsers: `pub use {feature}::parse_{feature}_declaration;`
 
 ## Integration with parse_source_file
+
+CRITICAL: Your feature must be added to the internal Chumsky parser chain in `declaration_item_parser_internal()`. Without this, your feature will NOT be recognized when parsing source files with multiple declarations.
+
 - [ ] Add your feature to `declaration_item/mod.rs`:
-  - [ ] Add internal parser to `declaration_item_parser_internal()`
-  - [ ] Add event emission to `parse_source_file()`
+  - [ ] **Add internal Chumsky parser to `declaration_item_parser_internal()`**
+    - Create a `{feature}_parser` variable following the same pattern as `class_parser` or `fn_parser`
+    - Add it to the `.or()` chain at the end: `module_parser.or(import_parser).or(class_parser).or({feature}_parser)`
+  - [ ] Add feature variant to `DeclarationItemData` enum
+  - [ ] Add event emission in `parse_source_file()` match statement
+  - [ ] Add event emission in `emit_declaration_item_internal()` helper
 - [ ] Test that your feature works with `Parser::parse()` and `parse_source_file()`
+
+### Example: Adding Function Parser
+
+In `declaration_item_parser_internal()`, add:
+
+```rust
+let fn_parser = visibility_parser_internal()
+    .then(just(Token::Fn).map_with_span(|_, span| span))
+    .then(filter_map(|span, token| match token {
+        Token::Identifier => Ok(span),
+        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+    }))
+    .then(just(Token::LParen).map_with_span(|_, span| span))
+    .then(just(Token::RParen).map_with_span(|_, span| span))
+    .then(just(Token::LBrace).map_with_span(|_, span| span))
+    .then(just(Token::RBrace).map_with_span(|_, span| span))
+    .map(|((((((visibility, fn_span), name_span), lparen_span), rparen_span), lbrace_span), rbrace_span)| {
+        DeclarationItemData::Fn(
+            visibility,
+            fn_span,
+            name_span,
+            lparen_span,
+            vec![],
+            rparen_span,
+            None,
+            lbrace_span,
+            rbrace_span,
+        )
+    });
+
+// CRITICAL: Add to the parser chain!
+module_parser.or(import_parser).or(class_parser).or(fn_parser)
+```
+
+**Why this matters:**
+- `parse_source_file()` uses the Chumsky parser to parse ALL declarations in a file
+- If you only update `parse_declaration_item()` (event-driven fallback), the Chumsky parser won't recognize your feature
+- Your feature will show "0 top-level symbols" in the semantic tree even though parsing succeeds
 
 ## Testing
 - [ ] Create `tests/{feature}/` directory
