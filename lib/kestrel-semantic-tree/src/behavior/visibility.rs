@@ -56,4 +56,9 @@ impl VisibilityBehavior {
     pub fn visibility(&self) -> Option<&Visibility> {
         self.visibility.as_ref()
     }
+
+    /// Get the visibility scope
+    pub fn visibility_scope(&self) -> &Arc<dyn Symbol<KestrelLanguage>> {
+        &self.visibility_scope
+    }
 }

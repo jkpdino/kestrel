@@ -3,7 +3,11 @@ use std::sync::Arc;
 use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
-use crate::{behavior::visibility::VisibilityBehavior, language::KestrelLanguage, symbol::kind::KestrelSymbolKind};
+use crate::{
+    behavior::{typed::TypedBehavior, visibility::VisibilityBehavior},
+    language::KestrelLanguage,
+    symbol::kind::KestrelSymbolKind,
+};
 
 #[derive(Debug)]
 pub struct ClassSymbol {
@@ -17,7 +21,7 @@ impl Symbol<KestrelLanguage> for ClassSymbol {
 }
 
 impl ClassSymbol {
-    /// Create a new ClassSymbol with a name, span, and visibility
+    /// Create a new ClassSymbol with a name, span, visibility, and type
     pub fn new(name: Name, span: Span, visibility: VisibilityBehavior) -> Self {
         let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Class)
             .with_name(name.clone())

@@ -1,0 +1,45 @@
+//! # Kestrel Compiler
+//!
+//! This crate provides a high-level compilation API for the Kestrel language,
+//! inspired by Roslyn's `Compilation` API.
+//!
+//! ## Example
+//!
+//! ```no_run
+//! use kestrel_compiler::Compilation;
+//!
+//! // Create a compilation with multiple source files
+//! let compilation = Compilation::builder()
+//!     .add_source("main.ks", "module Main\nclass Foo {}")
+//!     .add_source("utils.ks", "module Utils\nclass Helper {}")
+//!     .build();
+//!
+//! // Check for errors and emit diagnostics
+//! if compilation.has_errors() {
+//!     compilation.diagnostics().emit().unwrap();
+//!     std::process::exit(1);
+//! }
+//!
+//! // Access compiled results
+//! for file in compilation.source_files() {
+//!     println!("Compiled: {}", file.name());
+//! }
+//!
+//! // Access the unified semantic tree
+//! if let Some(semantic_tree) = compilation.semantic_tree() {
+//!     println!("Symbols: {}", semantic_tree.symbol_table().len());
+//! }
+//! ```
+
+mod source_file;
+mod builder;
+mod compilation;
+
+pub use source_file::SourceFile;
+pub use builder::CompilationBuilder;
+pub use compilation::Compilation;
+
+// Re-export commonly used types from dependencies
+pub use kestrel_reporting::{DiagnosticContext, IntoDiagnostic, Diagnostic, Label, Severity};
+pub use kestrel_semantic_tree_builder::SemanticTree;
+pub use kestrel_syntax_tree::SyntaxNode;

@@ -11,6 +11,6 @@ pub use table::SymbolTable;
 
 use crate::language::Language;
 
-pub trait Symbol<L: Language>: Debug {
+pub trait Symbol<L: Language>: Debug + Send + Sync {
     fn metadata(&self) -> &SymbolMetadata<L>;
 }

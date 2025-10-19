@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 kestrel-span = { path = "../kestrel-span" }
+downcast-rs = "2.0.2"

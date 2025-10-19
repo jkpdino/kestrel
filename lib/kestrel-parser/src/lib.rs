@@ -63,6 +63,7 @@ pub mod import;
 pub mod class;
 pub mod declaration_item;
 pub mod parser;
+pub mod ty;
 
 use kestrel_lexer::Token;
 use kestrel_span::Span;
@@ -73,12 +74,14 @@ pub use module::{ModuleDeclaration, ModulePath};
 pub use import::ImportDeclaration;
 pub use class::ClassDeclaration;
 pub use declaration_item::DeclarationItem;
+pub use ty::TyExpression;
 
 // Re-export event-driven parse functions
 pub use module::{parse_module_declaration, parse_module_path};
 pub use import::parse_import_declaration;
 pub use class::parse_class_declaration;
 pub use declaration_item::{parse_declaration_item, parse_source_file};
+pub use ty::parse_ty;
 
 // Re-export Parser API
 pub use parser::{Parser, ParseResult, ParseError};
@@ -158,4 +161,19 @@ where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
     Parser::parse(source, tokens, parse_source_file)
+}
+
+/// Convenience function to parse a type expression from source and tokens
+/// Returns a fully built TyExpression with its syntax tree
+pub fn parse_ty_from_source<I>(source: &str, tokens: I) -> TyExpression
+where
+    I: Iterator<Item = (Token, Span)> + Clone,
+{
+    let mut sink = EventSink::new();
+    ty::parse_ty(source, tokens, &mut sink);
+    let tree = TreeBuilder::new(source, sink.into_events()).build();
+    TyExpression {
+        syntax: tree,
+        span: 0..source.len(),
+    }
 }

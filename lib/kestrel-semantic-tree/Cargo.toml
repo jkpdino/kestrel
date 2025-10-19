@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 kestrel-span = { path = "../kestrel-span" }
 semantic-tree = { path = "../semantic-tree" }
+downcast-rs = "2.0.2"

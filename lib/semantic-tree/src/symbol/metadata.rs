@@ -67,6 +67,14 @@ impl<L: Language> SymbolMetadata<L> {
 
         return behaviors.clone();
     }
+
+    pub fn add_behavior(&self, behavior: impl Behavior<L> + 'static) {
+        let Ok(mut behaviors) = self.behaviors.write() else {
+            panic!("internal error: RwLock poison");
+        };
+
+        behaviors.push(Arc::new(behavior));
+    }
 }
 
 pub struct SymbolMetadataBuilder<L: Language> {

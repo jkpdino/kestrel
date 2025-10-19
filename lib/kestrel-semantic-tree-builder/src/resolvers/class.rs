@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::class::ClassSymbol;
+use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
@@ -28,7 +30,6 @@ impl Resolver for ClassResolver {
         let name_str = extract_name(syntax)?;
         let name_node = find_child(syntax, SyntaxKind::Name)?;
         let name_span = get_node_span(&name_node, source);
-        let name = Spanned::new(name_str, name_span.clone());
 
         // Get full span
         let full_span = get_node_span(syntax, source);
@@ -37,25 +38,33 @@ impl Resolver for ClassResolver {
         let visibility_str = extract_visibility(syntax);
         let visibility_enum = visibility_str.as_deref().and_then(parse_visibility);
 
-        let visibility_span = get_visibility_span(syntax, source).unwrap_or(name_span);
+        let visibility_span = get_visibility_span(syntax, source).unwrap_or(name_span.clone());
 
         // Determine visibility scope
         let visibility_scope = find_visibility_scope(visibility_enum.as_ref(), parent, root);
 
         // Create visibility behavior
-        let visibility_behavior = VisibilityBehavior::new(
-            visibility_enum,
-            visibility_span,
-            visibility_scope,
-        );
+        let visibility_behavior =
+            VisibilityBehavior::new(visibility_enum, visibility_span, visibility_scope);
 
-        // Create the class symbol with visibility
-        let class_symbol = ClassSymbol::new(name, full_span, visibility_behavior);
-        let class_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(class_symbol);
+        // Create the name object
+        let name = Spanned::new(name_str, name_span);
+
+        // Create the class symbol with a path type
+        // The path type will be resolved to a Class type during semantic analysis
+        let class_symbol = ClassSymbol::new(name, full_span.clone(), visibility_behavior);
+        let class_arc = Arc::new(class_symbol);
+
+        let class_type = Ty::class(class_arc.clone(), full_span.clone());
+        let typed_behavior = TypedBehavior::new(class_type, full_span.clone());
+
+        class_arc.metadata().add_behavior(typed_behavior);
+
+        let class_arc_dyn = class_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
         // Add to parent if exists
         if let Some(parent) = parent {
-            parent.metadata().add_child(&class_arc);
+            parent.metadata().add_child(&class_arc_dyn);
         }
 
         Some(class_arc)

@@ -160,6 +160,9 @@ pub enum Token {
     #[token(":")]
     Colon,
 
+    #[token("!")]
+    Bang,
+
     // ===== Operators =====
     #[token("=")]
     Equals,
@@ -169,6 +172,9 @@ pub enum Token {
 
     #[token("-")]
     Minus,
+
+    #[token("->")]
+    Arrow,
 
     #[token("*")]
     Star,

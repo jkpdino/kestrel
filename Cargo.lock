@@ -98,6 +98,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7704b5fdd17b18ae31c4c1da5a2e0305a2bf17b5249300a9ee9ed7b72114c636"
 
 [[package]]
+name = "downcast-rs"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -149,9 +155,25 @@ dependencies = [
  "chumsky 0.11.1",
  "kestrel-lexer",
  "kestrel-parser",
+ "kestrel-semantic-tree",
  "kestrel-semantic-tree-builder",
+ "kestrel-span",
  "kestrel-syntax-tree",
  "logos 0.15.1",
+ "semantic-tree",
+]
+
+[[package]]
+name = "kestrel-compiler"
+version = "0.1.0"
+dependencies = [
+ "kestrel-lexer",
+ "kestrel-parser",
+ "kestrel-reporting",
+ "kestrel-semantic-tree",
+ "kestrel-semantic-tree-builder",
+ "kestrel-span",
+ "kestrel-syntax-tree",
 ]
 
 [[package]]
@@ -174,9 +196,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-reporting"
+version = "0.1.0"
+dependencies = [
+ "codespan-reporting",
+]
+
+[[package]]
 name = "kestrel-semantic-tree"
 version = "0.1.0"
 dependencies = [
+ "downcast-rs",
  "kestrel-span",
  "semantic-tree",
 ]
@@ -185,6 +215,7 @@ dependencies = [
 name = "kestrel-semantic-tree-builder"
 version = "0.1.0"
 dependencies = [
+ "downcast-rs",
  "kestrel-semantic-tree",
  "kestrel-span",
  "kestrel-syntax-tree",
@@ -389,6 +420,7 @@ dependencies = [
 name = "semantic-tree"
 version = "0.1.0"
 dependencies = [
+ "downcast-rs",
  "kestrel-span",
 ]
 

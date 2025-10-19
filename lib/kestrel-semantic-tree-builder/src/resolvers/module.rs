@@ -7,7 +7,12 @@ use semantic_tree::symbol::Symbol;
 use crate::resolver::Resolver;
 
 /// Resolver for module declarations
-/// TODO: Implement module symbols in kestrel-semantic-tree
+///
+/// Module declarations are handled specially during semantic tree building.
+/// They define the namespace hierarchy but aren't created as symbols during
+/// the normal tree walk. Instead, the module hierarchy is built before processing
+/// other declarations. This resolver returns None to skip module declarations
+/// during the normal walk.
 pub struct ModuleResolver;
 
 impl Resolver for ModuleResolver {
@@ -18,7 +23,13 @@ impl Resolver for ModuleResolver {
         _parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
         _root: &Arc<dyn Symbol<KestrelLanguage>>,
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        // TODO: Implement ModuleSymbol
+        // Module declarations are processed separately during tree building
+        // Return None to skip during normal walk
         None
+    }
+
+    fn is_terminal(&self) -> bool {
+        // Module declarations don't have children to walk
+        true
     }
 }

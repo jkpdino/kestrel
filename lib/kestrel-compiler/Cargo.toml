@@ -1,0 +1,13 @@
+[package]
+name = "kestrel-compiler"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kestrel-lexer = { path = "../kestrel-lexer" }
+kestrel-parser = { path = "../kestrel-parser" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
+kestrel-semantic-tree = { path = "../kestrel-semantic-tree" }
+kestrel-semantic-tree-builder = { path = "../kestrel-semantic-tree-builder" }
+kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-span = { path = "../kestrel-span" }

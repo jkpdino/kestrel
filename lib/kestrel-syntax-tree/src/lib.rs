@@ -48,6 +48,19 @@ pub enum SyntaxKind {
     Name,
     Visibility,
 
+    // Type nodes
+    Ty,
+    TyUnit,
+    TyNever,
+    TyTuple,
+    TyFunction,
+    TyPath,
+    TyList,
+
+    // Path nodes (shared between types and other constructs)
+    Path,
+    PathElement,
+
     // ===== Tokens (Terminals) =====
     // Literals
     Identifier,
@@ -84,11 +97,13 @@ pub enum SyntaxKind {
     Comma,
     Dot,
     Colon,
+    Bang,
 
     // Operators
     Equals,
     Plus,
     Minus,
+    Arrow,
     Star,
     Slash,
 
@@ -135,9 +150,11 @@ impl From<Token> for SyntaxKind {
             Token::Comma => SyntaxKind::Comma,
             Token::Dot => SyntaxKind::Dot,
             Token::Colon => SyntaxKind::Colon,
+            Token::Bang => SyntaxKind::Bang,
             Token::Equals => SyntaxKind::Equals,
             Token::Plus => SyntaxKind::Plus,
             Token::Minus => SyntaxKind::Minus,
+            Token::Arrow => SyntaxKind::Arrow,
             Token::Star => SyntaxKind::Star,
             Token::Slash => SyntaxKind::Slash,
             Token::BlockCommentStart => SyntaxKind::Comment,
@@ -164,6 +181,15 @@ impl Language for KestrelLanguage {
         const MODULE_PATH: u16 = SyntaxKind::ModulePath as u16;
         const NAME: u16 = SyntaxKind::Name as u16;
         const VISIBILITY: u16 = SyntaxKind::Visibility as u16;
+        const TY: u16 = SyntaxKind::Ty as u16;
+        const TY_UNIT: u16 = SyntaxKind::TyUnit as u16;
+        const TY_NEVER: u16 = SyntaxKind::TyNever as u16;
+        const TY_TUPLE: u16 = SyntaxKind::TyTuple as u16;
+        const TY_FUNCTION: u16 = SyntaxKind::TyFunction as u16;
+        const TY_PATH: u16 = SyntaxKind::TyPath as u16;
+        const TY_LIST: u16 = SyntaxKind::TyList as u16;
+        const PATH: u16 = SyntaxKind::Path as u16;
+        const PATH_ELEMENT: u16 = SyntaxKind::PathElement as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
@@ -192,9 +218,11 @@ impl Language for KestrelLanguage {
         const COMMA: u16 = SyntaxKind::Comma as u16;
         const DOT: u16 = SyntaxKind::Dot as u16;
         const COLON: u16 = SyntaxKind::Colon as u16;
+        const BANG: u16 = SyntaxKind::Bang as u16;
         const EQUALS: u16 = SyntaxKind::Equals as u16;
         const PLUS: u16 = SyntaxKind::Plus as u16;
         const MINUS: u16 = SyntaxKind::Minus as u16;
+        const ARROW: u16 = SyntaxKind::Arrow as u16;
         const STAR: u16 = SyntaxKind::Star as u16;
         const SLASH: u16 = SyntaxKind::Slash as u16;
         const WHITESPACE: u16 = SyntaxKind::Whitespace as u16;
@@ -212,6 +240,15 @@ impl Language for KestrelLanguage {
             MODULE_PATH => SyntaxKind::ModulePath,
             NAME => SyntaxKind::Name,
             VISIBILITY => SyntaxKind::Visibility,
+            TY => SyntaxKind::Ty,
+            TY_UNIT => SyntaxKind::TyUnit,
+            TY_NEVER => SyntaxKind::TyNever,
+            TY_TUPLE => SyntaxKind::TyTuple,
+            TY_FUNCTION => SyntaxKind::TyFunction,
+            TY_PATH => SyntaxKind::TyPath,
+            TY_LIST => SyntaxKind::TyList,
+            PATH => SyntaxKind::Path,
+            PATH_ELEMENT => SyntaxKind::PathElement,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
             INTEGER => SyntaxKind::Integer,
@@ -240,9 +277,11 @@ impl Language for KestrelLanguage {
             COMMA => SyntaxKind::Comma,
             DOT => SyntaxKind::Dot,
             COLON => SyntaxKind::Colon,
+            BANG => SyntaxKind::Bang,
             EQUALS => SyntaxKind::Equals,
             PLUS => SyntaxKind::Plus,
             MINUS => SyntaxKind::Minus,
+            ARROW => SyntaxKind::Arrow,
             STAR => SyntaxKind::Star,
             SLASH => SyntaxKind::Slash,
             WHITESPACE => SyntaxKind::Whitespace,

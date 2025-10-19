@@ -22,7 +22,7 @@ fn parse_file(path: &str) {
         .filter(|l| !l.is_empty() && !l.starts_with("//"))
         .collect();
 
-    println!("\nParsing file with {} non-comment lines\n", lines.len());
+    println!("\nParsing file with {} lines\n", lines.len());
 
     // Lex the entire file
     let tokens: Vec<_> = lex(&content)
@@ -46,7 +46,8 @@ fn parse_file(path: &str) {
     }
 
     // Build semantic tree
-    let semantic_tree = kestrel_semantic_tree_builder::build_semantic_tree(&result.tree, &content);
+    let mut semantic_tree = kestrel_semantic_tree_builder::SemanticTree::new();
+    kestrel_semantic_tree_builder::add_file_to_tree(&mut semantic_tree, path, &result.tree, &content);
 
     // Print semantic tree (shows hierarchy)
     println!("--- Semantic Tree ---");

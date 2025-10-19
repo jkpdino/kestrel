@@ -1,0 +1,151 @@
+use crate::source_file::SourceFile;
+use kestrel_lexer::lex;
+use kestrel_parser::{parse_source_file, Parser};
+use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
+use kestrel_semantic_tree_builder::{add_file_to_tree, SemanticTree};
+
+/// Represents a compiled Kestrel project.
+///
+/// Contains all compiled source files, a unified semantic tree, and collected diagnostics.
+/// Created via `Compilation::builder()`.
+pub struct Compilation {
+    source_files: Vec<SourceFile>,
+    semantic_tree: Option<SemanticTree>,
+    diagnostics: DiagnosticContext,
+}
+
+impl Compilation {
+    /// Create a new compilation builder.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use kestrel_compiler::Compilation;
+    /// let compilation = Compilation::builder()
+    ///     .add_source("main.ks", "module Main\nclass Foo {}")
+    ///     .build();
+    /// ```
+    pub fn builder() -> crate::CompilationBuilder {
+        crate::CompilationBuilder::new()
+    }
+
+    /// Internal method to create a compilation from source files.
+    pub(crate) fn from_sources(sources: Vec<(String, String)>) -> Self {
+        let mut diagnostics = DiagnosticContext::new();
+        let mut source_files = Vec::new();
+
+        // Create the unified semantic tree
+        let mut semantic_tree = SemanticTree::new();
+
+        // Phase 1, 2 & 3: Lex, parse, and add each file to the semantic tree
+        for (name, source) in sources {
+            // Add source file to diagnostics context
+            let file_id = diagnostics.add_file(name.clone(), source.clone());
+
+            // Phase 1: Lexing
+            let lex_results: Vec<_> = lex(&source).collect();
+
+            // Collect lex errors
+            for result in &lex_results {
+                if let Err(error) = result {
+                    let error_diag = LexError {
+                        span: error.span.clone(),
+                    };
+                    diagnostics.throw(error_diag, file_id);
+                }
+            }
+
+            // Extract tokens for parsing
+            let tokens: Vec<_> = lex_results
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .map(|spanned| (spanned.value, spanned.span))
+                .collect();
+
+            // Phase 2: Parsing
+            let parse_result = Parser::parse(&source, tokens.into_iter(), parse_source_file);
+
+            // Collect parse errors
+            for error in &parse_result.errors {
+                let error_diag = ParseErrorDiagnostic {
+                    message: error.message.clone(),
+                };
+                diagnostics.throw(error_diag, file_id);
+            }
+
+            // Phase 3: Add file to the unified semantic tree
+            add_file_to_tree(&mut semantic_tree, &name, &parse_result.tree, &source);
+
+            // Create source file
+            let source_file = SourceFile::new(
+                name,
+                source,
+                parse_result.tree,
+            );
+
+            source_files.push(source_file);
+        }
+
+        Self {
+            source_files,
+            semantic_tree: Some(semantic_tree),
+            diagnostics,
+        }
+    }
+
+    /// Get all compiled source files.
+    pub fn source_files(&self) -> &[SourceFile] {
+        &self.source_files
+    }
+
+    /// Get the unified semantic tree for the entire compilation.
+    ///
+    /// This contains symbols from all source files in the compilation.
+    /// Returns `None` if the compilation has no source files.
+    pub fn semantic_tree(&self) -> Option<&SemanticTree> {
+        self.semantic_tree.as_ref()
+    }
+
+    /// Get the diagnostic context.
+    pub fn diagnostics(&self) -> &DiagnosticContext {
+        &self.diagnostics
+    }
+
+    /// Check if there are any errors in the compilation.
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics.has_errors()
+    }
+
+    /// Get a specific source file by name.
+    pub fn get_source_file(&self, name: &str) -> Option<&SourceFile> {
+        self.source_files.iter().find(|f| f.name() == name)
+    }
+}
+
+/// Lex error diagnostic
+struct LexError {
+    span: std::ops::Range<usize>,
+}
+
+impl IntoDiagnostic for LexError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message("invalid token")
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("unrecognized token")
+            ])
+    }
+}
+
+/// Parse error diagnostic
+struct ParseErrorDiagnostic {
+    message: String,
+}
+
+impl IntoDiagnostic for ParseErrorDiagnostic {
+    fn into_diagnostic(&self, _file_id: usize) -> Diagnostic<usize> {
+        // Note: Parse errors currently don't have spans, so we create a message-only diagnostic
+        Diagnostic::error()
+            .with_message(&self.message)
+    }
+}

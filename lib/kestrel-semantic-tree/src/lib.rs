@@ -1,6 +1,7 @@
 pub mod behavior;
 pub mod language;
 pub mod symbol;
+pub mod ty;
 
 #[cfg(test)]
 mod tests {
