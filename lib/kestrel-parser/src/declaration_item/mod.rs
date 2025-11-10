@@ -6,6 +6,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::module::{ModuleDeclaration, parse_module_declaration};
 use crate::import::{ImportDeclaration, parse_import_declaration};
 use crate::class::{ClassDeclaration, parse_class_declaration};
+use crate::type_alias::{TypeAliasDeclaration, parse_type_alias_declaration};
 use crate::event::EventSink;
 use crate::common::{
     module_declaration_parser_internal,
@@ -18,6 +19,7 @@ pub enum DeclarationItem {
     Module(ModuleDeclaration),
     Import(ImportDeclaration),
     Class(ClassDeclaration),
+    TypeAlias(TypeAliasDeclaration),
 }
 
 impl DeclarationItem {
@@ -27,6 +29,7 @@ impl DeclarationItem {
             DeclarationItem::Module(decl) => &decl.span,
             DeclarationItem::Import(decl) => &decl.span,
             DeclarationItem::Class(decl) => &decl.span,
+            DeclarationItem::TypeAlias(decl) => &decl.span,
         }
     }
 
@@ -36,6 +39,7 @@ impl DeclarationItem {
             DeclarationItem::Module(decl) => &decl.syntax,
             DeclarationItem::Import(decl) => &decl.syntax,
             DeclarationItem::Class(decl) => &decl.syntax,
+            DeclarationItem::TypeAlias(decl) => &decl.syntax,
         }
     }
 }
@@ -46,6 +50,7 @@ enum DeclarationItemData {
     Module(Span, Vec<Span>),
     Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>),
     Class(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
+    TypeAlias(Option<(Token, Span)>, Span, Span, Span, Span, Span),
 }
 
 /// Internal Chumsky parser for a single declaration item
@@ -70,7 +75,23 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
                 DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span)
             });
 
-        module_parser.or(import_parser).or(class_parser)
+        let type_alias_parser = visibility_parser_internal()
+            .then(just(Token::Type).map_with_span(|_, span| span))
+            .then(filter_map(|span, token| match token {
+                Token::Identifier => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .then(just(Token::Equals).map_with_span(|_, span| span))
+            .then(filter_map(|span, token| match token {
+                Token::Identifier => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .then(just(Token::Semicolon).map_with_span(|_, span| span))
+            .map(|(((((visibility, type_span), name_span), equals_span), aliased_type_span), semicolon_span)| {
+                DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span)
+            });
+
+        module_parser.or(import_parser).or(class_parser).or(type_alias_parser)
     })
 }
 
@@ -96,6 +117,7 @@ where
     // Clone the iterator so we can try multiple parsers
     let tokens_clone1 = tokens.clone();
     let tokens_clone2 = tokens.clone();
+    let tokens_clone3 = tokens.clone();
 
     // Try parsing as module declaration
     let module_result = {
@@ -159,8 +181,27 @@ where
         return;
     }
 
+    // If class parsing failed, try type alias declaration
+    let mut temp_sink = EventSink::new();
+    parse_type_alias_declaration(source, tokens_clone3, &mut temp_sink);
+
+    // Check if there were errors
+    let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
+    if !has_errors {
+        // Success! Copy events to the main sink
+        for event in temp_sink.into_events() {
+            match event {
+                crate::event::Event::StartNode(kind) => sink.start_node(kind),
+                crate::event::Event::AddToken(kind, span) => sink.add_token(kind, span),
+                crate::event::Event::FinishNode => sink.finish_node(),
+                crate::event::Event::Error { message, span } => sink.error(message, span),
+            }
+        }
+        return;
+    }
+
     // All failed - emit error (no specific span available since all parsers failed)
-    sink.error_no_span("Expected module, import, or class declaration".to_string());
+    sink.error_no_span("Expected module, import, class, or type alias declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -193,6 +234,10 @@ where
                     DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span) => {
                         // Emit class declaration events
                         emit_class_declaration(sink, visibility, class_span, name_span, lbrace_span, body, rbrace_span);
+                    }
+                    DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span) => {
+                        // Emit type alias declaration events
+                        emit_type_alias_declaration(sink, visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span);
                     }
                 }
             }
@@ -259,6 +304,52 @@ fn emit_class_declaration(
     sink.finish_node(); // Finish ClassDeclaration
 }
 
+/// Emit events for a type alias declaration
+/// Helper function used by parse_source_file
+fn emit_type_alias_declaration(
+    sink: &mut EventSink,
+    visibility: Option<(Token, Span)>,
+    type_span: Span,
+    name_span: Span,
+    equals_span: Span,
+    aliased_type_span: Span,
+    semicolon_span: Span,
+) {
+    sink.start_node(SyntaxKind::TypeAliasDeclaration);
+
+    // Always emit Visibility node (may be empty)
+    sink.start_node(SyntaxKind::Visibility);
+    if let Some((vis_token, vis_span)) = visibility {
+        let vis_kind = match vis_token {
+            Token::Public => SyntaxKind::Public,
+            Token::Private => SyntaxKind::Private,
+            Token::Internal => SyntaxKind::Internal,
+            Token::Fileprivate => SyntaxKind::Fileprivate,
+            _ => unreachable!("visibility_parser_internal only returns visibility tokens"),
+        };
+        sink.add_token(vis_kind, vis_span);
+    }
+    sink.finish_node(); // Finish Visibility
+
+    sink.add_token(SyntaxKind::Type, type_span);
+
+    // Emit Name node wrapping the identifier
+    sink.start_node(SyntaxKind::Name);
+    sink.add_token(SyntaxKind::Identifier, name_span);
+    sink.finish_node(); // Finish Name
+
+    sink.add_token(SyntaxKind::Equals, equals_span);
+
+    // Emit AliasedType node wrapping the aliased type identifier
+    sink.start_node(SyntaxKind::AliasedType);
+    sink.add_token(SyntaxKind::Identifier, aliased_type_span);
+    sink.finish_node(); // Finish AliasedType
+
+    sink.add_token(SyntaxKind::Semicolon, semicolon_span);
+
+    sink.finish_node(); // Finish TypeAliasDeclaration
+}
+
 /// Emit events for a declaration item (internal recursive helper)
 /// Helper function used by emit_class_declaration
 fn emit_declaration_item_internal(sink: &mut EventSink, item_data: DeclarationItemData) {
@@ -274,6 +365,9 @@ fn emit_declaration_item_internal(sink: &mut EventSink, item_data: DeclarationIt
         }
         DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span) => {
             emit_class_declaration(sink, visibility, class_span, name_span, lbrace_span, body, rbrace_span);
+        }
+        DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span) => {
+            emit_type_alias_declaration(sink, visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span);
         }
     }
 }

@@ -118,6 +118,9 @@ pub enum Token {
     #[token("public")]
     Public,
 
+    #[token("type")]
+    Type,
+
     // ===== Statement Keywords =====
     #[token("as")]
     As,
@@ -510,5 +513,36 @@ mod tests {
             .filter_map(|t| t.ok())
             .collect();
         assert_eq!(tokens[0].value, Token::Internal);
+    }
+
+    #[test]
+    fn test_type_alias_declaration() {
+        let source = "type Alias = Aliased;";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .collect();
+
+        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens[0].value, Token::Type);
+        assert_eq!(tokens[1].value, Token::Identifier); // Alias
+        assert_eq!(tokens[2].value, Token::Equals);
+        assert_eq!(tokens[3].value, Token::Identifier); // Aliased
+        assert_eq!(tokens[4].value, Token::Semicolon);
+    }
+
+    #[test]
+    fn test_type_alias_with_visibility() {
+        let source = "public type Alias = Aliased;";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .collect();
+
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(tokens[0].value, Token::Public);
+        assert_eq!(tokens[1].value, Token::Type);
+        assert_eq!(tokens[2].value, Token::Identifier); // Alias
+        assert_eq!(tokens[3].value, Token::Equals);
+        assert_eq!(tokens[4].value, Token::Identifier); // Aliased
+        assert_eq!(tokens[5].value, Token::Semicolon);
     }
 }

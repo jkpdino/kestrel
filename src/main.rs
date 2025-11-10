@@ -78,6 +78,8 @@ fn main() {
         //"tests/class/edge_cases.ks",
         "tests/mixed.ks",
         "tests/class/nested.ks",
+        "tests/type_alias/basic.ks",
+        "tests/type_alias/mixed_features.ks",
     ];
 
     for file in test_files {

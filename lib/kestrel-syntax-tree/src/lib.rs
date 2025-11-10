@@ -46,6 +46,8 @@ pub enum SyntaxKind {
     ModuleDeclaration,
     ModulePath,
     Name,
+    TypeAliasDeclaration,
+    AliasedType,
     Visibility,
 
     // Type nodes
@@ -83,6 +85,7 @@ pub enum SyntaxKind {
     Module,
     Private,
     Public,
+    Type,
 
     // Braces
     LParen,
@@ -140,6 +143,7 @@ impl From<Token> for SyntaxKind {
             Token::Module => SyntaxKind::Module,
             Token::Private => SyntaxKind::Private,
             Token::Public => SyntaxKind::Public,
+            Token::Type => SyntaxKind::Type,
             Token::LParen => SyntaxKind::LParen,
             Token::RParen => SyntaxKind::RParen,
             Token::LBrace => SyntaxKind::LBrace,
@@ -180,6 +184,8 @@ impl Language for KestrelLanguage {
         const MODULE_DECLARATION: u16 = SyntaxKind::ModuleDeclaration as u16;
         const MODULE_PATH: u16 = SyntaxKind::ModulePath as u16;
         const NAME: u16 = SyntaxKind::Name as u16;
+        const TYPE_ALIAS_DECLARATION: u16 = SyntaxKind::TypeAliasDeclaration as u16;
+        const ALIASED_TYPE: u16 = SyntaxKind::AliasedType as u16;
         const VISIBILITY: u16 = SyntaxKind::Visibility as u16;
         const TY: u16 = SyntaxKind::Ty as u16;
         const TY_UNIT: u16 = SyntaxKind::TyUnit as u16;
@@ -208,6 +214,7 @@ impl Language for KestrelLanguage {
         const MODULE: u16 = SyntaxKind::Module as u16;
         const PRIVATE: u16 = SyntaxKind::Private as u16;
         const PUBLIC: u16 = SyntaxKind::Public as u16;
+        const TYPE: u16 = SyntaxKind::Type as u16;
         const LPAREN: u16 = SyntaxKind::LParen as u16;
         const RPAREN: u16 = SyntaxKind::RParen as u16;
         const LBRACE: u16 = SyntaxKind::LBrace as u16;
@@ -239,6 +246,8 @@ impl Language for KestrelLanguage {
             MODULE_DECLARATION => SyntaxKind::ModuleDeclaration,
             MODULE_PATH => SyntaxKind::ModulePath,
             NAME => SyntaxKind::Name,
+            TYPE_ALIAS_DECLARATION => SyntaxKind::TypeAliasDeclaration,
+            ALIASED_TYPE => SyntaxKind::AliasedType,
             VISIBILITY => SyntaxKind::Visibility,
             TY => SyntaxKind::Ty,
             TY_UNIT => SyntaxKind::TyUnit,
@@ -267,6 +276,7 @@ impl Language for KestrelLanguage {
             MODULE => SyntaxKind::Module,
             PRIVATE => SyntaxKind::Private,
             PUBLIC => SyntaxKind::Public,
+            TYPE => SyntaxKind::Type,
             LPAREN => SyntaxKind::LParen,
             RPAREN => SyntaxKind::RParen,
             LBRACE => SyntaxKind::LBrace,

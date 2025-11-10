@@ -3,4 +3,5 @@ pub enum KestrelSymbolKind {
     Class,
     Module,
     SourceFile,
+    TypeAlias,
 }
