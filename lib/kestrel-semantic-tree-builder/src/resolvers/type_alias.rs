@@ -1,15 +1,16 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
-use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_tree::symbol::type_alias::{TypeAliasSymbol, TypeAliasTypedBehavior};
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::resolver::Resolver;
+use crate::resolver::{BindingContext, Resolver};
+use crate::type_resolver::{TypeResolutionContext, resolve_type};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -50,34 +51,45 @@ impl Resolver for TypeAliasResolver {
         // Create the name object
         let name = Spanned::new(name_str, name_span);
 
-        // Extract the aliased type name from AliasedType node
+        // Extract the aliased type from AliasedType node
         let aliased_type_node = find_child(syntax, SyntaxKind::AliasedType)?;
-        let aliased_type_name = aliased_type_node
-            .children_with_tokens()
-            .filter_map(|elem| elem.into_token())
-            .find(|tok| tok.kind() == SyntaxKind::Identifier)
-            .map(|tok| tok.text().to_string())?;
-        let aliased_type_span = get_node_span(&aliased_type_node, source);
 
-        // Create a path type for the aliased type
-        // This will be resolved during semantic analysis
-        let aliased_type = Ty::path(
-            vec![aliased_type_name.clone()],
-            aliased_type_span.clone(),
-        );
+        // Try to find a Ty node first. If it doesn't exist, use the AliasedType node itself.
+        // This handles both the expected structure (AliasedType -> Ty -> ...)
+        // and the current parser output (AliasedType -> Identifier)
+        let ty_node = find_child(&aliased_type_node, SyntaxKind::Ty)
+            .unwrap_or_else(|| aliased_type_node.clone());
 
-        // Create TypedBehavior for the type alias
-        // The type of a type alias is the aliased type
-        let typed_behavior = TypedBehavior::new(aliased_type, full_span.clone());
+        // Build the semantic type using TypeBuilder
+        // This will contain the syntactic type (may have unresolved Path variants)
+        let aliased_type = crate::type_builder::TypeBuilder::build(&ty_node, source)?;
+
+        // Store the syntactic aliased type in the first TypedBehavior
+        // This will be used during the binding phase to resolve Path variants
+        let syntactic_typed_behavior = TypedBehavior::new(aliased_type.clone(), full_span.clone());
 
         // Create the type alias symbol
         let type_alias_symbol = TypeAliasSymbol::new(
-            name,
+            name.clone(),
             full_span.clone(),
             visibility_behavior,
-            typed_behavior,
+            syntactic_typed_behavior,
         );
         let type_alias_arc = Arc::new(type_alias_symbol);
+
+        // The type of a type alias symbol is TypeAlias (referring to itself)
+        // This is what allows type checkers to distinguish type aliases from their underlying types
+        let type_alias_type =
+            kestrel_semantic_tree::ty::Ty::type_alias(type_alias_arc.clone(), full_span.clone());
+        let semantic_typed_behavior = TypedBehavior::new(type_alias_type, full_span.clone());
+
+        // Add a second TypedBehavior with the TypeAlias type
+        // Now the symbol has two TypedBehaviors:
+        // 1. The first one (from new()) contains the syntactic aliased type
+        // 2. This one contains the TypeAlias type
+        type_alias_arc
+            .metadata()
+            .add_behavior(semantic_typed_behavior);
 
         let type_alias_arc_dyn = type_alias_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
 
@@ -87,5 +99,46 @@ impl Resolver for TypeAliasResolver {
         }
 
         Some(type_alias_arc_dyn)
+    }
+
+    fn bind_declaration(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        context: &BindingContext,
+    ) {
+        // Extract the original aliased type from the first TypedBehavior
+        // (The one created in build_declaration with the syntactic type)
+        let behaviors = symbol.metadata().behaviors();
+
+        // Find the first TypedBehavior - this contains the syntactic aliased type
+        let typed_behavior = behaviors
+            .iter()
+            .find(|b| matches!(b.kind(), KestrelBehaviorKind::Typed))
+            .and_then(|b| b.as_ref().downcast_ref::<TypedBehavior>());
+
+        let Some(typed_behavior) = typed_behavior else {
+            // No TypedBehavior found - this shouldn't happen
+            return;
+        };
+
+        let aliased_type = typed_behavior.ty();
+
+        // Resolve all Path variants in the aliased type
+        let resolution_ctx = TypeResolutionContext {
+            symbol_table: context.symbol_table,
+            root: context.root,
+        };
+
+        let resolved_type = resolve_type(aliased_type, &resolution_ctx, symbol);
+
+        if let Some(resolved_type) = resolved_type {
+            // Create TypeAliasTypedBehavior with the resolved type
+            let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);
+
+            // Add the behavior to the symbol
+            symbol.metadata().add_behavior(type_alias_typed_behavior);
+        }
+        // If resolution fails, we don't add the behavior
+        // Future: report an error here
     }
 }

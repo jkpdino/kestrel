@@ -3,6 +3,7 @@ mod kind;
 pub use kind::TyKind;
 
 use crate::symbol::class::ClassSymbol;
+use crate::symbol::type_alias::TypeAliasSymbol;
 use kestrel_span::Span;
 use std::sync::Arc;
 
@@ -67,6 +68,11 @@ impl Ty {
         Self::new(TyKind::Class(class_symbol), span)
     }
 
+    /// Create a type alias type
+    pub fn type_alias(type_alias_symbol: Arc<TypeAliasSymbol>, span: Span) -> Self {
+        Self::new(TyKind::TypeAlias(type_alias_symbol), span)
+    }
+
     // === Type checking methods ===
 
     /// Check if this is a unit type
@@ -97,6 +103,11 @@ impl Ty {
     /// Check if this is a class type (resolved)
     pub fn is_class(&self) -> bool {
         matches!(self.kind, TyKind::Class(_))
+    }
+
+    /// Check if this is a type alias type
+    pub fn is_type_alias(&self) -> bool {
+        matches!(self.kind, TyKind::TypeAlias(_))
     }
 
     // === Accessor methods ===
@@ -132,6 +143,14 @@ impl Ty {
             _ => None,
         }
     }
+
+    /// Get type alias symbol if this is a type alias type
+    pub fn as_type_alias(&self) -> Option<&Arc<TypeAliasSymbol>> {
+        match &self.kind {
+            TyKind::TypeAlias(symbol) => Some(symbol),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -147,6 +166,7 @@ mod tests {
         assert!(!ty.is_function());
         assert!(!ty.is_path());
         assert!(!ty.is_class());
+        assert!(!ty.is_type_alias());
     }
 
     #[test]
@@ -158,6 +178,7 @@ mod tests {
         assert!(!ty.is_function());
         assert!(!ty.is_path());
         assert!(!ty.is_class());
+        assert!(!ty.is_type_alias());
     }
 
     #[test]

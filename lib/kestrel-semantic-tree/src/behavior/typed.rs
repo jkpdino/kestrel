@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use kestrel_span::Span;
 use semantic_tree::behavior::Behavior;
 

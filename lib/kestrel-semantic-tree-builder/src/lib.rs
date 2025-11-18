@@ -1,21 +1,27 @@
-mod resolver;
-mod resolvers;
-mod utils;
 mod diagnostics;
 pub mod path_resolver;
+mod resolver;
+mod resolvers;
+pub mod type_builder;
+pub mod type_resolver;
+mod utils;
 
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder, SymbolTable};
 
-use crate::diagnostics::{NoModuleDeclarationError, ModuleNotFirstError, MultipleModuleDeclarationsError};
+use crate::diagnostics::{
+    ModuleNotFirstError, MultipleModuleDeclarationsError, NoModuleDeclarationError,
+};
 use crate::resolver::ResolverRegistry;
 
 /// Represents the root of a semantic tree
@@ -30,10 +36,7 @@ impl SemanticTree {
         let root: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(RootSymbol::new(0..0));
         let symbol_table = SymbolTable::new();
 
-        SemanticTree {
-            root,
-            symbol_table,
-        }
+        SemanticTree { root, symbol_table }
     }
 
     /// Get the root symbol
@@ -278,7 +281,8 @@ pub fn add_file_to_tree(
     let root = tree.root().clone();
 
     // Step 1: Validate and extract module declaration (emits diagnostics on error)
-    let module_decl_and_path = validate_and_extract_module_declaration(syntax, source, diagnostics, file_id);
+    let module_decl_and_path =
+        validate_and_extract_module_declaration(syntax, source, diagnostics, file_id);
 
     // Step 2: Build/find module hierarchy and get the module where file should be placed
     // If validation failed (None), place declarations directly under root
@@ -290,9 +294,8 @@ pub fn add_file_to_tree(
 
     // Step 3: Create a SourceFile symbol under the module
     let file_name_spanned = Spanned::new(file_name.to_string(), 0..file_name.len());
-    let source_file_symbol: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(
-        SourceFileSymbol::new(file_name_spanned, 0..source.len())
-    );
+    let source_file_symbol: Arc<dyn Symbol<KestrelLanguage>> =
+        Arc::new(SourceFileSymbol::new(file_name_spanned, 0..source.len()));
 
     // Add the SourceFile symbol to the parent module
     parent_module.metadata().add_child(&source_file_symbol);
@@ -308,7 +311,8 @@ pub fn add_file_to_tree(
             continue;
         }
 
-        if let Some(symbol) = walk_node(&child, source, Some(&source_file_symbol), &root, &registry) {
+        if let Some(symbol) = walk_node(&child, source, Some(&source_file_symbol), &root, &registry)
+        {
             // Add this symbol and all its descendants to the table
             add_symbol_to_table(&symbol, tree.symbol_table_mut());
         }
@@ -316,7 +320,10 @@ pub fn add_file_to_tree(
 }
 
 /// Recursively add a symbol and all its children to the symbol table
-fn add_symbol_to_table(symbol: &Arc<dyn Symbol<KestrelLanguage>>, table: &mut SymbolTable<KestrelLanguage>) {
+fn add_symbol_to_table(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    table: &mut SymbolTable<KestrelLanguage>,
+) {
     // Add this symbol
     table.insert(symbol.clone());
 
@@ -401,29 +408,81 @@ pub fn print_symbol_table(tree: &SemanticTree) {
     }
 }
 
+/// Format a type for display
+fn format_type(ty: &Ty) -> String {
+    match ty.kind() {
+        TyKind::Unit => "()".to_string(),
+        TyKind::Never => "!".to_string(),
+        TyKind::Tuple(elements) => {
+            let elem_strs: Vec<String> = elements.iter().map(format_type).collect();
+            format!("({})", elem_strs.join(", "))
+        }
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            let param_strs: Vec<String> = params.iter().map(format_type).collect();
+            format!(
+                "({}) -> {}",
+                param_strs.join(", "),
+                format_type(return_type)
+            )
+        }
+        TyKind::Path(segments) => segments.join("."),
+        TyKind::Class(class_symbol) => class_symbol.metadata().name().value.clone(),
+        TyKind::TypeAlias(type_alias_symbol) => type_alias_symbol.metadata().name().value.clone(),
+    }
+}
+
 /// Debug print a symbol and its children
 fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
     let indent = "  ".repeat(level);
     let metadata = symbol.metadata();
 
-    // Look for visibility behavior
-    let visibility_str = metadata.behaviors()
-        .iter()
-        .find(|b| matches!(b.kind(), KestrelBehaviorKind::Visibility))
-        .and_then(|b| {
-            // Safe downcast to VisibilityBehavior using downcast_ref
-            b.as_ref().downcast_ref::<VisibilityBehavior>()
-        })
-        .and_then(|vb| vb.visibility())
-        .map(|v| format!(" [{}]", v))
-        .unwrap_or_default();
+    // Collect all behaviors
+    let behaviors = metadata.behaviors();
+    let behaviors_str = if !behaviors.is_empty() {
+        let behavior_strings: Vec<String> = behaviors
+            .iter()
+            .map(|b| {
+                match b.kind() {
+                    KestrelBehaviorKind::Visibility => {
+                        // Try to downcast to VisibilityBehavior for detailed info
+                        if let Some(vb) = b.as_ref().downcast_ref::<VisibilityBehavior>() {
+                            if let Some(vis) = vb.visibility() {
+                                format!("Visibility({})", vis)
+                            } else {
+                                format!("{:?}", b.kind())
+                            }
+                        } else {
+                            format!("{:?}", b.kind())
+                        }
+                    }
+                    KestrelBehaviorKind::Typed => {
+                        // Try to downcast to TypedBehavior for detailed info
+                        if let Some(tb) = b.as_ref().downcast_ref::<TypedBehavior>() {
+                            format!("Typed({})", format_type(tb.ty()))
+                        } else {
+                            format!("{:?}", b.kind())
+                        }
+                    }
+                    KestrelBehaviorKind::TypeAliasTyped => {
+                        format!("{:?}", b.kind())
+                    }
+                }
+            })
+            .collect();
+        format!(" [{}]", behavior_strings.join(", "))
+    } else {
+        String::new()
+    };
 
     println!(
         "{}{:?} '{}'{}",
         indent,
         metadata.kind(),
         metadata.name().value,
-        visibility_str
+        behaviors_str
     );
 
     // Print children

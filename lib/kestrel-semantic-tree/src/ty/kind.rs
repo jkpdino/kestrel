@@ -1,5 +1,6 @@
 use crate::ty::Ty;
 use crate::symbol::class::ClassSymbol;
+use crate::symbol::type_alias::TypeAliasSymbol;
 use std::sync::Arc;
 
 /// Represents the kind of a semantic type
@@ -29,4 +30,9 @@ pub enum TyKind {
     /// Class type (resolved)
     /// This is a reference to a class symbol
     Class(Arc<ClassSymbol>),
+
+    /// Type alias type
+    /// This is a reference to a type alias symbol
+    /// During type resolution, this should be replaced with the resolved aliased type
+    TypeAlias(Arc<TypeAliasSymbol>),
 }

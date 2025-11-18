@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use semantic_tree::symbol::Symbol;
+use semantic_tree::symbol::{Symbol, SymbolTable};
 
 use crate::resolvers::{ClassResolver, ImportResolver, ModuleResolver, TerminalResolver, TypeAliasResolver};
 
@@ -35,8 +35,11 @@ pub trait Resolver {
 }
 
 /// Context for the binding phase
-pub struct BindingContext {
-    // Empty for now - will be populated when binding phase is implemented
+pub struct BindingContext<'a> {
+    /// The symbol table containing all symbols in the tree
+    pub symbol_table: &'a SymbolTable<KestrelLanguage>,
+    /// The root symbol of the semantic tree
+    pub root: &'a Arc<dyn Symbol<KestrelLanguage>>,
 }
 
 /// Registry mapping SyntaxKind to Resolver implementations

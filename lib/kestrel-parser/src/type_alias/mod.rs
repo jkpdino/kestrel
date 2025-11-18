@@ -5,6 +5,10 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
 use crate::common::visibility_parser_internal;
+use crate::ty::{
+    emit_function_type, emit_never_type, emit_path_type, emit_tuple_type, emit_unit_type,
+    ty_parser, TyVariant,
+};
 
 /// Represents a type alias declaration: (visibility)? type Alias = Aliased;
 ///
@@ -57,22 +61,60 @@ impl TypeAliasDeclaration {
     }
 
     /// Get the aliased type name from this declaration
+    /// Note: This is a best-effort helper for simple path types.
+    /// For complex types (tuples, functions), this might not return a simple string.
     pub fn aliased_type(&self) -> Option<String> {
-        self.syntax
+        let aliased_node = self
+            .syntax
             .children()
-            .find(|child| child.kind() == SyntaxKind::AliasedType)?
-            .children_with_tokens()
-            .filter_map(|elem| elem.into_token())
-            .find(|tok| tok.kind() == SyntaxKind::Identifier)
-            .map(|tok| tok.text().to_string())
+            .find(|child| child.kind() == SyntaxKind::AliasedType)?;
+            
+        // Try to find a Ty node
+        let ty_node = aliased_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::Ty)?;
+
+        // Check if it's a TyPath
+        let ty_path_node = ty_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::TyPath)?;
+            
+        let path_node = ty_path_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::Path)?;
+            
+        // Reconstruct path string from Path elements
+        let segments: Vec<String> = path_node
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::PathElement)
+            .filter_map(|elem| {
+                elem.children_with_tokens()
+                    .filter_map(|t| t.into_token())
+                    .find(|tok| tok.kind() == SyntaxKind::Identifier)
+                    .map(|tok| tok.text().to_string())
+            })
+            .collect();
+            
+        if segments.is_empty() {
+            None
+        } else {
+            Some(segments.join("."))
+        }
     }
 }
 
 /// Internal Chumsky parser for type alias declaration
-/// Returns: (visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span)
+/// Returns: (visibility, type_span, name_span, equals_span, aliased_type_variant, semicolon_span)
 fn type_alias_declaration_parser_internal() -> impl Parser<
     Token,
-    (Option<(Token, Span)>, Span, Span, Span, Span, Span),
+    (
+        Option<(Token, Span)>,
+        Span,
+        Span,
+        Span,
+        TyVariant,
+        Span,
+    ),
     Error = Simple<Token>,
 > + Clone {
     visibility_parser_internal()
@@ -82,14 +124,18 @@ fn type_alias_declaration_parser_internal() -> impl Parser<
             _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
         }))
         .then(just(Token::Equals).map_with_span(|_, span| span))
-        .then(filter_map(|span, token| match token {
-            Token::Identifier => Ok(span),
-            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-        }))
+        .then(ty_parser())
         .then(just(Token::Semicolon).map_with_span(|_, span| span))
         .map(
-            |(((((visibility, type_span), name_span), equals_span), aliased_type_span), semicolon_span)| {
-                (visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span)
+            |(((((visibility, type_span), name_span), equals_span), aliased_type_variant), semicolon_span)| {
+                (
+                    visibility,
+                    type_span,
+                    name_span,
+                    equals_span,
+                    aliased_type_variant,
+                    semicolon_span,
+                )
             },
         )
 }
@@ -104,14 +150,21 @@ where
     let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
 
     match type_alias_declaration_parser_internal().parse(stream) {
-        Ok((visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span)) => {
+        Ok((
+            visibility,
+            type_span,
+            name_span,
+            equals_span,
+            aliased_type_variant,
+            semicolon_span,
+        )) => {
             emit_type_alias_declaration(
                 sink,
                 visibility,
                 type_span,
                 name_span,
                 equals_span,
-                aliased_type_span,
+                aliased_type_variant,
                 semicolon_span,
             );
         }
@@ -134,7 +187,7 @@ fn emit_type_alias_declaration(
     type_span: Span,
     name_span: Span,
     equals_span: Span,
-    aliased_type_span: Span,
+    aliased_type_variant: TyVariant,
     semicolon_span: Span,
 ) {
     sink.start_node(SyntaxKind::TypeAliasDeclaration);
@@ -162,9 +215,20 @@ fn emit_type_alias_declaration(
 
     sink.add_token(SyntaxKind::Equals, equals_span);
 
-    // Emit AliasedType node wrapping the aliased type identifier
+    // Emit AliasedType node wrapping the aliased type
     sink.start_node(SyntaxKind::AliasedType);
-    sink.add_token(SyntaxKind::Identifier, aliased_type_span);
+    
+    // Delegate to ty module emitters
+    match aliased_type_variant {
+        TyVariant::Unit(lparen, rparen) => emit_unit_type(sink, lparen, rparen),
+        TyVariant::Never(bang) => emit_never_type(sink, bang),
+        TyVariant::Tuple(lparen, types, rparen) => emit_tuple_type(sink, lparen, types, rparen),
+        TyVariant::Function(lparen, params, rparen, arrow, ret) => {
+            emit_function_type(sink, lparen, params, rparen, arrow, ret)
+        }
+        TyVariant::Path(segments) => emit_path_type(sink, &segments),
+    }
+    
     sink.finish_node(); // Finish AliasedType
 
     sink.add_token(SyntaxKind::Semicolon, semicolon_span);
@@ -290,5 +354,33 @@ mod tests {
         assert_eq!(decl.aliased_type(), Some("LocalType".to_string()));
         assert_eq!(decl.visibility(), Some(SyntaxKind::Fileprivate));
         assert_eq!(decl.syntax.kind(), SyntaxKind::TypeAliasDeclaration);
+    }
+    
+    #[test]
+    fn test_type_alias_declaration_tuple() {
+        let source = "type TupleAlias = (Int, String);";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_type_alias_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = TypeAliasDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        assert_eq!(decl.name(), Some("TupleAlias".to_string()));
+        // aliased_type() helper currently only works for simple paths, so it returns None for Tuple
+        // In a real scenario, we would check the structure of the tree
+        assert_eq!(decl.aliased_type(), None);
+        
+        // Verify structure manually
+        let aliased = decl.syntax.children().find(|c| c.kind() == SyntaxKind::AliasedType).unwrap();
+        let ty = aliased.children().find(|c| c.kind() == SyntaxKind::Ty).unwrap();
+        assert_eq!(ty.children().next().unwrap().kind(), SyntaxKind::TyTuple);
     }
 }

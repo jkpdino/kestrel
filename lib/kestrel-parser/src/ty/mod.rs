@@ -131,7 +131,7 @@ fn path_type_parser() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + 
 }
 
 /// Combined type parser that returns a variant
-fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>> + Clone {
+pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>> + Clone {
     // Never type: !
     let never = never_type_parser().map(TyVariant::Never);
 
@@ -185,7 +185,7 @@ where
 }
 
 /// Internal enum to distinguish between type variants during parsing
-enum TyVariant {
+pub(crate) enum TyVariant {
     Unit(Span, Span),
     Never(Span),
     Tuple(Span, Vec<Vec<Span>>, Span),
@@ -228,7 +228,7 @@ fn parse_tuple_or_function_type_parser() -> impl Parser<Token, TyVariant, Error 
 }
 
 /// Emit events for a unit type
-fn emit_unit_type(sink: &mut EventSink, lparen_span: Span, rparen_span: Span) {
+pub(crate) fn emit_unit_type(sink: &mut EventSink, lparen_span: Span, rparen_span: Span) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyUnit);
     sink.add_token(SyntaxKind::LParen, lparen_span);
@@ -238,7 +238,7 @@ fn emit_unit_type(sink: &mut EventSink, lparen_span: Span, rparen_span: Span) {
 }
 
 /// Emit events for a never type
-fn emit_never_type(sink: &mut EventSink, bang_span: Span) {
+pub(crate) fn emit_never_type(sink: &mut EventSink, bang_span: Span) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyNever);
     sink.add_token(SyntaxKind::Bang, bang_span);
@@ -268,7 +268,7 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
 
 /// Emit events for a path type
 /// Structure: Ty -> TyPath -> Path -> PathElement -> Identifier
-fn emit_path_type(sink: &mut EventSink, segments: &[Span]) {
+pub(crate) fn emit_path_type(sink: &mut EventSink, segments: &[Span]) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyPath);
     emit_path(sink, segments);
@@ -277,7 +277,7 @@ fn emit_path_type(sink: &mut EventSink, segments: &[Span]) {
 }
 
 /// Emit events for a tuple type
-fn emit_tuple_type(sink: &mut EventSink, lparen: Span, types: Vec<Vec<Span>>, rparen: Span) {
+pub(crate) fn emit_tuple_type(sink: &mut EventSink, lparen: Span, types: Vec<Vec<Span>>, rparen: Span) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyTuple);
 
@@ -300,7 +300,7 @@ fn emit_tuple_type(sink: &mut EventSink, lparen: Span, types: Vec<Vec<Span>>, rp
 }
 
 /// Emit events for a function type
-fn emit_function_type(
+pub(crate) fn emit_function_type(
     sink: &mut EventSink,
     lparen: Span,
     params: Vec<Vec<Span>>,

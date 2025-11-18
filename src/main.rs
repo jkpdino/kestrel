@@ -46,11 +46,23 @@ fn parse_file(path: &str) {
         println!();
     }
 
+    // Print syntax tree
+    println!("\n--- Syntax Tree ---");
+    println!("{:#?}", result.tree);
+    println!();
+
     // Build semantic tree
     let mut semantic_tree = kestrel_semantic_tree_builder::SemanticTree::new();
     let mut diagnostics = DiagnosticContext::new();
     let file_id = diagnostics.add_file(path.to_string(), content.clone());
-    kestrel_semantic_tree_builder::add_file_to_tree(&mut semantic_tree, path, &result.tree, &content, &mut diagnostics, file_id);
+    kestrel_semantic_tree_builder::add_file_to_tree(
+        &mut semantic_tree,
+        path,
+        &result.tree,
+        &content,
+        &mut diagnostics,
+        file_id,
+    );
 
     // Check for module validation errors
     if diagnostics.len() > 0 {
@@ -76,8 +88,6 @@ fn main() {
         //"tests/import/basic.ks",
         //"tests/class/basic.ks",
         //"tests/class/edge_cases.ks",
-        "tests/mixed.ks",
-        "tests/class/nested.ks",
         "tests/type_alias/basic.ks",
         "tests/type_alias/mixed_features.ks",
     ];

@@ -5,4 +5,5 @@ pub mod typed;
 pub enum KestrelBehaviorKind {
     Visibility,
     Typed,
+    TypeAliasTyped,
 }
