@@ -1,9 +1,14 @@
-pub mod visibility;
 pub mod typed;
+pub mod visibility;
+
+use semantic_tree::behavior::BehaviorKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KestrelBehaviorKind {
-    Visibility,
+    ImportData,
     Typed,
     TypeAliasTyped,
+    Visibility,
 }
+
+impl BehaviorKind for KestrelBehaviorKind {}

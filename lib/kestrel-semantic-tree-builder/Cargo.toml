@@ -10,3 +10,4 @@ kestrel-span = { path = "../kestrel-span" }
 kestrel-reporting = { path = "../kestrel-reporting" }
 semantic-tree = { path = "../semantic-tree" }
 downcast-rs = "2.0.2"
+salsa = "0.24.0"

@@ -2,10 +2,11 @@ use std::sync::{Arc, RwLock, Weak};
 
 use kestrel_span::{Name, Span};
 
-use crate::{behavior::Behavior, language::Language, symbol::Symbol};
+use crate::{behavior::Behavior, language::Language, symbol::{Symbol, SymbolId}};
 
 #[derive(Debug)]
 pub struct SymbolMetadata<L: Language> {
+    id: SymbolId,
     parent: Option<Weak<dyn Symbol<L>>>,
     children: RwLock<Vec<Arc<dyn Symbol<L>>>>,
 
@@ -18,6 +19,10 @@ pub struct SymbolMetadata<L: Language> {
 }
 
 impl<L: Language> SymbolMetadata<L> {
+    pub fn id(&self) -> SymbolId {
+        self.id
+    }
+
     pub fn parent(&self) -> Option<Arc<dyn Symbol<L>>> {
         let symbol = self.parent.as_ref()?;
 
@@ -78,6 +83,7 @@ impl<L: Language> SymbolMetadata<L> {
 }
 
 pub struct SymbolMetadataBuilder<L: Language> {
+    id: SymbolId,
     parent: Option<Weak<dyn Symbol<L>>>,
     children: Vec<Arc<dyn Symbol<L>>>,
     behaviors: Vec<Arc<dyn Behavior<L>>>,
@@ -90,6 +96,7 @@ pub struct SymbolMetadataBuilder<L: Language> {
 impl<L: Language> SymbolMetadataBuilder<L> {
     pub fn new(kind: L::SymbolKind) -> Self {
         Self {
+            id: SymbolId::new(),  // Auto-generate unique ID
             parent: None,
             children: Vec::new(),
             behaviors: Vec::new(),
@@ -98,6 +105,11 @@ impl<L: Language> SymbolMetadataBuilder<L> {
             declaration_span: None,
             span: None,
         }
+    }
+
+    pub fn with_id(mut self, id: SymbolId) -> Self {
+        self.id = id;
+        self
     }
 
     pub fn with_parent(mut self, parent: Weak<dyn Symbol<L>>) -> Self {
@@ -142,6 +154,7 @@ impl<L: Language> SymbolMetadataBuilder<L> {
 
     pub fn build(self) -> SymbolMetadata<L> {
         SymbolMetadata {
+            id: self.id,
             parent: self.parent,
             children: RwLock::new(self.children),
             behaviors: RwLock::new(self.behaviors),
