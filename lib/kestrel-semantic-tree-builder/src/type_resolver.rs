@@ -1,26 +1,22 @@
-use std::sync::Arc;
-
-use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
-use semantic_tree::symbol::{Symbol, SymbolTable};
+use semantic_tree::symbol::SymbolId;
 
-use crate::path_resolver::resolve_type_path;
+use crate::queries::{self, Db, TypePathResolution};
 
 /// Context for type resolution during the binding phase
 pub struct TypeResolutionContext<'a> {
-    pub symbol_table: &'a SymbolTable<KestrelLanguage>,
-    pub root: &'a Arc<dyn Symbol<KestrelLanguage>>,
+    pub db: &'a dyn Db,
 }
 
 /// Recursively resolve all Path variants in a type
 ///
 /// This function walks through the type structure and replaces all `TyKind::Path`
-/// variants with their resolved types by looking up the path in the symbol table.
+/// variants with their resolved types using scope-aware name resolution.
 ///
 /// # Arguments
 /// * `ty` - The type to resolve
-/// * `context` - Type resolution context containing symbol table and root
-/// * `resolution_context` - The symbol context for visibility checking
+/// * `ctx` - Type resolution context containing the database
+/// * `context_id` - The symbol ID of the resolution context (for scope/visibility)
 ///
 /// # Returns
 /// * `Some(Ty)` if resolution succeeds (all paths resolved)
@@ -33,16 +29,18 @@ pub struct TypeResolutionContext<'a> {
 pub fn resolve_type(
     ty: &Ty,
     ctx: &TypeResolutionContext,
-    resolution_context: &Arc<dyn Symbol<KestrelLanguage>>,
+    context_id: SymbolId,
 ) -> Option<Ty> {
     match ty.kind() {
         // Base types that don't need resolution
         TyKind::Unit | TyKind::Never => Some(ty.clone()),
 
-        // Path types need to be resolved
+        // Path types need to be resolved using scope-aware resolution
         TyKind::Path(segments) => {
-            // Resolve the path to a type
-            resolve_type_path(segments, ctx.symbol_table, resolution_context)
+            match queries::resolve_type_path(ctx.db, segments.clone(), context_id) {
+                TypePathResolution::Resolved(resolved_ty) => Some(resolved_ty),
+                _ => None, // NotFound, Ambiguous, or NotAType
+            }
         }
 
         // Class types are already resolved
@@ -60,7 +58,7 @@ pub fn resolve_type(
         TyKind::Tuple(elements) => {
             let resolved_elements: Option<Vec<Ty>> = elements
                 .iter()
-                .map(|elem_ty| resolve_type(elem_ty, ctx, resolution_context))
+                .map(|elem_ty| resolve_type(elem_ty, ctx, context_id))
                 .collect();
 
             resolved_elements.map(|elements| Ty::tuple(elements, ty.span().clone()))
@@ -74,11 +72,11 @@ pub fn resolve_type(
             // Resolve all parameter types
             let resolved_params: Option<Vec<Ty>> = params
                 .iter()
-                .map(|param_ty| resolve_type(param_ty, ctx, resolution_context))
+                .map(|param_ty| resolve_type(param_ty, ctx, context_id))
                 .collect();
 
             // Resolve return type
-            let resolved_return = resolve_type(return_type, ctx, resolution_context);
+            let resolved_return = resolve_type(return_type, ctx, context_id);
 
             // Combine results
             match (resolved_params, resolved_return) {
@@ -94,44 +92,82 @@ pub fn resolve_type(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-    use kestrel_span::Name;
-    use semantic_tree::symbol::SymbolMetadataBuilder;
+    use std::sync::Arc;
+    use std::collections::HashMap;
+    use kestrel_semantic_tree::error::ModuleNotFoundError;
+    use kestrel_semantic_tree::language::KestrelLanguage;
+    use semantic_tree::symbol::Symbol;
+    use crate::queries::{Scope, Import, SymbolResolution};
 
-    fn create_test_root() -> Arc<dyn Symbol<KestrelLanguage>> {
-        let root_name = Name::new("Root".to_string(), 0..4);
-        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Class)
-            .with_name(root_name)
-            .with_declaration_span(0..4)
-            .with_span(0..100)
-            .build();
+    /// A mock Db for testing that doesn't require a full semantic tree.
+    /// Only used for testing basic type resolution (unit, never, tuple, function).
+    struct MockDb {
+        root_id: SymbolId,
+    }
 
-        #[derive(Debug)]
-        struct TestRootSymbol {
-            metadata: semantic_tree::symbol::SymbolMetadata<KestrelLanguage>,
-        }
-
-        impl Symbol<KestrelLanguage> for TestRootSymbol {
-            fn metadata(&self) -> &semantic_tree::symbol::SymbolMetadata<KestrelLanguage> {
-                &self.metadata
+    impl MockDb {
+        fn new() -> Self {
+            MockDb {
+                root_id: SymbolId::new(),
             }
         }
+    }
 
-        Arc::new(TestRootSymbol { metadata })
+    impl Db for MockDb {
+        fn symbol_by_id(&self, _id: SymbolId) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+            None // Not needed for basic type tests
+        }
+
+        fn scope_for(&self, symbol_id: SymbolId) -> Arc<Scope> {
+            Arc::new(Scope {
+                symbol_id,
+                imports: HashMap::new(),
+                declarations: HashMap::new(),
+                parent: None,
+            })
+        }
+
+        fn resolve_name(&self, _name: String, _context: SymbolId) -> SymbolResolution {
+            SymbolResolution::NotFound
+        }
+
+        fn imports_in_scope(&self, _symbol_id: SymbolId) -> Vec<Arc<Import>> {
+            vec![]
+        }
+
+        fn is_visible_from(&self, _target: SymbolId, _context: SymbolId) -> bool {
+            true
+        }
+
+        fn resolve_module_path(
+            &self,
+            path: Vec<String>,
+            _context: SymbolId,
+        ) -> Result<SymbolId, ModuleNotFoundError> {
+            Err(ModuleNotFoundError {
+                path,
+                failed_segment_index: 0,
+                path_span: 0..0,
+                failed_segment_span: 0..0,
+            })
+        }
+
+        fn resolve_type_path(&self, path: Vec<String>, _context: SymbolId) -> TypePathResolution {
+            TypePathResolution::NotFound {
+                segment: path.first().cloned().unwrap_or_default(),
+                index: 0,
+            }
+        }
     }
 
     #[test]
     fn test_resolve_unit_type() {
         let ty = Ty::unit(0..2);
-        let symbol_table = SymbolTable::new();
-        let root = create_test_root();
+        let db = MockDb::new();
 
-        let ctx = TypeResolutionContext {
-            symbol_table: &symbol_table,
-            root: &root,
-        };
+        let ctx = TypeResolutionContext { db: &db };
 
-        let resolved = resolve_type(&ty, &ctx, &root);
+        let resolved = resolve_type(&ty, &ctx, db.root_id);
         assert!(resolved.is_some());
         assert!(resolved.unwrap().is_unit());
     }
@@ -139,15 +175,11 @@ mod tests {
     #[test]
     fn test_resolve_never_type() {
         let ty = Ty::never(0..1);
-        let symbol_table = SymbolTable::new();
-        let root = create_test_root();
+        let db = MockDb::new();
 
-        let ctx = TypeResolutionContext {
-            symbol_table: &symbol_table,
-            root: &root,
-        };
+        let ctx = TypeResolutionContext { db: &db };
 
-        let resolved = resolve_type(&ty, &ctx, &root);
+        let resolved = resolve_type(&ty, &ctx, db.root_id);
         assert!(resolved.is_some());
         assert!(resolved.unwrap().is_never());
     }
@@ -155,15 +187,11 @@ mod tests {
     #[test]
     fn test_resolve_tuple_type() {
         let ty = Ty::tuple(vec![Ty::unit(0..2), Ty::never(4..5)], 0..6);
-        let symbol_table = SymbolTable::new();
-        let root = create_test_root();
+        let db = MockDb::new();
 
-        let ctx = TypeResolutionContext {
-            symbol_table: &symbol_table,
-            root: &root,
-        };
+        let ctx = TypeResolutionContext { db: &db };
 
-        let resolved = resolve_type(&ty, &ctx, &root);
+        let resolved = resolve_type(&ty, &ctx, db.root_id);
         assert!(resolved.is_some());
         let resolved_ty = resolved.unwrap();
         assert!(resolved_ty.is_tuple());
@@ -181,15 +209,11 @@ mod tests {
             Ty::unit(10..12),
             0..12,
         );
-        let symbol_table = SymbolTable::new();
-        let root = create_test_root();
+        let db = MockDb::new();
 
-        let ctx = TypeResolutionContext {
-            symbol_table: &symbol_table,
-            root: &root,
-        };
+        let ctx = TypeResolutionContext { db: &db };
 
-        let resolved = resolve_type(&ty, &ctx, &root);
+        let resolved = resolve_type(&ty, &ctx, db.root_id);
         assert!(resolved.is_some());
         let resolved_ty = resolved.unwrap();
         assert!(resolved_ty.is_function());

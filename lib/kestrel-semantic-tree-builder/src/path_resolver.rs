@@ -123,6 +123,10 @@ pub fn is_visible_from(
 
 /// Resolve a type path like A.B.C to a Type
 ///
+/// # Deprecated
+/// This function performs global name lookup without considering imports or scope.
+/// Use `queries::Db::resolve_type_path()` instead for context-aware resolution.
+///
 /// # Arguments
 /// * `path` - The path segments to resolve (e.g., ["A", "B", "C"])
 /// * `symbol_table` - The symbol table to look up the first segment
@@ -131,13 +135,10 @@ pub fn is_visible_from(
 /// # Returns
 /// * `Some(Ty)` if the path resolves to a type
 /// * `None` if resolution fails
-///
-/// # Future Error Handling
-/// When error handling is added, this will return `Result<Ty, PathResolutionError>`
-/// with detailed information about:
-/// - Which segment failed
-/// - What alternatives were available
-/// - Why they were filtered out (visibility, no TypedBehavior, etc.)
+#[deprecated(
+    since = "0.1.0",
+    note = "Use queries::Db::resolve_type_path() for context-aware resolution that considers imports"
+)]
 pub fn resolve_type_path(
     path: &[String],
     symbol_table: &SymbolTable<KestrelLanguage>,
@@ -229,6 +230,7 @@ pub fn resolve_type_path(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use kestrel_semantic_tree::symbol::class::ClassSymbol;

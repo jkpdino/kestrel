@@ -10,6 +10,7 @@ use kestrel_semantic_tree::error::ModuleNotFoundError;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::Symbol;
 
 /// Result of name resolution
@@ -31,6 +32,49 @@ impl SymbolResolution {
     pub fn single(&self) -> Option<SymbolId> {
         match self {
             SymbolResolution::Found(ids) if ids.len() == 1 => Some(ids[0]),
+            _ => None,
+        }
+    }
+}
+
+/// Result of type path resolution
+#[derive(Debug, Clone)]
+pub enum TypePathResolution {
+    /// Successfully resolved to a type
+    Resolved(Ty),
+    /// A segment in the path was not found
+    NotFound {
+        /// The segment that wasn't found
+        segment: String,
+        /// Index of the failed segment in the path
+        index: usize,
+    },
+    /// A segment resolved to multiple candidates (ambiguous)
+    Ambiguous {
+        /// The ambiguous segment
+        segment: String,
+        /// Index of the ambiguous segment
+        index: usize,
+        /// The candidate symbol IDs
+        candidates: Vec<SymbolId>,
+    },
+    /// The final symbol doesn't have a type (not a type-defining symbol)
+    NotAType {
+        /// The symbol that isn't a type
+        symbol_id: SymbolId,
+    },
+}
+
+impl TypePathResolution {
+    /// Returns true if resolution succeeded
+    pub fn is_resolved(&self) -> bool {
+        matches!(self, TypePathResolution::Resolved(_))
+    }
+
+    /// Returns the resolved type if successful
+    pub fn ty(&self) -> Option<&Ty> {
+        match self {
+            TypePathResolution::Resolved(ty) => Some(ty),
             _ => None,
         }
     }
@@ -94,6 +138,13 @@ pub trait Db {
         path: Vec<String>,
         context: SymbolId,
     ) -> Result<SymbolId, ModuleNotFoundError>;
+
+    /// Resolve a type path (e.g., "Foo.Bar.Baz") to a Type.
+    ///
+    /// The first segment is resolved using scope-aware name resolution,
+    /// considering imports and local declarations. Subsequent segments
+    /// are resolved by searching children of the previously resolved symbol.
+    fn resolve_type_path(&self, path: Vec<String>, context: SymbolId) -> TypePathResolution;
 }
 
 /// Get the scope for a symbol
@@ -123,6 +174,15 @@ pub fn resolve_module_path(
     context: SymbolId,
 ) -> Result<SymbolId, ModuleNotFoundError> {
     db.resolve_module_path(path, context)
+}
+
+/// Resolve a type path to a Type
+pub fn resolve_type_path(
+    db: &dyn Db,
+    path: Vec<String>,
+    context: SymbolId,
+) -> TypePathResolution {
+    db.resolve_type_path(path, context)
 }
 
 /// Helper to get ImportDataBehavior from a symbol

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
@@ -42,6 +43,24 @@ pub struct BindingContext<'a> {
     pub diagnostics: &'a mut kestrel_reporting::DiagnosticContext,
     /// Current file ID for error reporting
     pub file_id: usize,
+}
+
+impl BindingContext<'_> {
+    /// Get the file_id for a symbol by walking up to its SourceFile parent.
+    ///
+    /// This enables cross-file diagnostics - errors can reference declarations
+    /// in other files by using the correct file_id for each span.
+    pub fn file_id_for_symbol(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<usize> {
+        let mut current = Some(symbol.clone());
+        while let Some(s) = current {
+            if s.metadata().kind() == KestrelSymbolKind::SourceFile {
+                let file_name = s.metadata().name().value.clone();
+                return self.diagnostics.get_file_id(&file_name);
+            }
+            current = s.metadata().parent();
+        }
+        None
+    }
 }
 
 /// Registry mapping SyntaxKind to Resolver implementations

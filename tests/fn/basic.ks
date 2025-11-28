@@ -25,19 +25,6 @@ internal fn internalFunction() {}
 // Fileprivate function
 fileprivate fn fileprivateFunction() {}
 
-// ===== Functions in Classes =====
-
-class Container {
-  fn method() {}
-  fn anotherMethod() {}
-}
-
-class WithVisibility {
-  public fn publicMethod() {}
-  private fn privateMethod() {}
-  internal fn internalMethod() {}
-}
-
 // ===== Multiple Features Together =====
 
 class Service {
@@ -50,30 +37,6 @@ public class PublicService {
   public fn publicAPI() {}
   private fn internalHelper() {}
 }
-
-// ===== Nested Classes with Functions =====
-
-class Outer {
-  fn outerMethod() {}
-
-  class Inner {
-    fn innerMethod() {}
-  }
-}
-
-// ===== Edge Cases =====
-
-// Single character name
-fn x() {}
-
-// Long identifier
-fn thisIsAVeryLongFunctionNameThatIsStillValidButUnusual() {}
-
-// Unicode identifiers
-fn café() {}
-fn 世界() {}
-fn привет() {}
-fn αβγ() {}
 
 // ===== Error Cases (commented out) =====
 

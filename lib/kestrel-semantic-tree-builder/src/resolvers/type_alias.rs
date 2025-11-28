@@ -4,12 +4,13 @@ use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
+use kestrel_semantic_tree::symbol::type_alias::{TypeAliasSymbol, TypeAliasTypedBehavior};
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{BindingContext, Resolver};
+use crate::type_resolver::{resolve_type, TypeResolutionContext};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -103,12 +104,8 @@ impl Resolver for TypeAliasResolver {
     fn bind_declaration(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        _context: &mut BindingContext,
+        context: &mut BindingContext,
     ) {
-        // TODO: Migrate type resolution to query-based API
-        // For now, type alias resolution is disabled until path_resolver is updated
-        // to use the Db trait instead of SymbolTable
-
         // Extract the original aliased type from the first TypedBehavior
         // (The one created in build_declaration with the syntactic type)
         let behaviors = symbol.metadata().behaviors();
@@ -119,17 +116,29 @@ impl Resolver for TypeAliasResolver {
             .find(|b| matches!(b.kind(), KestrelBehaviorKind::Typed))
             .and_then(|b| b.as_ref().downcast_ref::<TypedBehavior>());
 
-        let Some(_typed_behavior) = typed_behavior else {
+        let Some(typed_behavior) = typed_behavior else {
             // No TypedBehavior found - this shouldn't happen
             return;
         };
 
-        // TODO: When path_resolver is updated to use Db trait:
-        // let aliased_type = typed_behavior.ty();
-        // let resolved_type = resolve_type_with_db(aliased_type, context.db, symbol);
-        // if let Some(resolved_type) = resolved_type {
-        //     let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);
-        //     symbol.metadata().add_behavior(type_alias_typed_behavior);
-        // }
+        let syntactic_type = typed_behavior.ty();
+        let symbol_id = symbol.metadata().id();
+
+        // Create type resolution context with the Db
+        let type_ctx = TypeResolutionContext { db: context.db };
+
+        // Resolve all Path variants in the type using scope-aware resolution
+        match resolve_type(syntactic_type, &type_ctx, symbol_id) {
+            Some(resolved_type) => {
+                // Add the resolved type as a TypeAliasTypedBehavior
+                let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);
+                symbol.metadata().add_behavior(type_alias_typed_behavior);
+            }
+            None => {
+                // Type resolution failed - the error will be emitted by resolve_type_path
+                // For now, we don't add a TypeAliasTypedBehavior
+                // Future: emit a more specific diagnostic here
+            }
+        }
     }
 }

@@ -147,6 +147,8 @@ pub struct SymbolNotVisibleError {
     pub import_span: Span,
     /// Span of the symbol's declaration (where visibility is declared)
     pub declaration_span: Option<Span>,
+    /// File ID of the declaration (for cross-file diagnostics)
+    pub declaration_file_id: Option<usize>,
 }
 
 impl IntoDiagnostic for SymbolNotVisibleError {
@@ -157,8 +159,10 @@ impl IntoDiagnostic for SymbolNotVisibleError {
         ];
 
         if let Some(decl_span) = &self.declaration_span {
+            // Use declaration_file_id if available, otherwise fall back to import file
+            let decl_file_id = self.declaration_file_id.unwrap_or(file_id);
             labels.push(
-                Label::secondary(file_id, decl_span.clone())
+                Label::secondary(decl_file_id, decl_span.clone())
                     .with_message(format!("'{}' declared as {} here", self.symbol_name, self.visibility)),
             );
         }

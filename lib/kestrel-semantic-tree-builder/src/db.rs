@@ -2,11 +2,13 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::error::ModuleNotFoundError;
 use semantic_tree::symbol::{Symbol, SymbolId};
-use crate::queries::{self, Scope, Import, ImportItem, SymbolResolution};
+use crate::queries::{self, Scope, Import, ImportItem, SymbolResolution, TypePathResolution};
 use crate::path_resolver;
 
 /// Thread-safe registry of all symbols in the tree
@@ -378,5 +380,108 @@ impl queries::Db for SemanticDatabase {
         }
 
         Ok(current.metadata().id())
+    }
+
+    fn resolve_type_path(&self, path: Vec<String>, context: SymbolId) -> TypePathResolution {
+        if path.is_empty() {
+            return TypePathResolution::NotFound {
+                segment: String::new(),
+                index: 0,
+            };
+        }
+
+        let context_symbol = match self.symbol_by_id(context) {
+            Some(s) => s,
+            None => {
+                return TypePathResolution::NotFound {
+                    segment: path[0].clone(),
+                    index: 0,
+                };
+            }
+        };
+
+        // First segment: use scope-aware name resolution
+        let first = &path[0];
+        let first_resolution = self.resolve_name(first.clone(), context);
+
+        let mut current_symbol = match first_resolution {
+            SymbolResolution::Found(ids) if ids.len() == 1 => {
+                match self.symbol_by_id(ids[0]) {
+                    Some(s) => s,
+                    None => {
+                        return TypePathResolution::NotFound {
+                            segment: first.clone(),
+                            index: 0,
+                        };
+                    }
+                }
+            }
+            SymbolResolution::Found(ids) => {
+                // Multiple matches - ambiguous
+                return TypePathResolution::Ambiguous {
+                    segment: first.clone(),
+                    index: 0,
+                    candidates: ids,
+                };
+            }
+            SymbolResolution::Ambiguous(ids) => {
+                return TypePathResolution::Ambiguous {
+                    segment: first.clone(),
+                    index: 0,
+                    candidates: ids,
+                };
+            }
+            SymbolResolution::NotFound => {
+                return TypePathResolution::NotFound {
+                    segment: first.clone(),
+                    index: 0,
+                };
+            }
+        };
+
+        // Subsequent segments: search visible children of the resolved symbol
+        for (index, segment) in path.iter().enumerate().skip(1) {
+            let children = current_symbol.metadata().visible_children();
+
+            // Find children matching the name and visible from context
+            let matches: Vec<_> = children
+                .into_iter()
+                .filter(|c| c.metadata().name().value == *segment)
+                .filter(|c| path_resolver::is_visible_from(c, &context_symbol))
+                .collect();
+
+            match matches.len() {
+                0 => {
+                    return TypePathResolution::NotFound {
+                        segment: segment.clone(),
+                        index,
+                    };
+                }
+                1 => {
+                    current_symbol = matches.into_iter().next().unwrap();
+                }
+                _ => {
+                    return TypePathResolution::Ambiguous {
+                        segment: segment.clone(),
+                        index,
+                        candidates: matches.iter().map(|s| s.metadata().id()).collect(),
+                    };
+                }
+            }
+        }
+
+        // Extract type from the final symbol's TypedBehavior
+        let behaviors = current_symbol.metadata().behaviors();
+        let typed_behavior = behaviors
+            .iter()
+            .find(|b| matches!(b.kind(), KestrelBehaviorKind::Typed))
+            .and_then(|b| b.as_ref().downcast_ref::<TypedBehavior>());
+
+        match typed_behavior {
+            Some(tb) => TypePathResolution::Resolved(tb.ty().clone()),
+            None => TypePathResolution::NotAType {
+                symbol_id: current_symbol.metadata().id(),
+            },
+        }
     }
 }

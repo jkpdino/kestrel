@@ -1,5 +1,4 @@
 // Basic module declarations
-module Test.Module.Basic
 
 // Single segment module
 module Main
@@ -12,3 +11,6 @@ module A.B.C
 
 // Four segment module path
 module A.B.C.D
+
+// Deep module path
+module A.B.C.D.E

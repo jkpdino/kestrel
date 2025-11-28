@@ -120,17 +120,9 @@ fn main() {
         "tests/import_resolution/conflict/consumer_local_conflict.ks",
     ]);
 
-    // Test internal visibility
-    process_file_group("Internal Visibility", &[
-        "tests/import_resolution/visibility/internal_lib.ks",
-        "tests/import_resolution/visibility/internal_same_module.ks",
-        "tests/import_resolution/visibility/internal_other_module.ks",
-    ]);
-
-    // Test fileprivate visibility
-    process_file_group("Fileprivate Visibility", &[
-        "tests/import_resolution/visibility/fileprivate_lib.ks",
-        "tests/import_resolution/visibility/fileprivate_import.ks",
+    // Test visibility semantics
+    process_file_group("Visibility Semantics", &[
+        "tests/import_resolution/visibility_semantics.ks",
     ]);
 
     println!("\n{}", "=".repeat(70));

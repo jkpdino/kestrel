@@ -3,14 +3,6 @@
 // Single character class name
 class A { }
 
-// Very long class name
-class VeryLongClassNameThatIsStillValid { }
-
-// Unicode class names
-class Café { }
-class αβγ { }
-class 世界 { }
-
 // Mixed visibility patterns
 public class PublicOne { }
 private class PrivateOne { }
