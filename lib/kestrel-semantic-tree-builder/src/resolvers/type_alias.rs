@@ -74,6 +74,7 @@ impl Resolver for TypeAliasResolver {
             full_span.clone(),
             visibility_behavior,
             syntactic_typed_behavior,
+            parent.cloned(),
         );
         let type_alias_arc = Arc::new(type_alias_symbol);
 

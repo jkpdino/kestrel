@@ -45,6 +45,24 @@ impl ModulePath {
             .collect()
     }
 
+    /// Extract segments with their spans from the syntax tree
+    /// Returns (name, span) pairs for each segment
+    pub fn segments_with_spans(&self) -> Vec<(String, Span)> {
+        self.identifier_tokens()
+            .map(|tok| {
+                let range = tok.text_range();
+                let span: Span = range.start().into()..range.end().into();
+                (tok.text().to_string(), span)
+            })
+            .collect()
+    }
+
+    /// Get the span of the entire module path
+    pub fn span(&self) -> Span {
+        let range = self.syntax.text_range();
+        range.start().into()..range.end().into()
+    }
+
     /// Get the number of segments in the path
     pub fn segment_count(&self) -> usize {
         self.identifier_tokens().count()

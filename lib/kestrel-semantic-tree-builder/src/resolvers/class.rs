@@ -52,7 +52,7 @@ impl Resolver for ClassResolver {
 
         // Create the class symbol with a path type
         // The path type will be resolved to a Class type during semantic analysis
-        let class_symbol = ClassSymbol::new(name, full_span.clone(), visibility_behavior);
+        let class_symbol = ClassSymbol::new(name, full_span.clone(), visibility_behavior, parent.cloned());
         let class_arc = Arc::new(class_symbol);
 
         let class_type = Ty::class(class_arc.clone(), full_span.clone());

@@ -20,15 +20,25 @@ impl Symbol<KestrelLanguage> for ClassSymbol {
 }
 
 impl ClassSymbol {
-    /// Create a new ClassSymbol with a name, span, visibility, and type
-    pub fn new(name: Name, span: Span, visibility: VisibilityBehavior) -> Self {
-        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Class)
+    /// Create a new ClassSymbol with a name, span, visibility, and optional parent
+    pub fn new(
+        name: Name,
+        span: Span,
+        visibility: VisibilityBehavior,
+        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
+    ) -> Self {
+        let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Class)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
             .with_span(span)
-            .with_behavior(Arc::new(visibility))
-            .build();
+            .with_behavior(Arc::new(visibility));
 
-        ClassSymbol { metadata }
+        if let Some(p) = parent {
+            builder = builder.with_parent(Arc::downgrade(&p));
+        }
+
+        ClassSymbol {
+            metadata: builder.build(),
+        }
     }
 }

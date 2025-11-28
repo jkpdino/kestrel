@@ -42,8 +42,10 @@ impl ImportSymbol {
 /// Import data behavior stores the parsed import information
 #[derive(Debug)]
 pub struct ImportDataBehavior {
-    /// The module path (e.g., ["A", "B", "C"] for "import A.B.C")
-    module_path: Vec<String>,
+    /// The module path with spans (e.g., [("A", 0..1), ("B", 2..3), ("C", 4..5)])
+    module_path_segments: Vec<(String, Span)>,
+    /// Span of the entire module path
+    module_path_span: Span,
     /// Optional alias for the module (e.g., "D" for "import A.B.C as D")
     alias: Option<String>,
     /// Specific items to import (e.g., [("Foo", None), ("Bar", Some("Baz"))])
@@ -58,6 +60,8 @@ pub struct ImportItem {
     pub name: String,
     /// Optional alias for this specific import
     pub alias: Option<String>,
+    /// Span of the item name in the source
+    pub span: Span,
     /// Resolved symbol ID (filled during bind phase)
     pub target_id: Option<SymbolId>,
 }
@@ -70,19 +74,32 @@ impl Behavior<KestrelLanguage> for ImportDataBehavior {
 
 impl ImportDataBehavior {
     pub fn new(
-        module_path: Vec<String>,
+        module_path_segments: Vec<(String, Span)>,
+        module_path_span: Span,
         alias: Option<String>,
         items: Vec<ImportItem>,
     ) -> Self {
         ImportDataBehavior {
-            module_path,
+            module_path_segments,
+            module_path_span,
             alias,
             items: RwLock::new(items),
         }
     }
 
-    pub fn module_path(&self) -> &[String] {
-        &self.module_path
+    /// Get the module path as a slice of segment names
+    pub fn module_path(&self) -> Vec<String> {
+        self.module_path_segments.iter().map(|(s, _)| s.clone()).collect()
+    }
+
+    /// Get the module path segments with their spans
+    pub fn module_path_segments(&self) -> &[(String, Span)] {
+        &self.module_path_segments
+    }
+
+    /// Get the span of the entire module path
+    pub fn module_path_span(&self) -> &Span {
+        &self.module_path_span
     }
 
     pub fn alias(&self) -> Option<&str> {
@@ -123,7 +140,8 @@ impl ImportDataBehavior {
 impl Clone for ImportDataBehavior {
     fn clone(&self) -> Self {
         ImportDataBehavior {
-            module_path: self.module_path.clone(),
+            module_path_segments: self.module_path_segments.clone(),
+            module_path_span: self.module_path_span.clone(),
             alias: self.alias.clone(),
             items: RwLock::new(self.items.read().expect("RwLock poisoned").clone()),
         }

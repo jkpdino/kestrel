@@ -4,7 +4,7 @@ use kestrel_semantic_tree::behavior::visibility::Visibility;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_span::Span;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxElement};
 use semantic_tree::symbol::Symbol;
 
 /// Find a child node with the specified kind
@@ -59,14 +59,45 @@ pub fn is_declaration(kind: SyntaxKind) -> bool {
     )
 }
 
-/// Get the span of a syntax node
+/// Check if a SyntaxKind is trivia (whitespace or comment)
+fn is_trivia_kind(kind: SyntaxKind) -> bool {
+    matches!(kind, SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment)
+}
+
+/// Get the span of a syntax node, excluding leading trivia
 ///
-/// NOTE: Rowan's text_range() can be incorrect when the lexer skips tokens (like comments).
-/// This is a known limitation. For now, we use text_range() as-is.
-/// A proper fix would require tracking original spans through the parser.
+/// This function computes the span of a syntax node by finding the first
+/// non-trivia token and using its start position as the span start.
+/// The end position is taken from the full text_range.
 pub fn get_node_span(node: &SyntaxNode, _source: &str) -> Span {
     let text_range = node.text_range();
-    text_range.start().into()..text_range.end().into()
+    let end: usize = text_range.end().into();
+
+    // Find the first non-trivia element to get the real start position
+    let start = find_first_non_trivia_start(node)
+        .unwrap_or_else(|| text_range.start().into());
+
+    start..end
+}
+
+/// Recursively find the start position of the first non-trivia token in a node
+fn find_first_non_trivia_start(node: &SyntaxNode) -> Option<usize> {
+    for child in node.children_with_tokens() {
+        match child {
+            SyntaxElement::Token(t) => {
+                if !is_trivia_kind(t.kind()) {
+                    return Some(t.text_range().start().into());
+                }
+            }
+            SyntaxElement::Node(n) => {
+                // Recursively check child nodes
+                if let Some(start) = find_first_non_trivia_start(&n) {
+                    return Some(start);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Parse visibility string to Visibility enum

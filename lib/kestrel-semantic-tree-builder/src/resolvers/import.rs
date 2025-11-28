@@ -6,7 +6,6 @@ use kestrel_semantic_tree::error::*;
 use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_parser::import::ImportDeclaration;
-use kestrel_parser::module::ModulePath;
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{Resolver, BindingContext};
@@ -32,9 +31,10 @@ impl Resolver for ImportResolver {
             span: get_node_span(syntax, source),
         };
 
-        // Extract module path
+        // Extract module path with spans
         let module_path_node = import_decl.path();
-        let module_path = extract_module_path(&module_path_node, source);
+        let module_path_segments = module_path_node.segments_with_spans();
+        let module_path_span = module_path_node.span();
 
         // Extract alias
         let alias = import_decl.alias();
@@ -46,7 +46,7 @@ impl Resolver for ImportResolver {
         let import_name = if let Some(ref alias) = alias {
             alias.clone()
         } else {
-            module_path.join(".")
+            module_path_segments.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join(".")
         };
 
         // NOTE: Span may be incorrect due to rowan position calculation issue
@@ -59,7 +59,7 @@ impl Resolver for ImportResolver {
         let import_arc: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(import_symbol);
 
         // Store import data in behavior for bind phase
-        let import_data = ImportDataBehavior::new(module_path, alias, items);
+        let import_data = ImportDataBehavior::new(module_path_segments, module_path_span, alias, items);
         import_arc.metadata().add_behavior(import_data);
 
         // Add to parent
@@ -87,11 +87,17 @@ impl Resolver for ImportResolver {
         // Resolve module path using query
         let module_id = match queries::resolve_module_path(
             ctx.db,
-            import_data.module_path().to_vec(),
+            import_data.module_path(),
             import_id,
         ) {
             Ok(id) => id,
-            Err(err) => {
+            Err(mut err) => {
+                // Fix up the spans in the error using the import data
+                let segments = import_data.module_path_segments();
+                err.path_span = import_data.module_path_span().clone();
+                if err.failed_segment_index < segments.len() {
+                    err.failed_segment_span = segments[err.failed_segment_index].1.clone();
+                }
                 ctx.diagnostics.throw(err, ctx.file_id);
                 return;
             }
@@ -128,13 +134,14 @@ impl Resolver for ImportResolver {
 
                             // Get cross-file diagnostic info
                             let declaration_file_id = ctx.file_id_for_symbol(&target_symbol);
-                            let declaration_span = Some(target_symbol.metadata().span());
+                            // Point to the target's name identifier, not the whole declaration
+                            let declaration_span = Some(target_symbol.metadata().name().span.clone());
 
                             ctx.diagnostics.throw(
                                 SymbolNotVisibleError {
                                     symbol_name: item.name.clone(),
                                     visibility: visibility_str,
-                                    import_span: symbol.metadata().span(),
+                                    import_span: item.span.clone(), // Point to the specific item
                                     declaration_span,
                                     declaration_file_id,
                                 },
@@ -147,7 +154,7 @@ impl Resolver for ImportResolver {
                             SymbolNotFoundInModuleError {
                                 symbol_name: item.name.clone(),
                                 module_path: import_data.module_path().to_vec(),
-                                symbol_span: symbol.metadata().span(),
+                                symbol_span: item.span.clone(), // Point to the specific item
                                 module_span: symbol.metadata().span(),
                             },
                             ctx.file_id,
@@ -168,24 +175,23 @@ impl Resolver for ImportResolver {
     }
 }
 
-/// Extract module path from ModulePath syntax node
-fn extract_module_path(module_path: &ModulePath, _source: &str) -> Vec<String> {
-    module_path.segment_names()
-}
-
 /// Extract import items from import declaration
-fn extract_import_items(import_decl: &ImportDeclaration, source: &str) -> Vec<ImportItem> {
+fn extract_import_items(import_decl: &ImportDeclaration, _source: &str) -> Vec<ImportItem> {
     import_decl
         .items()
         .into_iter()
         .filter_map(|item_node| {
-            // Get the name (first identifier)
-            let name = item_node
+            // Get the name (first identifier) and its span
+            let (name, span) = item_node
                 .children_with_tokens()
                 .find_map(|elem| {
                     elem.as_token()
                         .filter(|t| t.kind() == SyntaxKind::Identifier)
-                        .map(|t| t.text().to_string())
+                        .map(|t| {
+                            let range = t.text_range();
+                            let span: Span = range.start().into()..range.end().into();
+                            (t.text().to_string(), span)
+                        })
                 })?;
 
             // Check for alias (identifier after "as" keyword)
@@ -205,6 +211,7 @@ fn extract_import_items(import_decl: &ImportDeclaration, source: &str) -> Vec<Im
             Some(ImportItem {
                 name,
                 alias,
+                span,
                 target_id: None, // Filled during bind phase
             })
         })
@@ -283,7 +290,8 @@ fn check_whole_module_import_conflicts(
                     // For specific imports, check the items
                     for item in import_data.items() {
                         let name = item.alias.clone().unwrap_or_else(|| item.name.clone());
-                        existing_names.insert(name, (sibling.metadata().span(), true));
+                        // Use the specific item span, not the whole import statement
+                        existing_names.insert(name, (item.span.clone(), true));
                     }
 
                     // For whole-module imports without alias, we'd need to check that too
@@ -292,9 +300,10 @@ fn check_whole_module_import_conflicts(
                 }
             }
             KestrelSymbolKind::Class | KestrelSymbolKind::TypeAlias => {
-                // Local declaration
+                // Local declaration - use the name span for more precise error reporting
                 let name = sibling.metadata().name().value.clone();
-                existing_names.insert(name, (sibling.metadata().span(), false));
+                let name_span = sibling.metadata().name().span.clone();
+                existing_names.insert(name, (name_span, false));
             }
             _ => {}
         }

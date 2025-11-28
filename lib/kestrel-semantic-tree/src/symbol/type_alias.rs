@@ -23,17 +23,28 @@ impl Symbol<KestrelLanguage> for TypeAliasSymbol {
 }
 
 impl TypeAliasSymbol {
-    /// Create a new TypeAliasSymbol with a name, span, visibility, and type
-    pub fn new(name: Name, span: Span, visibility: VisibilityBehavior, ty: TypedBehavior) -> Self {
-        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::TypeAlias)
+    /// Create a new TypeAliasSymbol with a name, span, visibility, type, and optional parent
+    pub fn new(
+        name: Name,
+        span: Span,
+        visibility: VisibilityBehavior,
+        ty: TypedBehavior,
+        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
+    ) -> Self {
+        let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::TypeAlias)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
             .with_span(span)
             .with_behavior(Arc::new(visibility))
-            .with_behavior(Arc::new(ty))
-            .build();
+            .with_behavior(Arc::new(ty));
 
-        TypeAliasSymbol { metadata }
+        if let Some(p) = parent {
+            builder = builder.with_parent(Arc::downgrade(&p));
+        }
+
+        TypeAliasSymbol {
+            metadata: builder.build(),
+        }
     }
 }
 
