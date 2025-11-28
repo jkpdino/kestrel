@@ -22,14 +22,20 @@ pub fn extract_name(syntax: &SyntaxNode) -> Option<String> {
         .map(|tok| tok.text().to_string())
 }
 
+/// Check if a SyntaxKind is trivia (whitespace or comment)
+fn is_trivia(kind: SyntaxKind) -> bool {
+    matches!(kind, SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment)
+}
+
 /// Extract visibility modifier from a node with a Visibility child
 pub fn extract_visibility(syntax: &SyntaxNode) -> Option<String> {
     let visibility_node = find_child(syntax, SyntaxKind::Visibility)?;
 
+    // Skip trivia tokens
     let visibility_token = visibility_node
         .children_with_tokens()
         .filter_map(|elem| elem.into_token())
-        .next()?;
+        .find(|tok| !is_trivia(tok.kind()))?;
 
     let vis_text = match visibility_token.kind() {
         SyntaxKind::Public => "public",
@@ -52,8 +58,12 @@ pub fn is_declaration(kind: SyntaxKind) -> bool {
     )
 }
 
-/// Get the span of a syntax node by finding its text range in the source
-pub fn get_node_span(node: &SyntaxNode, source: &str) -> Span {
+/// Get the span of a syntax node
+///
+/// NOTE: Rowan's text_range() can be incorrect when the lexer skips tokens (like comments).
+/// This is a known limitation. For now, we use text_range() as-is.
+/// A proper fix would require tracking original spans through the parser.
+pub fn get_node_span(node: &SyntaxNode, _source: &str) -> Span {
     let text_range = node.text_range();
     text_range.start().into()..text_range.end().into()
 }

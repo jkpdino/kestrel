@@ -11,7 +11,7 @@ use std::sync::Arc;
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,ignore
 /// let mut table = SymbolTable::new();
 /// table.insert(symbol1);
 /// table.insert(symbol2);

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use semantic_tree::symbol::{Symbol, SymbolTable};
+use semantic_tree::symbol::Symbol;
 
 use crate::resolvers::{ClassResolver, ImportResolver, ModuleResolver, TerminalResolver, TypeAliasResolver};
 
@@ -23,7 +23,7 @@ pub trait Resolver {
     fn bind_declaration(
         &self,
         _symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-        _context: &BindingContext,
+        _context: &mut BindingContext,
     ) {
         // Default: do nothing
     }
@@ -36,10 +36,12 @@ pub trait Resolver {
 
 /// Context for the binding phase
 pub struct BindingContext<'a> {
-    /// The symbol table containing all symbols in the tree
-    pub symbol_table: &'a SymbolTable<KestrelLanguage>,
-    /// The root symbol of the semantic tree
-    pub root: &'a Arc<dyn Symbol<KestrelLanguage>>,
+    /// Salsa database for queries
+    pub db: &'a dyn crate::queries::Db,
+    /// Diagnostics collector
+    pub diagnostics: &'a mut kestrel_reporting::DiagnosticContext,
+    /// Current file ID for error reporting
+    pub file_id: usize,
 }
 
 /// Registry mapping SyntaxKind to Resolver implementations

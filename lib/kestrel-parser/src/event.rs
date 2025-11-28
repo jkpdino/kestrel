@@ -102,6 +102,8 @@ pub struct TreeBuilder<'src> {
     source: &'src str,
     events: Vec<Event>,
     pos: usize,
+    /// Current position in the source, used to emit trivia before tokens
+    source_pos: usize,
 }
 
 impl<'src> TreeBuilder<'src> {
@@ -111,6 +113,7 @@ impl<'src> TreeBuilder<'src> {
             source,
             events,
             pos: 0,
+            source_pos: 0,
         }
     }
 
@@ -122,17 +125,37 @@ impl<'src> TreeBuilder<'src> {
         SyntaxNode::new_root(green)
     }
 
+    /// Emit trivia (whitespace and comments) from source_pos to the given position
+    fn emit_trivia_until(&mut self, target_pos: usize, builder: &mut GreenNodeBuilder) {
+        if target_pos <= self.source_pos || target_pos > self.source.len() {
+            return;
+        }
+
+        let trivia = &self.source[self.source_pos..target_pos];
+        if !trivia.is_empty() {
+            // Emit as whitespace token (could be more granular)
+            builder.token(SyntaxKind::Whitespace.into(), trivia);
+        }
+        self.source_pos = target_pos;
+    }
+
     /// Process all events and build the tree
     fn process_events(&mut self, builder: &mut GreenNodeBuilder) {
         while self.pos < self.events.len() {
-            match &self.events[self.pos] {
+            // Clone the event to avoid borrow issues
+            let event = self.events[self.pos].clone();
+            match event {
                 Event::StartNode(kind) => {
-                    builder.start_node((*kind).into());
+                    builder.start_node(kind.into());
                     self.pos += 1;
                 }
                 Event::AddToken(kind, span) => {
+                    // Emit any trivia before this token
+                    self.emit_trivia_until(span.start, builder);
+
                     let text = &self.source[span.clone()];
-                    builder.token((*kind).into(), text);
+                    builder.token(kind.into(), text);
+                    self.source_pos = span.end;
                     self.pos += 1;
                 }
                 Event::FinishNode => {

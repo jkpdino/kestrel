@@ -1,0 +1,382 @@
+//! Database for semantic analysis with query caching
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::error::ModuleNotFoundError;
+use semantic_tree::symbol::{Symbol, SymbolId};
+use crate::queries::{self, Scope, Import, ImportItem, SymbolResolution};
+use crate::path_resolver;
+
+/// Thread-safe registry of all symbols in the tree
+#[derive(Debug, Clone)]
+pub struct SymbolRegistry {
+    symbols: Arc<RwLock<HashMap<SymbolId, Arc<dyn Symbol<KestrelLanguage>>>>>,
+}
+
+impl SymbolRegistry {
+    pub fn new() -> Self {
+        Self {
+            symbols: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Register a single symbol (called during build phase)
+    pub fn register(&self, symbol: Arc<dyn Symbol<KestrelLanguage>>) {
+        let id = symbol.metadata().id();
+        self.symbols
+            .write()
+            .expect("RwLock poisoned")
+            .insert(id, symbol);
+    }
+
+    /// Get symbol by ID
+    pub fn get(&self, id: SymbolId) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+        self.symbols.read().expect("RwLock poisoned").get(&id).cloned()
+    }
+
+    /// Register entire symbol tree recursively
+    pub fn register_tree(&self, root: &Arc<dyn Symbol<KestrelLanguage>>) {
+        self.register(root.clone());
+        for child in root.metadata().children() {
+            self.register_tree(&child);
+        }
+    }
+
+    /// Get total number of registered symbols (for debugging)
+    pub fn len(&self) -> usize {
+        self.symbols.read().expect("RwLock poisoned").len()
+    }
+
+    /// Check if registry is empty
+    pub fn is_empty(&self) -> bool {
+        self.symbols.read().expect("RwLock poisoned").is_empty()
+    }
+
+    /// Iterate over all symbols (for module path resolution)
+    pub fn iter(&self) -> impl Iterator<Item = (SymbolId, Arc<dyn Symbol<KestrelLanguage>>)> + '_ {
+        SymbolRegistryIter {
+            guard: self.symbols.read().expect("RwLock poisoned"),
+            keys: None,
+        }
+    }
+}
+
+/// Iterator over symbol registry
+struct SymbolRegistryIter<'a> {
+    guard: std::sync::RwLockReadGuard<'a, HashMap<SymbolId, Arc<dyn Symbol<KestrelLanguage>>>>,
+    keys: Option<Vec<SymbolId>>,
+}
+
+impl<'a> Iterator for SymbolRegistryIter<'a> {
+    type Item = (SymbolId, Arc<dyn Symbol<KestrelLanguage>>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.keys.is_none() {
+            self.keys = Some(self.guard.keys().copied().collect());
+        }
+        let keys = self.keys.as_mut()?;
+        let id = keys.pop()?;
+        self.guard.get(&id).map(|s| (id, s.clone()))
+    }
+}
+
+impl Default for SymbolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Database for semantic queries with caching
+pub struct SemanticDatabase {
+    /// Symbol registry (input to queries)
+    registry: SymbolRegistry,
+    /// Cache for scope queries
+    scope_cache: RwLock<HashMap<SymbolId, Arc<Scope>>>,
+}
+
+impl SemanticDatabase {
+    /// Create a new database with the given symbol registry
+    pub fn new(registry: SymbolRegistry) -> Self {
+        Self {
+            registry,
+            scope_cache: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Get the symbol registry
+    pub fn registry(&self) -> &SymbolRegistry {
+        &self.registry
+    }
+
+    /// Get symbol by ID (public delegation)
+    pub fn symbol_by_id(&self, id: SymbolId) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+        queries::Db::symbol_by_id(self, id)
+    }
+
+    /// Get scope for a symbol (public delegation)
+    pub fn scope_for(&self, symbol_id: SymbolId) -> Arc<Scope> {
+        queries::Db::scope_for(self, symbol_id)
+    }
+
+    /// Get imports in scope (public delegation)
+    pub fn imports_in_scope(&self, symbol_id: SymbolId) -> Vec<Arc<Import>> {
+        queries::Db::imports_in_scope(self, symbol_id)
+    }
+
+    /// Check visibility (public delegation)
+    pub fn is_visible_from(&self, target: SymbolId, context: SymbolId) -> bool {
+        queries::Db::is_visible_from(self, target, context)
+    }
+
+    /// Resolve module path (public delegation)
+    pub fn resolve_module_path(
+        &self,
+        path: Vec<String>,
+        context: SymbolId,
+    ) -> Result<SymbolId, ModuleNotFoundError> {
+        queries::Db::resolve_module_path(self, path, context)
+    }
+
+    /// Compute scope for a symbol (internal implementation)
+    fn compute_scope(&self, symbol_id: SymbolId) -> Arc<Scope> {
+        let symbol = self.symbol_by_id(symbol_id).expect("symbol must exist");
+
+        // Get imports using imports_in_scope query
+        let imports_data = self.imports_in_scope(symbol_id);
+        let mut imports = HashMap::new();
+
+        for import in imports_data.iter() {
+            // Process specific import items
+            for item in &import.items {
+                if let Some(target_id) = item.target_id {
+                    let name = item.alias.as_ref().unwrap_or(&item.name);
+                    imports
+                        .entry(name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(target_id);
+                }
+            }
+
+            // Handle whole-module imports
+            if import.items.is_empty() {
+                if let Some(alias) = &import.alias {
+                    // import A.B.C as D
+                    if let Ok(module_id) = self.resolve_module_path(import.module_path.clone(), symbol_id)
+                    {
+                        imports
+                            .entry(alias.clone())
+                            .or_insert_with(Vec::new)
+                            .push(module_id);
+                    }
+                } else {
+                    // import A.B.C → import all visible symbols
+                    if let Ok(module_id) = self.resolve_module_path(import.module_path.clone(), symbol_id)
+                    {
+                        let module_scope = self.scope_for(module_id);
+
+                        // Import all visible declarations from module
+                        for (name, ids) in &module_scope.declarations {
+                            for &decl_id in ids {
+                                // Check visibility
+                                if self.is_visible_from(decl_id, symbol_id) {
+                                    imports
+                                        .entry(name.clone())
+                                        .or_insert_with(Vec::new)
+                                        .push(decl_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Get declarations (children that aren't imports)
+        let declarations = symbol
+            .metadata()
+            .children()
+            .into_iter()
+            .filter(|c| !matches!(c.metadata().kind(), KestrelSymbolKind::Import))
+            .fold(HashMap::new(), |mut map, child| {
+                map.entry(child.metadata().name().value.clone())
+                    .or_insert_with(Vec::new)
+                    .push(child.metadata().id());
+                map
+            });
+
+        Arc::new(Scope {
+            symbol_id,
+            imports,
+            declarations,
+            parent: symbol.metadata().parent().map(|p| p.metadata().id()),
+        })
+    }
+}
+
+// Implement the Db trait
+impl queries::Db for SemanticDatabase {
+    fn symbol_by_id(&self, id: SymbolId) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+        self.registry.get(id)
+    }
+
+    fn scope_for(&self, symbol_id: SymbolId) -> Arc<Scope> {
+        // Check cache first
+        {
+            let cache = self.scope_cache.read().expect("RwLock poisoned");
+            if let Some(scope) = cache.get(&symbol_id) {
+                return scope.clone();
+            }
+        }
+
+        // Compute scope
+        let scope = self.compute_scope(symbol_id);
+
+        // Cache result
+        {
+            let mut cache = self.scope_cache.write().expect("RwLock poisoned");
+            cache.insert(symbol_id, scope.clone());
+        }
+
+        scope
+    }
+
+    fn resolve_name(&self, name: String, context: SymbolId) -> SymbolResolution {
+        let mut current = Some(context);
+
+        // Walk up scope chain
+        while let Some(id) = current {
+            let scope = self.scope_for(id);
+
+            // Check imports first
+            if let Some(imported) = scope.imports.get(&name) {
+                return if imported.len() == 1 {
+                    SymbolResolution::Found(imported.clone())
+                } else {
+                    SymbolResolution::Ambiguous(imported.clone())
+                };
+            }
+
+            // Check declarations
+            if let Some(declared) = scope.declarations.get(&name) {
+                return if declared.len() == 1 {
+                    SymbolResolution::Found(declared.clone())
+                } else {
+                    SymbolResolution::Ambiguous(declared.clone())
+                };
+            }
+
+            current = scope.parent;
+        }
+
+        SymbolResolution::NotFound
+    }
+
+    fn imports_in_scope(&self, symbol_id: SymbolId) -> Vec<Arc<Import>> {
+        let symbol = self.symbol_by_id(symbol_id).expect("symbol must exist");
+
+        // Find import symbols and extract their ImportDataBehavior
+        symbol
+            .metadata()
+            .children()
+            .into_iter()
+            .filter(|c| matches!(c.metadata().kind(), KestrelSymbolKind::Import))
+            .filter_map(|import_symbol| {
+                queries::get_import_data(&import_symbol).map(|data| {
+                    Arc::new(Import {
+                        module_path: data.module_path().to_vec(),
+                        alias: data.alias().map(|s| s.to_string()),
+                        items: data
+                            .items()
+                            .iter()
+                            .map(|i| ImportItem {
+                                name: i.name.clone(),
+                                alias: i.alias.clone(),
+                                target_id: i.target_id,
+                            })
+                            .collect(),
+                    })
+                })
+            })
+            .collect()
+    }
+
+    fn is_visible_from(&self, target: SymbolId, context: SymbolId) -> bool {
+        let target_symbol = self.symbol_by_id(target).expect("target symbol must exist");
+        let context_symbol = self
+            .symbol_by_id(context)
+            .expect("context symbol must exist");
+
+        // Use existing visibility logic
+        path_resolver::is_visible_from(&target_symbol, &context_symbol)
+    }
+
+    fn resolve_module_path(
+        &self,
+        path: Vec<String>,
+        _context: SymbolId,
+    ) -> Result<SymbolId, ModuleNotFoundError> {
+        if path.is_empty() {
+            return Err(ModuleNotFoundError {
+                path: vec![],
+                failed_segment_index: 0,
+                path_span: 0..0,
+                failed_segment_span: 0..0,
+            });
+        }
+
+        // Simple approach: search all registered symbols for matching module name
+        // Import paths are always absolute from the root
+        // For a path like "Library", we search for a Module symbol named "Library"
+        // For a path like "Library.Sub", we find "Library" then look for "Sub" in its children
+
+        // Find first segment - search all symbols for a top-level module
+        let first_segment = &path[0];
+        let mut current_symbol: Option<Arc<dyn Symbol<KestrelLanguage>>> = None;
+
+        // Search all registered symbols for a module with the first name
+        for (_id, symbol) in self.registry.iter() {
+            if symbol.metadata().kind() == KestrelSymbolKind::Module
+                && symbol.metadata().name().value == *first_segment
+            {
+                current_symbol = Some(symbol.clone());
+                break;
+            }
+        }
+
+        let mut current = match current_symbol {
+            Some(s) => s,
+            None => {
+                return Err(ModuleNotFoundError {
+                    path: path.clone(),
+                    failed_segment_index: 0,
+                    path_span: 0..0,
+                    failed_segment_span: 0..0,
+                });
+            }
+        };
+
+        // Resolve remaining segments by searching visible children
+        for (index, segment) in path.iter().enumerate().skip(1) {
+            let found = current
+                .metadata()
+                .visible_children()
+                .into_iter()
+                .find(|child| child.metadata().name().value == *segment);
+            match found {
+                Some(child) => current = child,
+                None => {
+                    return Err(ModuleNotFoundError {
+                        path: path.clone(),
+                        failed_segment_index: index,
+                        path_span: 0..0,
+                        failed_segment_span: 0..0,
+                    });
+                }
+            }
+        }
+
+        Ok(current.metadata().id())
+    }
+}

@@ -110,9 +110,12 @@ pub enum SyntaxKind {
     Star,
     Slash,
 
-    // Special
+    // Trivia (whitespace and comments)
     Whitespace,
-    Comment,
+    LineComment,
+    BlockComment,
+
+    // Special
     Error,
 }
 
@@ -125,12 +128,18 @@ impl From<SyntaxKind> for rowan::SyntaxKind {
 impl From<Token> for SyntaxKind {
     fn from(token: Token) -> Self {
         match token {
+            // Trivia
+            Token::Whitespace => SyntaxKind::Whitespace,
+            Token::LineComment => SyntaxKind::LineComment,
+            Token::BlockComment => SyntaxKind::BlockComment,
+            // Literals
             Token::Identifier => SyntaxKind::Identifier,
             Token::String => SyntaxKind::String,
             Token::Integer => SyntaxKind::Integer,
             Token::Float => SyntaxKind::Float,
             Token::Boolean => SyntaxKind::Boolean,
             Token::Null => SyntaxKind::Null,
+            // Keywords
             Token::As => SyntaxKind::As,
             Token::Class => SyntaxKind::Class,
             Token::Else => SyntaxKind::Else,
@@ -144,24 +153,26 @@ impl From<Token> for SyntaxKind {
             Token::Private => SyntaxKind::Private,
             Token::Public => SyntaxKind::Public,
             Token::Type => SyntaxKind::Type,
+            // Braces
             Token::LParen => SyntaxKind::LParen,
             Token::RParen => SyntaxKind::RParen,
             Token::LBrace => SyntaxKind::LBrace,
             Token::RBrace => SyntaxKind::RBrace,
             Token::LBracket => SyntaxKind::LBracket,
             Token::RBracket => SyntaxKind::RBracket,
+            // Punctuation
             Token::Semicolon => SyntaxKind::Semicolon,
             Token::Comma => SyntaxKind::Comma,
             Token::Dot => SyntaxKind::Dot,
             Token::Colon => SyntaxKind::Colon,
             Token::Bang => SyntaxKind::Bang,
+            // Operators
             Token::Equals => SyntaxKind::Equals,
             Token::Plus => SyntaxKind::Plus,
             Token::Minus => SyntaxKind::Minus,
             Token::Arrow => SyntaxKind::Arrow,
             Token::Star => SyntaxKind::Star,
             Token::Slash => SyntaxKind::Slash,
-            Token::BlockCommentStart => SyntaxKind::Comment,
         }
     }
 }
@@ -233,7 +244,8 @@ impl Language for KestrelLanguage {
         const STAR: u16 = SyntaxKind::Star as u16;
         const SLASH: u16 = SyntaxKind::Slash as u16;
         const WHITESPACE: u16 = SyntaxKind::Whitespace as u16;
-        const COMMENT: u16 = SyntaxKind::Comment as u16;
+        const LINE_COMMENT: u16 = SyntaxKind::LineComment as u16;
+        const BLOCK_COMMENT: u16 = SyntaxKind::BlockComment as u16;
 
         match raw.0 {
             ROOT => SyntaxKind::Root,
@@ -295,7 +307,8 @@ impl Language for KestrelLanguage {
             STAR => SyntaxKind::Star,
             SLASH => SyntaxKind::Slash,
             WHITESPACE => SyntaxKind::Whitespace,
-            COMMENT => SyntaxKind::Comment,
+            LINE_COMMENT => SyntaxKind::LineComment,
+            BLOCK_COMMENT => SyntaxKind::BlockComment,
             _ => SyntaxKind::Error,
         }
     }

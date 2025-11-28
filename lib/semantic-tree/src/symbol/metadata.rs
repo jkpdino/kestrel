@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock, Weak};
 
 use kestrel_span::{Name, Span};
 
-use crate::{behavior::Behavior, language::Language, symbol::{Symbol, SymbolId}};
+use crate::{behavior::Behavior, language::{Language, SymbolKind}, symbol::{Symbol, SymbolId}};
 
 #[derive(Debug)]
 pub struct SymbolMetadata<L: Language> {
@@ -39,6 +39,24 @@ impl<L: Language> SymbolMetadata<L> {
         };
 
         return children.clone();
+    }
+
+    /// Returns children visible for name resolution, flattening through transparent symbols.
+    ///
+    /// Transparent symbols (like SourceFile) are not directly visible in name lookups;
+    /// instead, their children are surfaced. This method recursively flattens through
+    /// any transparent symbols to return only the symbols that participate in name resolution.
+    pub fn visible_children(&self) -> Vec<Arc<dyn Symbol<L>>> {
+        self.children()
+            .into_iter()
+            .flat_map(|child| {
+                if child.metadata().kind().is_transparent() {
+                    child.metadata().visible_children()
+                } else {
+                    vec![child]
+                }
+            })
+            .collect()
     }
 
     pub fn add_child(&self, child: &Arc<dyn Symbol<L>>) {

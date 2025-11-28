@@ -143,17 +143,28 @@ pub struct SymbolNotVisibleError {
     pub symbol_name: String,
     /// The symbol's visibility level
     pub visibility: String,
-    /// Span of the import
+    /// Span of the import statement
     pub import_span: Span,
+    /// Span of the symbol's declaration (where visibility is declared)
+    pub declaration_span: Option<Span>,
 }
 
 impl IntoDiagnostic for SymbolNotVisibleError {
     fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let mut labels = vec![
+            Label::primary(file_id, self.import_span.clone())
+                .with_message(format!("'{}' is {}", self.symbol_name, self.visibility)),
+        ];
+
+        if let Some(decl_span) = &self.declaration_span {
+            labels.push(
+                Label::secondary(file_id, decl_span.clone())
+                    .with_message(format!("'{}' declared as {} here", self.symbol_name, self.visibility)),
+            );
+        }
+
         Diagnostic::error()
             .with_message(format!("'{}' is not accessible", self.symbol_name))
-            .with_labels(vec![
-                Label::primary(file_id, self.import_span.clone())
-                    .with_message(format!("this symbol is {}", self.visibility)),
-            ])
+            .with_labels(labels)
     }
 }

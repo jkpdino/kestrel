@@ -1,5 +1,7 @@
+mod db;
 mod diagnostics;
 pub mod path_resolver;
+mod queries;
 mod resolver;
 mod resolvers;
 pub mod type_builder;
@@ -19,10 +21,11 @@ use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder, SymbolTable};
 
+use crate::db::{SemanticDatabase, SymbolRegistry};
 use crate::diagnostics::{
     ModuleNotFirstError, MultipleModuleDeclarationsError, NoModuleDeclarationError,
 };
-use crate::resolver::ResolverRegistry;
+use crate::resolver::{BindingContext, ResolverRegistry};
 
 /// Represents the root of a semantic tree
 pub struct SemanticTree {
@@ -344,16 +347,14 @@ fn walk_node(
 ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
     // Look up resolver for this syntax kind
     if let Some(resolver) = registry.get(syntax.kind()) {
-        // Check if terminal - if so, stop here
-        if resolver.is_terminal() {
-            return None;
-        }
-
         // Resolver creates symbol and adds to parent
         if let Some(symbol) = resolver.build_declaration(syntax, source, parent, root) {
-            // Walk children
-            for child in syntax.children() {
-                walk_node(&child, source, Some(&symbol), root, registry);
+            // Check if terminal - if so, don't walk children (but still return the symbol)
+            if !resolver.is_terminal() {
+                // Walk children
+                for child in syntax.children() {
+                    walk_node(&child, source, Some(&symbol), root, registry);
+                }
             }
             return Some(symbol);
         }
@@ -365,6 +366,76 @@ fn walk_node(
     }
 
     None
+}
+
+/// Run the binding phase on the semantic tree
+///
+/// This resolves all imports and checks visibility. Should be called after
+/// all files have been added to the tree.
+pub fn bind_tree(
+    tree: &SemanticTree,
+    diagnostics: &mut DiagnosticContext,
+    _file_id: usize,
+) {
+    // Build the symbol registry from the tree
+    let registry = SymbolRegistry::new();
+    registry.register_tree(tree.root());
+
+    // Create the database
+    let db = SemanticDatabase::new(registry);
+
+    // Get the resolver registry to find resolvers
+    let resolver_registry = ResolverRegistry::new();
+
+    // Walk all symbols and call bind_declaration
+    // Note: file_id is determined per-symbol based on parent SourceFile
+    bind_symbol(tree.root(), &db, diagnostics, &resolver_registry, 0);
+}
+
+/// Recursively bind a symbol and its children
+fn bind_symbol(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    db: &SemanticDatabase,
+    diagnostics: &mut DiagnosticContext,
+    registry: &ResolverRegistry,
+    current_file_id: usize,
+) {
+    // Find resolver for this symbol kind and call bind_declaration
+    let kind = symbol.metadata().kind();
+
+    // Track file_id - when we enter a SourceFile, update the file_id
+    let file_id = if kind == KestrelSymbolKind::SourceFile {
+        // Look up file_id based on source file name
+        let file_name = symbol.metadata().name().value.clone();
+        diagnostics.get_file_id(&file_name).unwrap_or(current_file_id)
+    } else {
+        current_file_id
+    };
+
+    // Map symbol kind to syntax kind for resolver lookup
+    let syntax_kind = match kind {
+        KestrelSymbolKind::Import => Some(SyntaxKind::ImportDeclaration),
+        KestrelSymbolKind::Class => Some(SyntaxKind::ClassDeclaration),
+        KestrelSymbolKind::Module => Some(SyntaxKind::ModuleDeclaration),
+        KestrelSymbolKind::TypeAlias => Some(SyntaxKind::TypeAliasDeclaration),
+        KestrelSymbolKind::SourceFile => None,
+    };
+
+    if let Some(sk) = syntax_kind {
+        if let Some(resolver) = registry.get(sk) {
+            let mut ctx = BindingContext {
+                db,
+                diagnostics,
+                file_id,
+            };
+            resolver.bind_declaration(symbol, &mut ctx);
+        }
+    }
+
+    // Recursively bind children
+    for child in symbol.metadata().children() {
+        bind_symbol(&child, db, diagnostics, registry, file_id);
+    }
 }
 
 /// Print the semantic tree (shows symbol hierarchy)
@@ -468,6 +539,31 @@ fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
                     }
                     KestrelBehaviorKind::TypeAliasTyped => {
                         format!("{:?}", b.kind())
+                    }
+                    KestrelBehaviorKind::ImportData => {
+                        use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
+                        if let Some(import_data) = b.as_ref().downcast_ref::<ImportDataBehavior>() {
+                            let path = import_data.module_path().join(".");
+                            let items = import_data.items();
+                            if items.is_empty() {
+                                if let Some(alias) = import_data.alias() {
+                                    format!("Import({} as {})", path, alias)
+                                } else {
+                                    format!("Import({})", path)
+                                }
+                            } else {
+                                let item_strs: Vec<String> = items.iter().map(|i| {
+                                    if let Some(alias) = &i.alias {
+                                        format!("{} as {}", i.name, alias)
+                                    } else {
+                                        i.name.clone()
+                                    }
+                                }).collect();
+                                format!("Import({}.({}))", path, item_strs.join(", "))
+                            }
+                        } else {
+                            format!("{:?}", b.kind())
+                        }
                     }
                 }
             })

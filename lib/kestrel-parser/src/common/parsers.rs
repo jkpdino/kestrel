@@ -7,6 +7,39 @@ use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 
+/// Check if a token is trivia (whitespace or comment)
+pub fn is_trivia(token: &Token) -> bool {
+    matches!(token, Token::Whitespace | Token::LineComment | Token::BlockComment)
+}
+
+/// Parser that skips trivia tokens
+pub fn skip_trivia() -> impl Parser<Token, (), Error = Simple<Token>> + Clone {
+    filter(|token: &Token| is_trivia(token))
+        .repeated()
+        .ignored()
+}
+
+/// Wrap a parser to skip leading trivia
+pub fn trivia<P, O>(parser: P) -> impl Parser<Token, O, Error = Simple<Token>> + Clone
+where
+    P: Parser<Token, O, Error = Simple<Token>> + Clone,
+{
+    skip_trivia().ignore_then(parser)
+}
+
+/// Match a specific token, skipping leading trivia
+pub fn token(t: Token) -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
+    trivia(just(t).map_with_span(|_, span| span))
+}
+
+/// Parse an identifier, skipping leading trivia
+pub fn identifier() -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
+    trivia(filter_map(|span, token| match token {
+        Token::Identifier => Ok(span),
+        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+    }))
+}
+
 /// Internal Chumsky parser for module path segments
 ///
 /// Parses identifier sequences separated by dots: A.B.C
@@ -16,12 +49,9 @@ use kestrel_span::Span;
 /// - `A` → `[span(A)]`
 /// - `A.B.C` → `[span(A), span(B), span(C)]`
 pub fn module_path_parser_internal() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
-    filter_map(|span, token| match token {
-        Token::Identifier => Ok(span),
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    })
-    .separated_by(just(Token::Dot))
-    .at_least(1)
+    identifier()
+        .separated_by(token(Token::Dot))
+        .at_least(1)
 }
 
 /// Internal Chumsky parser for optional visibility modifier
@@ -34,12 +64,12 @@ pub fn module_path_parser_internal() -> impl Parser<Token, Vec<Span>, Error = Si
 /// - `class Foo` → `None`
 pub fn visibility_parser_internal(
 ) -> impl Parser<Token, Option<(Token, Span)>, Error = Simple<Token>> + Clone {
-    filter_map(|span, token| match token {
+    trivia(filter_map(|span, token| match token {
         Token::Public | Token::Private | Token::Internal | Token::Fileprivate => {
             Ok((token, span))
         }
         _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    })
+    }))
     .or_not()
 }
 
@@ -52,8 +82,7 @@ pub fn visibility_parser_internal(
 /// - `module A` → `(span(module), [span(A)])`
 /// - `module A.B.C` → `(span(module), [span(A), span(B), span(C)])`
 pub fn module_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Span>), Error = Simple<Token>> + Clone {
-    just(Token::Module)
-        .map_with_span(|_, span| span)
+    token(Token::Module)
         .then(module_path_parser_internal())
 }
 
@@ -67,18 +96,12 @@ pub fn module_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Spa
 /// - `Foo` → `(span(Foo), None)`
 /// - `Foo as Bar` → `(span(Foo), Some(span(Bar)))`
 pub fn import_item_parser_internal() -> impl Parser<Token, (Span, Option<Span>), Error = Simple<Token>> + Clone {
-    filter_map(|span, token| match token {
-        Token::Identifier => Ok(span),
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    })
-    .then(
-        just(Token::As)
-            .ignore_then(filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            }))
-            .or_not()
-    )
+    identifier()
+        .then(
+            token(Token::As)
+                .ignore_then(identifier())
+                .or_not()
+        )
 }
 
 /// Internal parser for import items list
@@ -90,13 +113,13 @@ pub fn import_item_parser_internal() -> impl Parser<Token, (Span, Option<Span>),
 /// - `(D, E)` → `[(span(D), None), (span(E), None)]`
 /// - `(D as E, F)` → `[(span(D), Some(span(E))), (span(F), None)]`
 pub fn import_items_parser_internal() -> impl Parser<Token, Vec<(Span, Option<Span>)>, Error = Simple<Token>> + Clone {
-    just(Token::LParen)
+    token(Token::LParen)
         .ignore_then(
             import_item_parser_internal()
-                .separated_by(just(Token::Comma))
+                .separated_by(token(Token::Comma))
                 .at_least(1)
         )
-        .then_ignore(just(Token::RParen))
+        .then_ignore(token(Token::RParen))
 }
 
 /// Internal parser for import declaration
@@ -114,19 +137,15 @@ pub fn import_items_parser_internal() -> impl Parser<Token, Vec<(Span, Option<Sp
 /// - `import A.B.C as D` → `(span(import), [span(A), span(B), span(C)], Some(span(D)), None)`
 /// - `import A.B.C.(D, E)` → `(span(import), [span(A), span(B), span(C)], None, Some([...]))`
 pub fn import_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>), Error = Simple<Token>> + Clone {
-    just(Token::Import)
-        .map_with_span(|_, span| span)
+    token(Token::Import)
         .then(module_path_parser_internal())
         .then(
             // Optional: either "as Alias" or ".(items)"
-            just(Token::As)
-                .ignore_then(filter_map(|span, token| match token {
-                    Token::Identifier => Ok(span),
-                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-                }))
+            token(Token::As)
+                .ignore_then(identifier())
                 .map(|alias| (Some(alias), None))
                 .or(
-                    just(Token::Dot)
+                    token(Token::Dot)
                         .ignore_then(import_items_parser_internal())
                         .map(|items| (None, Some(items)))
                 )

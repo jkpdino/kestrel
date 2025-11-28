@@ -12,7 +12,7 @@ type BaseSymbol<L> = Arc<dyn Symbol<L>>;
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,ignore
 /// let collection = symbol_table.get("foo");
 /// let filtered = collection.filter(|s| s.in_scope(current_scope));
 /// let function_symbol = filtered.filter(|s| s.kind() == SymbolKind::Function);

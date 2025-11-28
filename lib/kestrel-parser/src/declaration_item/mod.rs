@@ -55,6 +55,8 @@ enum DeclarationItemData {
 
 /// Internal Chumsky parser for a single declaration item
 fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData, Error = Simple<Token>> + Clone {
+    use crate::common::{token, identifier};
+
     recursive(|declaration_item| {
         let module_parser = module_declaration_parser_internal()
             .map(|(span, path)| DeclarationItemData::Module(span, path));
@@ -63,30 +65,21 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
             .map(|(import_span, path, alias, items)| DeclarationItemData::Import(import_span, path, alias, items));
 
         let class_parser = visibility_parser_internal()
-            .then(just(Token::Class).map_with_span(|_, span| span))
-            .then(filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            }))
-            .then(just(Token::LBrace).map_with_span(|_, span| span))
+            .then(token(Token::Class))
+            .then(identifier())
+            .then(token(Token::LBrace))
             .then(declaration_item.repeated())
-            .then(just(Token::RBrace).map_with_span(|_, span| span))
+            .then(token(Token::RBrace))
             .map(|(((((visibility, class_span), name_span), lbrace_span), body), rbrace_span)| {
                 DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span)
             });
 
         let type_alias_parser = visibility_parser_internal()
-            .then(just(Token::Type).map_with_span(|_, span| span))
-            .then(filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            }))
-            .then(just(Token::Equals).map_with_span(|_, span| span))
-            .then(filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            }))
-            .then(just(Token::Semicolon).map_with_span(|_, span| span))
+            .then(token(Token::Type))
+            .then(identifier())
+            .then(token(Token::Equals))
+            .then(identifier())
+            .then(token(Token::Semicolon))
             .map(|(((((visibility, type_span), name_span), equals_span), aliased_type_span), semicolon_span)| {
                 DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span)
             });
@@ -102,9 +95,12 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
 /// continue attempting to parse subsequent declarations. This allows the parser to report
 /// multiple errors in a single pass.
 fn declaration_items_parser_internal() -> impl Parser<Token, Vec<DeclarationItemData>, Error = Simple<Token>> + Clone {
+    use crate::common::skip_trivia;
+
     declaration_item_parser_internal()
         .repeated()
         .at_least(0)
+        .then_ignore(skip_trivia()) // Skip any trailing trivia
 }
 
 /// Parse a declaration item and emit events

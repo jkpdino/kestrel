@@ -1,13 +1,10 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::{Symbol, SymbolTable};
-
-#[cfg(test)]
-use kestrel_semantic_tree::behavior::visibility::Visibility;
 
 // Error type for future error handling
 // Uncomment when adding proper error handling
@@ -79,7 +76,7 @@ fn is_ancestor(
 ///
 /// Uses the visibility scope stored in VisibilityBehavior to determine if
 /// the symbol is accessible from the given context.
-fn is_visible_from(
+pub fn is_visible_from(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     context: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> bool {
@@ -95,17 +92,33 @@ fn is_visible_from(
         return true;
     };
 
-    // Get the visibility scope - this is where the symbol is accessible
-    let visibility_scope = visibility_behavior.visibility_scope();
-
-    // Check if the context is within the visibility scope
-    // The context is visible if it's the scope itself or a descendant of the scope
-    if Arc::ptr_eq(context, visibility_scope) {
-        return true;
+    // Check the visibility level
+    match visibility_behavior.visibility() {
+        Some(Visibility::Public) => {
+            // Public symbols are visible everywhere
+            return true;
+        }
+        Some(Visibility::Private) => {
+            // Private symbols are only visible within the visibility scope
+            let visibility_scope = visibility_behavior.visibility_scope();
+            return Arc::ptr_eq(context, visibility_scope) || is_ancestor(visibility_scope, context);
+        }
+        Some(Visibility::Internal) => {
+            // Internal symbols are visible within the same module
+            // For now, treat as always visible (module-level checking requires more info)
+            return true;
+        }
+        Some(Visibility::Fileprivate) => {
+            // File-private symbols are visible within the same file
+            // For now, treat as visible if in same SourceFile
+            let visibility_scope = visibility_behavior.visibility_scope();
+            return Arc::ptr_eq(context, visibility_scope) || is_ancestor(visibility_scope, context);
+        }
+        None => {
+            // Default visibility (internal) - visible everywhere for now
+            return true;
+        }
     }
-
-    // Check if context is a descendant of the visibility scope
-    is_ancestor(visibility_scope, context)
 }
 
 /// Resolve a type path like A.B.C to a Type
