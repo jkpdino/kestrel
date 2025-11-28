@@ -4,6 +4,7 @@ use semantic_tree::language::SymbolKind;
 pub enum KestrelSymbolKind {
     Class,
     Field,
+    Function,
     Import,
     Module,
     SourceFile,

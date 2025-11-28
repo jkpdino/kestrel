@@ -1,5 +1,6 @@
 pub mod class;
 pub mod field;
+pub mod function;
 pub mod import;
 pub mod kind;
 pub mod module;

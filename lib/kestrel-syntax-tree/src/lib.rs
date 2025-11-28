@@ -51,6 +51,11 @@ pub enum SyntaxKind {
     TypeAliasDeclaration,
     AliasedType,
     FieldDeclaration,
+    FunctionDeclaration,
+    FunctionBody,
+    ParameterList,
+    Parameter,
+    ReturnType,
     Visibility,
     StaticModifier,
 
@@ -210,6 +215,11 @@ impl Language for KestrelLanguage {
         const TYPE_ALIAS_DECLARATION: u16 = SyntaxKind::TypeAliasDeclaration as u16;
         const ALIASED_TYPE: u16 = SyntaxKind::AliasedType as u16;
         const FIELD_DECLARATION: u16 = SyntaxKind::FieldDeclaration as u16;
+        const FUNCTION_DECLARATION: u16 = SyntaxKind::FunctionDeclaration as u16;
+        const FUNCTION_BODY: u16 = SyntaxKind::FunctionBody as u16;
+        const PARAMETER_LIST: u16 = SyntaxKind::ParameterList as u16;
+        const PARAMETER: u16 = SyntaxKind::Parameter as u16;
+        const RETURN_TYPE: u16 = SyntaxKind::ReturnType as u16;
         const VISIBILITY: u16 = SyntaxKind::Visibility as u16;
         const STATIC_MODIFIER: u16 = SyntaxKind::StaticModifier as u16;
         const TY: u16 = SyntaxKind::Ty as u16;
@@ -280,6 +290,11 @@ impl Language for KestrelLanguage {
             TYPE_ALIAS_DECLARATION => SyntaxKind::TypeAliasDeclaration,
             ALIASED_TYPE => SyntaxKind::AliasedType,
             FIELD_DECLARATION => SyntaxKind::FieldDeclaration,
+            FUNCTION_DECLARATION => SyntaxKind::FunctionDeclaration,
+            FUNCTION_BODY => SyntaxKind::FunctionBody,
+            PARAMETER_LIST => SyntaxKind::ParameterList,
+            PARAMETER => SyntaxKind::Parameter,
+            RETURN_TYPE => SyntaxKind::ReturnType,
             VISIBILITY => SyntaxKind::Visibility,
             STATIC_MODIFIER => SyntaxKind::StaticModifier,
             TY => SyntaxKind::Ty,

@@ -594,6 +594,7 @@ fn bind_symbol(
         KestrelSymbolKind::Class => Some(SyntaxKind::ClassDeclaration),
         KestrelSymbolKind::Struct => Some(SyntaxKind::StructDeclaration),
         KestrelSymbolKind::Field => Some(SyntaxKind::FieldDeclaration),
+        KestrelSymbolKind::Function => Some(SyntaxKind::FunctionDeclaration),
         KestrelSymbolKind::Module => Some(SyntaxKind::ModuleDeclaration),
         KestrelSymbolKind::TypeAlias => Some(SyntaxKind::TypeAliasDeclaration),
         KestrelSymbolKind::SourceFile => None,
