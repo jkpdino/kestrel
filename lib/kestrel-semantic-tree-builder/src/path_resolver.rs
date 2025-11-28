@@ -245,7 +245,7 @@ mod tests {
         let class_name = Name::new("MyClass".to_string(), 0..7);
         let visibility = VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
 
-        let class_symbol = ClassSymbol::new(class_name, 0..20, visibility);
+        let class_symbol = ClassSymbol::new(class_name, 0..20, visibility, None);
         let class_arc = Arc::new(class_symbol);
 
         // Add TypedBehavior after creation (following the pattern in resolvers/class.rs)
@@ -295,7 +295,7 @@ mod tests {
         let outer_name = Name::new("Outer".to_string(), 0..5);
         let outer_visibility =
             VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
-        let outer_symbol = ClassSymbol::new(outer_name, 0..50, outer_visibility);
+        let outer_symbol = ClassSymbol::new(outer_name, 0..50, outer_visibility, None);
         let outer_arc = Arc::new(outer_symbol);
 
         // Add TypedBehavior to outer class
@@ -309,7 +309,7 @@ mod tests {
         let inner_name = Name::new("Inner".to_string(), 10..15);
         let inner_visibility =
             VisibilityBehavior::new(Some(Visibility::Public), 10..16, root.clone());
-        let inner_symbol = ClassSymbol::new(inner_name, 10..40, inner_visibility);
+        let inner_symbol = ClassSymbol::new(inner_name, 10..40, inner_visibility, None);
         let inner_arc = Arc::new(inner_symbol);
 
         // Add TypedBehavior to inner class
@@ -354,7 +354,7 @@ mod tests {
         let outer_name = Name::new("Outer".to_string(), 0..5);
         let outer_visibility =
             VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
-        let outer_symbol = ClassSymbol::new(outer_name, 0..50, outer_visibility);
+        let outer_symbol = ClassSymbol::new(outer_name, 0..50, outer_visibility, None);
         let outer_arc = Arc::new(outer_symbol);
 
         // Add TypedBehavior to outer class
@@ -368,7 +368,7 @@ mod tests {
         let inner_name = Name::new("Inner".to_string(), 10..15);
         let inner_visibility =
             VisibilityBehavior::new(Some(Visibility::Private), 10..17, outer_arc_dyn.clone());
-        let inner_symbol = ClassSymbol::new(inner_name, 10..40, inner_visibility);
+        let inner_symbol = ClassSymbol::new(inner_name, 10..40, inner_visibility, None);
         let inner_arc = Arc::new(inner_symbol);
 
         // Add TypedBehavior to inner class
@@ -404,7 +404,7 @@ mod tests {
         // Create class A
         let a_name = Name::new("A".to_string(), 0..1);
         let a_visibility = VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
-        let a_symbol = ClassSymbol::new(a_name, 0..100, a_visibility);
+        let a_symbol = ClassSymbol::new(a_name, 0..100, a_visibility, None);
         let a_arc = Arc::new(a_symbol);
         let a_type = Ty::path(vec!["A".to_string()], 0..1);
         let a_typed = TypedBehavior::new(a_type, 0..1);
@@ -414,7 +414,7 @@ mod tests {
         // Create class B (child of A)
         let b_name = Name::new("B".to_string(), 10..11);
         let b_visibility = VisibilityBehavior::new(Some(Visibility::Public), 10..16, root.clone());
-        let b_symbol = ClassSymbol::new(b_name, 10..80, b_visibility);
+        let b_symbol = ClassSymbol::new(b_name, 10..80, b_visibility, None);
         let b_arc = Arc::new(b_symbol);
         let b_type = Ty::path(vec!["A".to_string(), "B".to_string()], 10..11);
         let b_typed = TypedBehavior::new(b_type, 10..11);
@@ -424,7 +424,7 @@ mod tests {
         // Create class C (child of B)
         let c_name = Name::new("C".to_string(), 20..21);
         let c_visibility = VisibilityBehavior::new(Some(Visibility::Public), 20..26, root.clone());
-        let c_symbol = ClassSymbol::new(c_name, 20..50, c_visibility);
+        let c_symbol = ClassSymbol::new(c_name, 20..50, c_visibility, None);
         let c_arc = Arc::new(c_symbol);
         let c_type = Ty::path(
             vec!["A".to_string(), "B".to_string(), "C".to_string()],

@@ -471,11 +471,31 @@ impl queries::Db for SemanticDatabase {
         }
 
         // Extract type from the final symbol's TypedBehavior
+        // For type aliases, we need to return the TypeAlias type (second TypedBehavior)
+        // rather than the aliased type (first TypedBehavior)
         let behaviors = current_symbol.metadata().behaviors();
-        let typed_behavior = behaviors
+
+        // Check if this is a TypeAlias symbol by looking for a TypedBehavior with TypeAlias kind
+        // Type aliases have two TypedBehaviors:
+        // 1. First: the syntactic aliased type (what it points to)
+        // 2. Second: the TypeAlias type (the alias itself)
+        // We want the second one for type resolution so that we can detect cycles
+        let typed_behaviors: Vec<_> = behaviors
             .iter()
-            .find(|b| matches!(b.kind(), KestrelBehaviorKind::Typed))
-            .and_then(|b| b.as_ref().downcast_ref::<TypedBehavior>());
+            .filter_map(|b| {
+                if matches!(b.kind(), KestrelBehaviorKind::Typed) {
+                    b.as_ref().downcast_ref::<TypedBehavior>()
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // If there are multiple TypedBehaviors, look for one with TypeAlias kind
+        let type_alias_behavior = typed_behaviors.iter().find(|tb| tb.ty().is_type_alias()).copied();
+
+        let typed_behavior = type_alias_behavior
+            .or_else(|| typed_behaviors.first().copied());
 
         match typed_behavior {
             Some(tb) => TypePathResolution::Resolved(tb.ty().clone()),

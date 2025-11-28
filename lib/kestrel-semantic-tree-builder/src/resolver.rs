@@ -4,9 +4,10 @@ use std::sync::Arc;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use semantic_tree::symbol::Symbol;
+use semantic_tree::cycle::CycleDetector;
+use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::resolvers::{ClassResolver, ImportResolver, ModuleResolver, TerminalResolver, TypeAliasResolver};
+use crate::resolvers::{ClassResolver, FieldResolver, ImportResolver, ModuleResolver, StructResolver, TerminalResolver, TypeAliasResolver};
 
 /// Trait for resolving syntax nodes into semantic symbols
 pub trait Resolver {
@@ -43,6 +44,8 @@ pub struct BindingContext<'a> {
     pub diagnostics: &'a mut kestrel_reporting::DiagnosticContext,
     /// Current file ID for error reporting
     pub file_id: usize,
+    /// Cycle detector for type alias resolution
+    pub type_alias_cycle_detector: &'a mut CycleDetector<SymbolId>,
 }
 
 impl BindingContext<'_> {
@@ -89,6 +92,14 @@ impl ResolverRegistry {
         resolvers.insert(
             SyntaxKind::TypeAliasDeclaration,
             Box::new(TypeAliasResolver),
+        );
+        resolvers.insert(
+            SyntaxKind::StructDeclaration,
+            Box::new(StructResolver),
+        );
+        resolvers.insert(
+            SyntaxKind::FieldDeclaration,
+            Box::new(FieldResolver),
         );
 
         // Register terminal resolvers (separate instances for each)

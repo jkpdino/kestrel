@@ -117,8 +117,17 @@ pub enum Token {
     #[token("public")]
     Public,
 
+    #[token("static")]
+    Static,
+
+    #[token("struct")]
+    Struct,
+
     #[token("type")]
     Type,
+
+    #[token("var")]
+    Var,
 
     // ===== Statement Keywords =====
     #[token("as")]

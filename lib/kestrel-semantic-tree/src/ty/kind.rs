@@ -1,7 +1,24 @@
 use crate::ty::Ty;
 use crate::symbol::class::ClassSymbol;
+use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
 use std::sync::Arc;
+
+/// Integer bit widths
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntBits {
+    I8,
+    I16,
+    I32,
+    I64,
+}
+
+/// Float bit widths
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FloatBits {
+    F32,
+    F64,
+}
 
 /// Represents the kind of a semantic type
 /// These are resolved types after semantic analysis
@@ -12,6 +29,18 @@ pub enum TyKind {
 
     /// Never type: !
     Never,
+
+    /// Integer type with bit width
+    Int(IntBits),
+
+    /// Float type with bit width
+    Float(FloatBits),
+
+    /// Boolean type
+    Bool,
+
+    /// String type
+    String,
 
     /// Tuple type: (T1, T2, ...)
     Tuple(Vec<Ty>),
@@ -30,6 +59,10 @@ pub enum TyKind {
     /// Class type (resolved)
     /// This is a reference to a class symbol
     Class(Arc<ClassSymbol>),
+
+    /// Struct type (resolved)
+    /// This is a reference to a struct symbol
+    Struct(Arc<StructSymbol>),
 
     /// Type alias type
     /// This is a reference to a type alias symbol

@@ -116,18 +116,28 @@ fn unit_type_parser() -> impl Parser<Token, (Span, Span), Error = Simple<Token>>
 }
 
 /// Internal parser for never type: !
+/// Skips leading whitespace
 fn never_type_parser() -> impl Parser<Token, Span, Error = Simple<Token>> + Clone {
-    just(Token::Bang).map_with_span(|_, span| span)
+    use crate::common::skip_trivia;
+
+    skip_trivia()
+        .ignore_then(just(Token::Bang).map_with_span(|_, span| span))
 }
 
 /// Internal parser for path type: Ident or Ident.Ident.Ident
+/// Skips leading whitespace before the first identifier
 fn path_type_parser() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
-    filter_map(|span, token| match token {
-        Token::Identifier => Ok(span),
-        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-    })
-    .separated_by(just(Token::Dot))
-    .at_least(1)
+    use crate::common::skip_trivia;
+
+    skip_trivia()
+        .ignore_then(
+            filter_map(|span, token| match token {
+                Token::Identifier => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            })
+            .separated_by(just(Token::Dot))
+            .at_least(1)
+        )
 }
 
 /// Combined type parser that returns a variant
@@ -185,6 +195,7 @@ where
 }
 
 /// Internal enum to distinguish between type variants during parsing
+#[derive(Debug, Clone)]
 pub(crate) enum TyVariant {
     Unit(Span, Span),
     Never(Span),
@@ -197,10 +208,13 @@ pub(crate) enum TyVariant {
 /// Tuple: (type1, type2, ...)
 /// Function: (param1, param2, ...) -> return_type
 /// Unit: ()
+/// Skips leading whitespace
 fn parse_tuple_or_function_type_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>> + Clone {
+    use crate::common::skip_trivia;
+
     // Parse: ( type_list ) (-> type)?
-    just(Token::LParen)
-        .map_with_span(|_, span| span)
+    skip_trivia()
+        .ignore_then(just(Token::LParen).map_with_span(|_, span| span))
         .then(
             // Parse a list of path types separated by commas
             path_type_parser()

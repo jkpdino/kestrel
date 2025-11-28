@@ -19,7 +19,8 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::{Span, Spanned};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
-use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder, SymbolTable};
+use semantic_tree::cycle::CycleDetector;
+use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder, SymbolTable};
 
 use crate::db::{SemanticDatabase, SymbolRegistry};
 use crate::diagnostics::{
@@ -396,9 +397,174 @@ pub fn bind_tree(
     // Get the resolver registry to find resolvers
     let resolver_registry = ResolverRegistry::new();
 
+    // Create cycle detector for type alias resolution
+    let mut type_alias_cycle_detector: CycleDetector<SymbolId> = CycleDetector::new();
+
     // Walk all symbols and call bind_declaration
     // Note: file_id is determined per-symbol based on parent SourceFile
-    bind_symbol(tree.root(), &db, diagnostics, &resolver_registry, 0);
+    bind_symbol(
+        tree.root(),
+        &db,
+        diagnostics,
+        &resolver_registry,
+        0,
+        &mut type_alias_cycle_detector,
+    );
+
+    // Post-binding pass: detect type alias cycles
+    // This catches cycles like A -> B -> A that can't be detected during sequential binding
+    check_type_alias_cycles(tree.root(), &db, diagnostics);
+}
+
+/// Check for circular type alias dependencies by following alias chains
+fn check_type_alias_cycles(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    db: &SemanticDatabase,
+    diagnostics: &mut DiagnosticContext,
+) {
+    use kestrel_semantic_tree::error::{CircularTypeAliasError, CycleParticipant};
+    use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
+
+    let kind = symbol.metadata().kind();
+
+    // If this is a type alias, follow its chain to detect cycles
+    if kind == KestrelSymbolKind::TypeAlias {
+        // Get the file_id for error reporting
+        let file_id = get_file_id_for_symbol(symbol, diagnostics);
+
+        // Get the TypeAliasTypedBehavior which contains the resolved aliased type
+        let behaviors = symbol.metadata().behaviors();
+        let type_alias_typed = behaviors.iter().find_map(|b| {
+            if matches!(b.kind(), KestrelBehaviorKind::TypeAliasTyped) {
+                b.as_ref().downcast_ref::<TypeAliasTypedBehavior>()
+            } else {
+                None
+            }
+        });
+
+        if let Some(resolved) = type_alias_typed {
+            let mut visited: CycleDetector<SymbolId> = CycleDetector::new();
+            let symbol_id = symbol.metadata().id();
+
+            // Enter this type alias
+            if visited.enter(symbol_id).is_ok() {
+                // Follow the chain
+                if let Some(cycle) =
+                    follow_type_alias_chain(resolved.resolved_ty(), &mut visited)
+                {
+                    // Build error
+                    let origin = CycleParticipant {
+                        name: symbol.metadata().name().value.clone(),
+                        name_span: symbol.metadata().name().span.clone(),
+                        file_id: Some(file_id),
+                    };
+
+                    let cycle_participants: Vec<CycleParticipant> = cycle
+                        .cycle()
+                        .iter()
+                        .skip(1) // Skip the origin
+                        .filter_map(|&id| {
+                            db.symbol_by_id(id).map(|s| CycleParticipant {
+                                name: s.metadata().name().value.clone(),
+                                name_span: s.metadata().name().span.clone(),
+                                file_id: Some(get_file_id_for_symbol(&s, diagnostics)),
+                            })
+                        })
+                        .collect();
+
+                    diagnostics.throw(
+                        CircularTypeAliasError {
+                            origin,
+                            cycle: cycle_participants,
+                        },
+                        file_id,
+                    );
+                }
+            }
+        }
+    }
+
+    // Recursively check children
+    for child in symbol.metadata().children() {
+        check_type_alias_cycles(&child, db, diagnostics);
+    }
+}
+
+/// Follow a type alias chain and return the cycle if found
+fn follow_type_alias_chain(
+    ty: &Ty,
+    visited: &mut CycleDetector<SymbolId>,
+) -> Option<semantic_tree::cycle::Cycle<SymbolId>> {
+    use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
+
+    match ty.kind() {
+        TyKind::TypeAlias(alias_symbol) => {
+            let alias_id = alias_symbol.metadata().id();
+
+            // Try to enter - if it fails, we found a cycle
+            if let Err(cycle) = visited.enter(alias_id) {
+                return Some(cycle);
+            }
+
+            // Get the resolved type from this alias
+            let behaviors = alias_symbol.metadata().behaviors();
+            let type_alias_typed = behaviors.iter().find_map(|b| {
+                if matches!(b.kind(), KestrelBehaviorKind::TypeAliasTyped) {
+                    b.as_ref().downcast_ref::<TypeAliasTypedBehavior>()
+                } else {
+                    None
+                }
+            });
+
+            if let Some(resolved) = type_alias_typed {
+                // Recursively follow
+                let result = follow_type_alias_chain(resolved.resolved_ty(), visited);
+                visited.exit();
+                return result;
+            }
+
+            visited.exit();
+            None
+        }
+        TyKind::Tuple(elements) => {
+            for elem in elements {
+                if let Some(cycle) = follow_type_alias_chain(elem, visited) {
+                    return Some(cycle);
+                }
+            }
+            None
+        }
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            for param in params {
+                if let Some(cycle) = follow_type_alias_chain(param, visited) {
+                    return Some(cycle);
+                }
+            }
+            follow_type_alias_chain(return_type, visited)
+        }
+        _ => None,
+    }
+}
+
+/// Get the file_id for a symbol by walking up to its SourceFile parent
+fn get_file_id_for_symbol(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    diagnostics: &DiagnosticContext,
+) -> usize {
+    let mut current = symbol.clone();
+    loop {
+        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
+            let file_name = current.metadata().name().value.clone();
+            return diagnostics.get_file_id(&file_name).unwrap_or(0);
+        }
+        match current.metadata().parent() {
+            Some(parent) => current = parent,
+            None => return 0,
+        }
+    }
 }
 
 /// Recursively bind a symbol and its children
@@ -408,6 +574,7 @@ fn bind_symbol(
     diagnostics: &mut DiagnosticContext,
     registry: &ResolverRegistry,
     current_file_id: usize,
+    type_alias_cycle_detector: &mut CycleDetector<SymbolId>,
 ) {
     // Find resolver for this symbol kind and call bind_declaration
     let kind = symbol.metadata().kind();
@@ -425,6 +592,8 @@ fn bind_symbol(
     let syntax_kind = match kind {
         KestrelSymbolKind::Import => Some(SyntaxKind::ImportDeclaration),
         KestrelSymbolKind::Class => Some(SyntaxKind::ClassDeclaration),
+        KestrelSymbolKind::Struct => Some(SyntaxKind::StructDeclaration),
+        KestrelSymbolKind::Field => Some(SyntaxKind::FieldDeclaration),
         KestrelSymbolKind::Module => Some(SyntaxKind::ModuleDeclaration),
         KestrelSymbolKind::TypeAlias => Some(SyntaxKind::TypeAliasDeclaration),
         KestrelSymbolKind::SourceFile => None,
@@ -436,6 +605,7 @@ fn bind_symbol(
                 db,
                 diagnostics,
                 file_id,
+                type_alias_cycle_detector,
             };
             resolver.bind_declaration(symbol, &mut ctx);
         }
@@ -443,7 +613,7 @@ fn bind_symbol(
 
     // Recursively bind children
     for child in symbol.metadata().children() {
-        bind_symbol(&child, db, diagnostics, registry, file_id);
+        bind_symbol(&child, db, diagnostics, registry, file_id, type_alias_cycle_detector);
     }
 }
 
@@ -494,6 +664,10 @@ fn format_type(ty: &Ty) -> String {
     match ty.kind() {
         TyKind::Unit => "()".to_string(),
         TyKind::Never => "!".to_string(),
+        TyKind::Int(bits) => format!("{:?}", bits),
+        TyKind::Float(bits) => format!("{:?}", bits),
+        TyKind::Bool => "Bool".to_string(),
+        TyKind::String => "String".to_string(),
         TyKind::Tuple(elements) => {
             let elem_strs: Vec<String> = elements.iter().map(format_type).collect();
             format!("({})", elem_strs.join(", "))
@@ -511,6 +685,7 @@ fn format_type(ty: &Ty) -> String {
         }
         TyKind::Path(segments) => segments.join("."),
         TyKind::Class(class_symbol) => class_symbol.metadata().name().value.clone(),
+        TyKind::Struct(struct_symbol) => struct_symbol.metadata().name().value.clone(),
         TyKind::TypeAlias(type_alias_symbol) => type_alias_symbol.metadata().name().value.clone(),
     }
 }

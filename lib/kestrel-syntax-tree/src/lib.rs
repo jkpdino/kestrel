@@ -41,6 +41,8 @@ pub enum SyntaxKind {
     DeclarationItem,
     ClassDeclaration,
     ClassBody,
+    StructDeclaration,
+    StructBody,
     ImportDeclaration,
     ImportItem,
     ModuleDeclaration,
@@ -48,7 +50,9 @@ pub enum SyntaxKind {
     Name,
     TypeAliasDeclaration,
     AliasedType,
+    FieldDeclaration,
     Visibility,
+    StaticModifier,
 
     // Type nodes
     Ty,
@@ -85,7 +89,10 @@ pub enum SyntaxKind {
     Module,
     Private,
     Public,
+    Static,
+    Struct,
     Type,
+    Var,
 
     // Braces
     LParen,
@@ -152,7 +159,10 @@ impl From<Token> for SyntaxKind {
             Token::Module => SyntaxKind::Module,
             Token::Private => SyntaxKind::Private,
             Token::Public => SyntaxKind::Public,
+            Token::Static => SyntaxKind::Static,
+            Token::Struct => SyntaxKind::Struct,
             Token::Type => SyntaxKind::Type,
+            Token::Var => SyntaxKind::Var,
             // Braces
             Token::LParen => SyntaxKind::LParen,
             Token::RParen => SyntaxKind::RParen,
@@ -190,6 +200,8 @@ impl Language for KestrelLanguage {
         const DECLARATION_ITEM: u16 = SyntaxKind::DeclarationItem as u16;
         const CLASS_DECLARATION: u16 = SyntaxKind::ClassDeclaration as u16;
         const CLASS_BODY: u16 = SyntaxKind::ClassBody as u16;
+        const STRUCT_DECLARATION: u16 = SyntaxKind::StructDeclaration as u16;
+        const STRUCT_BODY: u16 = SyntaxKind::StructBody as u16;
         const IMPORT_DECLARATION: u16 = SyntaxKind::ImportDeclaration as u16;
         const IMPORT_ITEM: u16 = SyntaxKind::ImportItem as u16;
         const MODULE_DECLARATION: u16 = SyntaxKind::ModuleDeclaration as u16;
@@ -197,7 +209,9 @@ impl Language for KestrelLanguage {
         const NAME: u16 = SyntaxKind::Name as u16;
         const TYPE_ALIAS_DECLARATION: u16 = SyntaxKind::TypeAliasDeclaration as u16;
         const ALIASED_TYPE: u16 = SyntaxKind::AliasedType as u16;
+        const FIELD_DECLARATION: u16 = SyntaxKind::FieldDeclaration as u16;
         const VISIBILITY: u16 = SyntaxKind::Visibility as u16;
+        const STATIC_MODIFIER: u16 = SyntaxKind::StaticModifier as u16;
         const TY: u16 = SyntaxKind::Ty as u16;
         const TY_UNIT: u16 = SyntaxKind::TyUnit as u16;
         const TY_NEVER: u16 = SyntaxKind::TyNever as u16;
@@ -225,7 +239,10 @@ impl Language for KestrelLanguage {
         const MODULE: u16 = SyntaxKind::Module as u16;
         const PRIVATE: u16 = SyntaxKind::Private as u16;
         const PUBLIC: u16 = SyntaxKind::Public as u16;
+        const STATIC: u16 = SyntaxKind::Static as u16;
+        const STRUCT: u16 = SyntaxKind::Struct as u16;
         const TYPE: u16 = SyntaxKind::Type as u16;
+        const VAR: u16 = SyntaxKind::Var as u16;
         const LPAREN: u16 = SyntaxKind::LParen as u16;
         const RPAREN: u16 = SyntaxKind::RParen as u16;
         const LBRACE: u16 = SyntaxKind::LBrace as u16;
@@ -253,6 +270,8 @@ impl Language for KestrelLanguage {
             DECLARATION_ITEM => SyntaxKind::DeclarationItem,
             CLASS_DECLARATION => SyntaxKind::ClassDeclaration,
             CLASS_BODY => SyntaxKind::ClassBody,
+            STRUCT_DECLARATION => SyntaxKind::StructDeclaration,
+            STRUCT_BODY => SyntaxKind::StructBody,
             IMPORT_DECLARATION => SyntaxKind::ImportDeclaration,
             IMPORT_ITEM => SyntaxKind::ImportItem,
             MODULE_DECLARATION => SyntaxKind::ModuleDeclaration,
@@ -260,7 +279,9 @@ impl Language for KestrelLanguage {
             NAME => SyntaxKind::Name,
             TYPE_ALIAS_DECLARATION => SyntaxKind::TypeAliasDeclaration,
             ALIASED_TYPE => SyntaxKind::AliasedType,
+            FIELD_DECLARATION => SyntaxKind::FieldDeclaration,
             VISIBILITY => SyntaxKind::Visibility,
+            STATIC_MODIFIER => SyntaxKind::StaticModifier,
             TY => SyntaxKind::Ty,
             TY_UNIT => SyntaxKind::TyUnit,
             TY_NEVER => SyntaxKind::TyNever,
@@ -288,7 +309,10 @@ impl Language for KestrelLanguage {
             MODULE => SyntaxKind::Module,
             PRIVATE => SyntaxKind::Private,
             PUBLIC => SyntaxKind::Public,
+            STATIC => SyntaxKind::Static,
+            STRUCT => SyntaxKind::Struct,
             TYPE => SyntaxKind::Type,
+            VAR => SyntaxKind::Var,
             LPAREN => SyntaxKind::LParen,
             RPAREN => SyntaxKind::RParen,
             LBRACE => SyntaxKind::LBrace,

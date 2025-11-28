@@ -4,22 +4,51 @@
 
 ### Core Type System
 
-- [ ] Type Aliases - Define reusable type names (`type String = Array<Char>`)
-- [ ] Import Resolution - Complete the ImportResolver
-  - [ ] Module path resolution
-  - [ ] Imported symbol lookup
-  - [ ] Import cycle detection
-  - [ ] Cross-module type references
-- [ ] Type Resolution - Resolve type references across modules
-- [ ] Primitive Types - Int, Float, String, Bool, etc.
+- [x] Type Aliases - Define reusable type names (`type String = Array<Char>`)
+  - [x] Parser support
+  - [x] Semantic tree representation (TypeAliasSymbol)
+  - [x] Type resolution (resolves aliased types)
+  - [x] Circular alias detection
+- [x] Import Resolution - Complete the ImportResolver
+  - [x] Module path resolution
+  - [x] Imported symbol lookup
+  - [x] Specific imports `import A.(Foo, Bar)`
+  - [x] Aliased imports `import A as B`, `import A.(Foo as F)`
+  - [x] Whole-module imports `import A.B.C`
+  - [x] Visibility checking (public/private/internal/fileprivate)
+  - [x] Cross-file error reporting with precise spans
+- [x] Type Resolution - Resolve type references across modules
+  - [x] Path type resolution (`A.B.C` -> concrete type)
+  - [x] Scope-aware name lookup
+  - [x] Cross-module type references
+- [x] Primitive Types - Int, Float, String, Bool (TyKind variants)
 - [ ] Type Checking Infrastructure - Core type validation logic
+
+### Modules & Visibility (moved from Phase 5 - DONE)
+
+- [x] Module declarations (`module A.B.C`)
+- [x] Visibility modifiers (public, private, internal, fileprivate)
+- [x] Visibility scope tracking
+- [x] Cross-module visibility checking
+
+### Classes (Temporary - will be replaced by Structs)
+
+- [x] Class declarations with visibility
+- [x] Nested classes
+- [x] Class type representation
 
 ### Structured Types
 
-- [ ] Structs - Replace classes with lightweight data structures
-  - [ ] Parser support for struct declarations
-  - [ ] Semantic tree representation
-  - [ ] Struct type resolution
+- [x] Structs - Replace classes with lightweight data structures
+  - [x] Parser support for struct declarations
+  - [x] Semantic tree representation (StructSymbol)
+  - [x] Struct type resolution (TyKind::Struct)
+- [x] Struct Fields / Global Variables - `(visibility)? (static)? let/var name: Type`
+  - [x] Parser support for field declarations
+  - [x] Semantic tree representation (FieldSymbol)
+  - [x] Static vs instance field tracking
+  - [x] Mutability (let vs var)
+  - [x] Works in struct bodies and at module level (globals)
 - [ ] Protocols - Define interfaces/contracts
   - [ ] Parser support for protocol declarations
   - [ ] Protocol type checking
@@ -32,7 +61,17 @@
   - [ ] Function signatures with parameter types
   - [ ] Return type declarations
   - [ ] Function type resolution
-- [ ] Function Types - First-class function types `(Int, Int) -> Int`
+- [x] Function Types - First-class function types `(Int, Int) -> Int`
+  - [x] Parser support for function type syntax
+  - [x] TyKind::Function representation
+
+### Type Expressions (Parser)
+
+- [x] Unit type `()`
+- [x] Never type `!`
+- [x] Tuple types `(T1, T2, ...)`
+- [x] Function types `(P1, P2) -> R`
+- [x] Path types `A.B.C`
 
 ## Phase 2: Generics
 
@@ -89,14 +128,16 @@
 - [ ] Methods - Functions on structs
 - [ ] Protocol Implementations - `impl Protocol for Struct`
 - [ ] Associated Types - Types within protocols
-- [ ] Modules & Visibility - Public/private declarations
 - [ ] Error Handling - Result types, error propagation
 - [ ] Traits/Extensions - Add methods to existing types
 
 ## Phase 6: Polish & Optimization
 
 - [ ] Type Inference Improvements
-- [ ] Error Messages - Clear, actionable diagnostics
+- [x] Error Messages - Clear, actionable diagnostics
+  - [x] Cross-file diagnostics
+  - [x] Precise span reporting (name-level, not declaration-level)
+  - [x] Contextual secondary labels
 - [ ] IDE Support - LSP implementation
 - [ ] Optimization Passes
 - [ ] Standard Library
@@ -106,7 +147,12 @@
 ## Current Status
 
 **Phase**: Phase 1 (Type System Foundation)
-**Next Task**: Type Aliases
+**Progress**: ~80% of Phase 1 complete
+**Next Tasks**:
+
+1. Function Declarations (medium)
+2. Protocols (medium)
+3. Type Checking Infrastructure
 
 ## Notes
 
@@ -115,3 +161,4 @@
 - Functions are first-class, enabling functional programming patterns
 - Import resolution must work before advanced features (generics, protocols)
 - Values/expressions come after types are solid
+- Classes are implemented as a stepping stone; will be replaced by Structs

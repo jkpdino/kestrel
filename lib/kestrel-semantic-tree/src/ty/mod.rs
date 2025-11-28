@@ -1,8 +1,9 @@
 mod kind;
 
-pub use kind::TyKind;
+pub use kind::{FloatBits, IntBits, TyKind};
 
 use crate::symbol::class::ClassSymbol;
+use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
 use kestrel_span::Span;
 use std::sync::Arc;
@@ -42,6 +43,26 @@ impl Ty {
         Self::new(TyKind::Never, span)
     }
 
+    /// Create an integer type with the given bit width
+    pub fn int(bits: IntBits, span: Span) -> Self {
+        Self::new(TyKind::Int(bits), span)
+    }
+
+    /// Create a float type with the given bit width
+    pub fn float(bits: FloatBits, span: Span) -> Self {
+        Self::new(TyKind::Float(bits), span)
+    }
+
+    /// Create a boolean type
+    pub fn bool(span: Span) -> Self {
+        Self::new(TyKind::Bool, span)
+    }
+
+    /// Create a string type
+    pub fn string(span: Span) -> Self {
+        Self::new(TyKind::String, span)
+    }
+
     /// Create a tuple type: (T1, T2, ...)
     pub fn tuple(elements: Vec<Ty>, span: Span) -> Self {
         Self::new(TyKind::Tuple(elements), span)
@@ -68,6 +89,11 @@ impl Ty {
         Self::new(TyKind::Class(class_symbol), span)
     }
 
+    /// Create a struct type (resolved)
+    pub fn r#struct(struct_symbol: Arc<StructSymbol>, span: Span) -> Self {
+        Self::new(TyKind::Struct(struct_symbol), span)
+    }
+
     /// Create a type alias type
     pub fn type_alias(type_alias_symbol: Arc<TypeAliasSymbol>, span: Span) -> Self {
         Self::new(TyKind::TypeAlias(type_alias_symbol), span)
@@ -83,6 +109,26 @@ impl Ty {
     /// Check if this is a never type
     pub fn is_never(&self) -> bool {
         matches!(self.kind, TyKind::Never)
+    }
+
+    /// Check if this is an integer type
+    pub fn is_int(&self) -> bool {
+        matches!(self.kind, TyKind::Int(_))
+    }
+
+    /// Check if this is a float type
+    pub fn is_float(&self) -> bool {
+        matches!(self.kind, TyKind::Float(_))
+    }
+
+    /// Check if this is a boolean type
+    pub fn is_bool(&self) -> bool {
+        matches!(self.kind, TyKind::Bool)
+    }
+
+    /// Check if this is a string type
+    pub fn is_string(&self) -> bool {
+        matches!(self.kind, TyKind::String)
     }
 
     /// Check if this is a tuple type
@@ -105,12 +151,33 @@ impl Ty {
         matches!(self.kind, TyKind::Class(_))
     }
 
+    /// Check if this is a struct type (resolved)
+    pub fn is_struct(&self) -> bool {
+        matches!(self.kind, TyKind::Struct(_))
+    }
+
     /// Check if this is a type alias type
     pub fn is_type_alias(&self) -> bool {
         matches!(self.kind, TyKind::TypeAlias(_))
     }
 
     // === Accessor methods ===
+
+    /// Get integer bit width if this is an integer type
+    pub fn as_int(&self) -> Option<IntBits> {
+        match &self.kind {
+            TyKind::Int(bits) => Some(*bits),
+            _ => None,
+        }
+    }
+
+    /// Get float bit width if this is a float type
+    pub fn as_float(&self) -> Option<FloatBits> {
+        match &self.kind {
+            TyKind::Float(bits) => Some(*bits),
+            _ => None,
+        }
+    }
 
     /// Get tuple elements if this is a tuple type
     pub fn as_tuple(&self) -> Option<&Vec<Ty>> {
@@ -140,6 +207,14 @@ impl Ty {
     pub fn as_class(&self) -> Option<&Arc<ClassSymbol>> {
         match &self.kind {
             TyKind::Class(symbol) => Some(symbol),
+            _ => None,
+        }
+    }
+
+    /// Get struct symbol if this is a struct type
+    pub fn as_struct(&self) -> Option<&Arc<StructSymbol>> {
+        match &self.kind {
+            TyKind::Struct(symbol) => Some(symbol),
             _ => None,
         }
     }

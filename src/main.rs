@@ -125,6 +125,32 @@ fn main() {
         "tests/import_resolution/visibility_semantics.ks",
     ]);
 
+    // Test cycle detection
+    process_file_group("Circular Type Alias Detection", &[
+        "tests/cycle_detection/circular_alias.ks",
+    ]);
+
+    process_file_group("Self-Referential Type Alias Detection", &[
+        "tests/cycle_detection/self_cycle.ks",
+    ]);
+
+    // Test struct declarations
+    process_file_group("Basic Struct Declarations", &[
+        "tests/struct/basic.ks",
+    ]);
+
+    process_file_group("Nested Struct Declarations", &[
+        "tests/struct/nested.ks",
+    ]);
+
+    process_file_group("Struct Fields", &[
+        "tests/struct/fields.ks",
+    ]);
+
+    process_file_group("Struct Edge Cases", &[
+        "tests/struct/edge_cases.ks",
+    ]);
+
     println!("\n{}", "=".repeat(70));
     println!("All test groups processed!");
     println!("{}", "=".repeat(70));

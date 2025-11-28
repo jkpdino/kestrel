@@ -1,0 +1,4 @@
+module Test
+
+type A = B
+type B = A

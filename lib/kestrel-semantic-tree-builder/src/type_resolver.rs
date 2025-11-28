@@ -33,7 +33,12 @@ pub fn resolve_type(
 ) -> Option<Ty> {
     match ty.kind() {
         // Base types that don't need resolution
-        TyKind::Unit | TyKind::Never => Some(ty.clone()),
+        TyKind::Unit
+        | TyKind::Never
+        | TyKind::Int(_)
+        | TyKind::Float(_)
+        | TyKind::Bool
+        | TyKind::String => Some(ty.clone()),
 
         // Path types need to be resolved using scope-aware resolution
         TyKind::Path(segments) => {
@@ -45,6 +50,9 @@ pub fn resolve_type(
 
         // Class types are already resolved
         TyKind::Class(_) => Some(ty.clone()),
+
+        // Struct types are already resolved
+        TyKind::Struct(_) => Some(ty.clone()),
 
         // Type alias types should be resolved to their underlying type
         // Note: This might need special handling to prevent infinite recursion

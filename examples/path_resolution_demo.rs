@@ -111,7 +111,7 @@ fn create_class(
         visibility_scope.clone(),
     );
 
-    let class_symbol = ClassSymbol::new(class_name, span, visibility_behavior);
+    let class_symbol = ClassSymbol::new(class_name, span, visibility_behavior, None);
     Arc::new(class_symbol)
 }
 

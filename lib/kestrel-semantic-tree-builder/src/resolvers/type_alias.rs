@@ -3,8 +3,10 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+use kestrel_semantic_tree::error::{CircularTypeAliasError, CycleParticipant};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::type_alias::{TypeAliasSymbol, TypeAliasTypedBehavior};
+use kestrel_semantic_tree::ty::TyKind;
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
@@ -107,6 +109,16 @@ impl Resolver for TypeAliasResolver {
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
         context: &mut BindingContext,
     ) {
+        let symbol_id = symbol.metadata().id();
+
+        // Enter the cycle detector to track that we're binding this type alias
+        // This shouldn't fail on first entry, but we check anyway
+        if let Err(_) = context.type_alias_cycle_detector.enter(symbol_id) {
+            // We're already binding this type alias - this shouldn't happen
+            // in normal sequential binding, but guard against it
+            return;
+        }
+
         // Extract the original aliased type from the first TypedBehavior
         // (The one created in build_declaration with the syntactic type)
         let behaviors = symbol.metadata().behaviors();
@@ -119,11 +131,11 @@ impl Resolver for TypeAliasResolver {
 
         let Some(typed_behavior) = typed_behavior else {
             // No TypedBehavior found - this shouldn't happen
+            context.type_alias_cycle_detector.exit();
             return;
         };
 
         let syntactic_type = typed_behavior.ty();
-        let symbol_id = symbol.metadata().id();
 
         // Create type resolution context with the Db
         let type_ctx = TypeResolutionContext { db: context.db };
@@ -131,15 +143,114 @@ impl Resolver for TypeAliasResolver {
         // Resolve all Path variants in the type using scope-aware resolution
         match resolve_type(syntactic_type, &type_ctx, symbol_id) {
             Some(resolved_type) => {
-                // Add the resolved type as a TypeAliasTypedBehavior
-                let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);
-                symbol.metadata().add_behavior(type_alias_typed_behavior);
+                // Check if the resolved type contains a type alias that would create a cycle
+                if let Some(cycle_error) =
+                    check_resolved_type_for_cycles(&resolved_type, symbol, context)
+                {
+                    context.diagnostics.throw(cycle_error, context.file_id);
+                } else {
+                    // Add the resolved type as a TypeAliasTypedBehavior
+                    let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);
+                    symbol.metadata().add_behavior(type_alias_typed_behavior);
+                }
             }
             None => {
                 // Type resolution failed - the error will be emitted by resolve_type_path
                 // For now, we don't add a TypeAliasTypedBehavior
-                // Future: emit a more specific diagnostic here
             }
         }
+
+        // Exit the cycle detector after we're done resolving this type alias
+        context.type_alias_cycle_detector.exit();
+    }
+}
+
+/// Check if a resolved type contains a type alias that would create a cycle
+/// This detects direct self-references (type A = A) and checks the cycle detector
+/// for any type aliases that are currently being resolved (indirect cycles).
+fn check_resolved_type_for_cycles(
+    ty: &kestrel_semantic_tree::ty::Ty,
+    current_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    context: &mut BindingContext,
+) -> Option<CircularTypeAliasError> {
+    check_type_for_cycles_recursive(ty, current_symbol, context)
+}
+
+fn check_type_for_cycles_recursive(
+    ty: &kestrel_semantic_tree::ty::Ty,
+    current_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    context: &mut BindingContext,
+) -> Option<CircularTypeAliasError> {
+    match ty.kind() {
+        TyKind::TypeAlias(alias_symbol) => {
+            let alias_id = alias_symbol.metadata().id();
+            let current_id = current_symbol.metadata().id();
+
+            // Check for direct self-reference (type A = A)
+            if alias_id == current_id {
+                let origin = CycleParticipant {
+                    name: current_symbol.metadata().name().value.clone(),
+                    name_span: current_symbol.metadata().name().span.clone(),
+                    file_id: context.file_id_for_symbol(current_symbol),
+                };
+
+                return Some(CircularTypeAliasError {
+                    origin,
+                    cycle: vec![], // Self-cycle has no intermediate participants
+                });
+            }
+
+            // Check if this type alias is currently being resolved (indirect cycle)
+            // This would happen if: type A = B, type B = A
+            // When binding A, we enter A in the detector
+            // When resolving B in A's definition, if B were being bound, we'd detect it
+            // But since B hasn't been bound yet, we can't detect A -> B -> A this way
+            //
+            // For now, we can only detect self-references. Detecting A -> B -> A requires
+            // a post-binding pass that follows the type alias chains.
+            if context.type_alias_cycle_detector.is_active(&alias_id) {
+                let origin = CycleParticipant {
+                    name: current_symbol.metadata().name().value.clone(),
+                    name_span: current_symbol.metadata().name().span.clone(),
+                    file_id: context.file_id_for_symbol(current_symbol),
+                };
+
+                let cycle = vec![CycleParticipant {
+                    name: alias_symbol.metadata().name().value.clone(),
+                    name_span: alias_symbol.metadata().name().span.clone(),
+                    file_id: context.file_id_for_symbol(
+                        &(alias_symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+                    ),
+                }];
+
+                return Some(CircularTypeAliasError { origin, cycle });
+            }
+
+            None
+        }
+        TyKind::Tuple(elements) => {
+            for elem in elements {
+                if let Some(err) =
+                    check_type_for_cycles_recursive(elem, current_symbol, context)
+                {
+                    return Some(err);
+                }
+            }
+            None
+        }
+        TyKind::Function {
+            params,
+            return_type,
+        } => {
+            for param in params {
+                if let Some(err) =
+                    check_type_for_cycles_recursive(param, current_symbol, context)
+                {
+                    return Some(err);
+                }
+            }
+            check_type_for_cycles_recursive(return_type, current_symbol, context)
+        }
+        _ => None,
     }
 }

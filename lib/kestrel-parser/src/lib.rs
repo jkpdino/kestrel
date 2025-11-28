@@ -62,6 +62,8 @@ pub mod common;
 pub mod module;
 pub mod import;
 pub mod class;
+pub mod r#struct;
+pub mod field;
 pub mod type_alias;
 pub mod declaration_item;
 pub mod parser;
@@ -75,6 +77,8 @@ use event::{EventSink, TreeBuilder};
 pub use module::{ModuleDeclaration, ModulePath};
 pub use import::ImportDeclaration;
 pub use class::ClassDeclaration;
+pub use r#struct::StructDeclaration;
+pub use field::FieldDeclaration;
 pub use type_alias::TypeAliasDeclaration;
 pub use declaration_item::DeclarationItem;
 pub use ty::TyExpression;
@@ -83,6 +87,8 @@ pub use ty::TyExpression;
 pub use module::{parse_module_declaration, parse_module_path};
 pub use import::parse_import_declaration;
 pub use class::parse_class_declaration;
+pub use r#struct::parse_struct_declaration;
+pub use field::parse_field_declaration;
 pub use type_alias::parse_type_alias_declaration;
 pub use declaration_item::{parse_declaration_item, parse_source_file};
 pub use ty::parse_ty;
@@ -142,6 +148,21 @@ where
     class::parse_class_declaration(source, tokens, &mut sink);
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     ClassDeclaration {
+        syntax: tree,
+        span: 0..source.len(),
+    }
+}
+
+/// Convenience function to parse a struct declaration from source and tokens
+/// Returns a fully built StructDeclaration with its syntax tree
+pub fn parse_struct_declaration_from_source<I>(source: &str, tokens: I) -> StructDeclaration
+where
+    I: Iterator<Item = (Token, Span)> + Clone,
+{
+    let mut sink = EventSink::new();
+    r#struct::parse_struct_declaration(source, tokens, &mut sink);
+    let tree = TreeBuilder::new(source, sink.into_events()).build();
+    StructDeclaration {
         syntax: tree,
         span: 0..source.len(),
     }
