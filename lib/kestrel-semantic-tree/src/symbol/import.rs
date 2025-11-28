@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use kestrel_span::{Name, Span};
 use semantic_tree::behavior::Behavior;
@@ -40,15 +40,16 @@ impl ImportSymbol {
 }
 
 /// Import data behavior stores the parsed import information
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ImportDataBehavior {
     /// The module path (e.g., ["A", "B", "C"] for "import A.B.C")
-    pub module_path: Vec<String>,
+    module_path: Vec<String>,
     /// Optional alias for the module (e.g., "D" for "import A.B.C as D")
-    pub alias: Option<String>,
+    alias: Option<String>,
     /// Specific items to import (e.g., [("Foo", None), ("Bar", Some("Baz"))])
-    /// Empty if importing the entire module
-    pub items: Vec<ImportItem>,
+    /// Empty if importing the entire module.
+    /// Uses RwLock to allow setting target_id during bind phase.
+    items: RwLock<Vec<ImportItem>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +77,7 @@ impl ImportDataBehavior {
         ImportDataBehavior {
             module_path,
             alias,
-            items,
+            items: RwLock::new(items),
         }
     }
 
@@ -88,7 +89,43 @@ impl ImportDataBehavior {
         self.alias.as_deref()
     }
 
-    pub fn items(&self) -> &[ImportItem] {
-        &self.items
+    /// Returns a clone of the import items.
+    pub fn items(&self) -> Vec<ImportItem> {
+        self.items
+            .read()
+            .expect("RwLock poisoned")
+            .clone()
+    }
+
+    /// Set the resolved target_id for an import item by name.
+    ///
+    /// Returns true if the item was found and updated, false otherwise.
+    pub fn set_target_id(&self, name: &str, target_id: SymbolId) -> bool {
+        let mut items = self.items.write().expect("RwLock poisoned");
+        if let Some(item) = items.iter_mut().find(|i| i.name == name) {
+            item.target_id = Some(target_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if all import items have been resolved.
+    pub fn all_resolved(&self) -> bool {
+        self.items
+            .read()
+            .expect("RwLock poisoned")
+            .iter()
+            .all(|item| item.target_id.is_some())
+    }
+}
+
+impl Clone for ImportDataBehavior {
+    fn clone(&self) -> Self {
+        ImportDataBehavior {
+            module_path: self.module_path.clone(),
+            alias: self.alias.clone(),
+            items: RwLock::new(self.items.read().expect("RwLock poisoned").clone()),
+        }
     }
 }

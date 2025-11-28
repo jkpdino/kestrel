@@ -119,7 +119,10 @@ impl Resolver for ImportResolver {
                         let target_id = target_symbol.metadata().id();
 
                         // Check visibility using query
-                        if !queries::is_visible_from(ctx.db, target_id, import_id) {
+                        if queries::is_visible_from(ctx.db, target_id, import_id) {
+                            // Visibility check passed - record the resolved target
+                            import_data.set_target_id(&item.name, target_id);
+                        } else {
                             // Get the actual visibility from the target symbol
                             let (visibility_str, _decl_span) = get_visibility_info(&target_symbol);
 

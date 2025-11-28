@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::visibility::Visibility;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
@@ -85,9 +86,28 @@ pub fn get_visibility_span(syntax: &SyntaxNode, source: &str) -> Option<Span> {
     Some(get_node_span(&visibility_node, source))
 }
 
+/// Find an ancestor symbol of the specified kind by walking up the parent chain.
+///
+/// Returns the first ancestor matching the kind, or None if no such ancestor exists.
+pub fn find_ancestor_of_kind(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    kind: KestrelSymbolKind,
+) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+    let mut current = Some(symbol.clone());
+
+    while let Some(s) = current {
+        if s.metadata().kind() == kind {
+            return Some(s);
+        }
+        current = s.metadata().parent();
+    }
+
+    None
+}
+
 /// Find the scope symbol where this visibility level is accessible
-/// - Public/Internal: root symbol
-/// - Fileprivate: SourceFile symbol (TODO: track properly, for now use root)
+/// - Public/Internal: root symbol (module-level visibility)
+/// - Fileprivate: SourceFile symbol (file-level visibility)
 /// - Private: immediate container (parent)
 /// - None (no visibility specified): defaults to internal, so root
 pub fn find_visibility_scope(
@@ -101,9 +121,11 @@ pub fn find_visibility_scope(
             parent.cloned().unwrap_or_else(|| root.clone())
         }
         Some(Visibility::Fileprivate) => {
-            // TODO: Track SourceFile symbol properly
-            // For now, use root as we don't have file boundaries
-            root.clone()
+            // Fileprivate is visible within the same SourceFile
+            // Walk up from parent to find the containing SourceFile
+            parent
+                .and_then(|p| find_ancestor_of_kind(p, KestrelSymbolKind::SourceFile))
+                .unwrap_or_else(|| root.clone())
         }
         Some(Visibility::Internal) | Some(Visibility::Public) | None => {
             // Public and Internal are visible at root level
