@@ -3,6 +3,7 @@ mod kind;
 pub use kind::{FloatBits, IntBits, TyKind};
 
 use crate::symbol::class::ClassSymbol;
+use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
 use kestrel_span::Span;
@@ -89,6 +90,11 @@ impl Ty {
         Self::new(TyKind::Class(class_symbol), span)
     }
 
+    /// Create a protocol type (resolved)
+    pub fn protocol(protocol_symbol: Arc<ProtocolSymbol>, span: Span) -> Self {
+        Self::new(TyKind::Protocol(protocol_symbol), span)
+    }
+
     /// Create a struct type (resolved)
     pub fn r#struct(struct_symbol: Arc<StructSymbol>, span: Span) -> Self {
         Self::new(TyKind::Struct(struct_symbol), span)
@@ -151,6 +157,11 @@ impl Ty {
         matches!(self.kind, TyKind::Class(_))
     }
 
+    /// Check if this is a protocol type (resolved)
+    pub fn is_protocol(&self) -> bool {
+        matches!(self.kind, TyKind::Protocol(_))
+    }
+
     /// Check if this is a struct type (resolved)
     pub fn is_struct(&self) -> bool {
         matches!(self.kind, TyKind::Struct(_))
@@ -207,6 +218,14 @@ impl Ty {
     pub fn as_class(&self) -> Option<&Arc<ClassSymbol>> {
         match &self.kind {
             TyKind::Class(symbol) => Some(symbol),
+            _ => None,
+        }
+    }
+
+    /// Get protocol symbol if this is a protocol type
+    pub fn as_protocol(&self) -> Option<&Arc<ProtocolSymbol>> {
+        match &self.kind {
+            TyKind::Protocol(symbol) => Some(symbol),
             _ => None,
         }
     }

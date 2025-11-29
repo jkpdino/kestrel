@@ -1,5 +1,6 @@
 use crate::ty::Ty;
 use crate::symbol::class::ClassSymbol;
+use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
 use std::sync::Arc;
@@ -59,6 +60,10 @@ pub enum TyKind {
     /// Class type (resolved)
     /// This is a reference to a class symbol
     Class(Arc<ClassSymbol>),
+
+    /// Protocol type (resolved)
+    /// This is a reference to a protocol symbol
+    Protocol(Arc<ProtocolSymbol>),
 
     /// Struct type (resolved)
     /// This is a reference to a struct symbol

@@ -62,6 +62,7 @@ pub mod common;
 pub mod module;
 pub mod import;
 pub mod class;
+pub mod protocol;
 pub mod r#struct;
 pub mod field;
 pub mod function;
@@ -78,6 +79,7 @@ use event::{EventSink, TreeBuilder};
 pub use module::{ModuleDeclaration, ModulePath};
 pub use import::ImportDeclaration;
 pub use class::ClassDeclaration;
+pub use protocol::ProtocolDeclaration;
 pub use r#struct::StructDeclaration;
 pub use field::FieldDeclaration;
 pub use function::FunctionDeclaration;
@@ -89,6 +91,7 @@ pub use ty::TyExpression;
 pub use module::{parse_module_declaration, parse_module_path};
 pub use import::parse_import_declaration;
 pub use class::parse_class_declaration;
+pub use protocol::parse_protocol_declaration;
 pub use r#struct::parse_struct_declaration;
 pub use field::parse_field_declaration;
 pub use function::parse_function_declaration;
@@ -196,6 +199,21 @@ where
     function::parse_function_declaration(source, tokens, &mut sink);
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     FunctionDeclaration {
+        syntax: tree,
+        span: 0..source.len(),
+    }
+}
+
+/// Convenience function to parse a protocol declaration from source and tokens
+/// Returns a fully built ProtocolDeclaration with its syntax tree
+pub fn parse_protocol_declaration_from_source<I>(source: &str, tokens: I) -> ProtocolDeclaration
+where
+    I: Iterator<Item = (Token, Span)> + Clone,
+{
+    let mut sink = EventSink::new();
+    protocol::parse_protocol_declaration(source, tokens, &mut sink);
+    let tree = TreeBuilder::new(source, sink.into_events()).build();
+    ProtocolDeclaration {
         syntax: tree,
         span: 0..source.len(),
     }

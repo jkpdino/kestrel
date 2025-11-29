@@ -9,58 +9,58 @@ struct Point {
     let y: Int
 
     // Basic method
-    fn distance() -> Float { }
+    func distance() -> Float { }
 
     // Method with parameters
-    fn add(other: Point) -> Point { }
+    func add(other: Point) -> Point { }
 
     // Static method
-    static fn origin() -> Point { }
+    static func origin() -> Point { }
 
     // Public method
-    public fn publicMethod() { }
+    public func publicMethod() { }
 
     // Private method
-    private fn privateMethod() { }
+    private func privateMethod() { }
 
     // Valid overloads within struct
-    fn overloaded(x: Int) { }
-    fn overloaded(x: Float) { }
-    fn overloaded(x: Int, y: Int) { }
+    func overloaded(x: Int) { }
+    func overloaded(x: Float) { }
+    func overloaded(x: Int, y: Int) { }
 
     // Labeled method
-    fn move(by offset: Point) { }
-    fn move(to destination: Point) { }
+    func move(by offset: Point) { }
+    func move(to destination: Point) { }
 }
 
 struct Calculator {
     // Methods with same name as Point - should be fine (different scope)
-    fn add(x: Int, y: Int) -> Int { }
-    fn distance(from a: Int, to b: Int) -> Int { }
+    func add(x: Int, y: Int) -> Int { }
+    func distance(from a: Int, to b: Int) -> Int { }
 
     // Duplicate within struct (should error)
-    fn duplicate(x: Int) { }
-    fn duplicate(y: Int) { }
+    func duplicate(x: Int) { }
+    func duplicate(y: Int) { }
 }
 
 // Nested struct with functions
 struct Outer {
     let value: Int
 
-    fn outerMethod() { }
+    func outerMethod() { }
 
     struct Inner {
         let innerValue: Int
 
-        fn innerMethod() { }
+        func innerMethod() { }
 
         // Same name as outer - should be fine (different scope)
-        fn outerMethod() { }
+        func outerMethod() { }
     }
 }
 
 // Empty struct with only methods
 struct MethodOnly {
-    fn doSomething() { }
-    static fn create() -> MethodOnly { }
+    func doSomething() { }
+    static func create() -> MethodOnly { }
 }

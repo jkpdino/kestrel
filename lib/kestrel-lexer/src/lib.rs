@@ -96,8 +96,8 @@ pub enum Token {
     #[token("fileprivate")]
     Fileprivate,
 
-    #[token("fn")]
-    Fn,
+    #[token("func")]
+    Func,
 
     #[token("import")]
     Import,
@@ -113,6 +113,9 @@ pub enum Token {
 
     #[token("private")]
     Private,
+
+    #[token("protocol")]
+    Protocol,
 
     #[token("public")]
     Public,
@@ -220,14 +223,14 @@ mod tests {
 
     #[test]
     fn test_lexer() {
-        let source = "fn main() { let x = 42; }";
+        let source = "func main() { let x = 42; }";
         let tokens = filter_trivia(lex(source).collect());
 
         assert!(tokens.len() > 0);
 
-        // First token should be 'fn' at position 0..2
-        assert_eq!(tokens[0].value, Token::Fn);
-        assert_eq!(tokens[0].span, 0..2);
+        // First token should be 'func' at position 0..4
+        assert_eq!(tokens[0].value, Token::Func);
+        assert_eq!(tokens[0].span, 0..4);
     }
 
     #[test]
@@ -300,10 +303,10 @@ mod tests {
         assert_eq!(tokens[3].value, Token::Integer);
 
         // Test Greek identifiers
-        let source = "fn αβγ() { }";
+        let source = "func αβγ() { }";
         let tokens = filter_trivia(lex(source).collect());
 
-        assert_eq!(tokens[0].value, Token::Fn);
+        assert_eq!(tokens[0].value, Token::Func);
         assert_eq!(tokens[1].value, Token::Identifier); // αβγ
 
         // Test mixed scripts

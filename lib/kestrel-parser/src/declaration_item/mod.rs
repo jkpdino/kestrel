@@ -6,6 +6,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::module::{ModuleDeclaration, parse_module_declaration};
 use crate::import::{ImportDeclaration, parse_import_declaration};
 use crate::class::{ClassDeclaration, parse_class_declaration};
+use crate::protocol::{ProtocolDeclaration, parse_protocol_declaration};
 use crate::r#struct::{StructDeclaration, parse_struct_declaration};
 use crate::field::{FieldDeclaration, parse_field_declaration};
 use crate::function::{FunctionDeclaration, parse_function_declaration};
@@ -24,6 +25,7 @@ pub enum DeclarationItem {
     Module(ModuleDeclaration),
     Import(ImportDeclaration),
     Class(ClassDeclaration),
+    Protocol(ProtocolDeclaration),
     Struct(StructDeclaration),
     Field(FieldDeclaration),
     Function(FunctionDeclaration),
@@ -37,6 +39,7 @@ impl DeclarationItem {
             DeclarationItem::Module(decl) => &decl.span,
             DeclarationItem::Import(decl) => &decl.span,
             DeclarationItem::Class(decl) => &decl.span,
+            DeclarationItem::Protocol(decl) => &decl.span,
             DeclarationItem::Struct(decl) => &decl.span,
             DeclarationItem::Field(decl) => &decl.span,
             DeclarationItem::Function(decl) => &decl.span,
@@ -50,6 +53,7 @@ impl DeclarationItem {
             DeclarationItem::Module(decl) => &decl.syntax,
             DeclarationItem::Import(decl) => &decl.syntax,
             DeclarationItem::Class(decl) => &decl.syntax,
+            DeclarationItem::Protocol(decl) => &decl.syntax,
             DeclarationItem::Struct(decl) => &decl.syntax,
             DeclarationItem::Field(decl) => &decl.syntax,
             DeclarationItem::Function(decl) => &decl.syntax,
@@ -64,11 +68,13 @@ enum DeclarationItemData {
     Module(Span, Vec<Span>),
     Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>),
     Class(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
+    /// Protocol: visibility, protocol_span, name_span, lbrace_span, body (functions), rbrace_span
+    Protocol(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
     Struct(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
     /// Field: visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty
     Field(Option<(Token, Span)>, Option<Span>, Span, bool, Span, Span, TyVariant),
-    /// Function: visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, lbrace, rbrace
-    Function(Option<(Token, Span)>, Option<Span>, Span, Span, Span, Vec<ParameterData>, Span, Option<(Span, TyVariant)>, Span, Span),
+    /// Function: visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body (optional)
+    Function(Option<(Token, Span)>, Option<Span>, Span, Span, Span, Vec<ParameterData>, Span, Option<(Span, TyVariant)>, Option<(Span, Span)>),
     TypeAlias(Option<(Token, Span)>, Span, Span, Span, Span, Span),
 }
 
@@ -182,6 +188,18 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
                 DeclarationItemData::Struct(visibility, struct_span, name_span, lbrace_span, body, rbrace_span)
             });
 
+        // Protocol: (visibility)? protocol Name { (function declarations)* }
+        // Protocol body only contains function declarations (methods)
+        let protocol_parser = visibility_parser_internal()
+            .then(token(Token::Protocol))
+            .then(identifier())
+            .then(token(Token::LBrace))
+            .then(declaration_item.clone().repeated())
+            .then(token(Token::RBrace))
+            .map(|(((((visibility, protocol_span), name_span), lbrace_span), body), rbrace_span)| {
+                DeclarationItemData::Protocol(visibility, protocol_span, name_span, lbrace_span, body, rbrace_span)
+            });
+
         // Field: (visibility)? (static)? let/var name: Type
         let field_parser = visibility_parser_internal()
             .then(static_parser_internal())
@@ -193,19 +211,24 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
                 DeclarationItemData::Field(visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty)
             });
 
-        // Function: (visibility)? (static)? fn name(params) (-> Type)? { }
+        // Function body parser (optional): { }
+        let function_body_parser = token(Token::LBrace)
+            .then(token(Token::RBrace))
+            .map(|(lbrace, rbrace)| Some((lbrace, rbrace)))
+            .or(empty().map(|_| None));
+
+        // Function: (visibility)? (static)? fn name(params) (-> Type)? ({ })?
         let function_parser = visibility_parser_internal()
             .then(static_parser_internal())
-            .then(token(Token::Fn))
+            .then(token(Token::Func))
             .then(identifier())
             .then(token(Token::LParen))
             .then(parameter_list_parser_internal())
             .then(token(Token::RParen))
             .then(return_type_parser_internal())
-            .then(token(Token::LBrace))
-            .then(token(Token::RBrace))
-            .map(|(((((((((visibility, is_static), fn_span), name_span), lparen), parameters), rparen), return_type), lbrace), rbrace)| {
-                DeclarationItemData::Function(visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, lbrace, rbrace)
+            .then(function_body_parser)
+            .map(|((((((((visibility, is_static), fn_span), name_span), lparen), parameters), rparen), return_type), body)| {
+                DeclarationItemData::Function(visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body)
             });
 
         let type_alias_parser = visibility_parser_internal()
@@ -218,7 +241,7 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
                 DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span)
             });
 
-        module_parser.or(import_parser).or(class_parser).or(struct_parser).or(function_parser).or(field_parser).or(type_alias_parser)
+        module_parser.or(import_parser).or(class_parser).or(protocol_parser).or(struct_parser).or(function_parser).or(field_parser).or(type_alias_parser)
     })
 }
 
@@ -251,6 +274,7 @@ where
     let tokens_clone4 = tokens.clone();
     let tokens_clone5 = tokens.clone();
     let tokens_clone6 = tokens.clone();
+    let tokens_clone7 = tokens.clone();
 
     // Try parsing as module declaration
     let module_result = {
@@ -314,10 +338,31 @@ where
         return;
     }
 
-    // If class parsing failed, try struct declaration
+    // If class parsing failed, try protocol declaration
     {
         let mut temp_sink = EventSink::new();
-        parse_struct_declaration(source, tokens_clone3, &mut temp_sink);
+        parse_protocol_declaration(source, tokens_clone3, &mut temp_sink);
+
+        // Check if there were errors
+        let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
+        if !has_errors {
+            // Success! Copy events to the main sink
+            for event in temp_sink.into_events() {
+                match event {
+                    crate::event::Event::StartNode(kind) => sink.start_node(kind),
+                    crate::event::Event::AddToken(kind, span) => sink.add_token(kind, span),
+                    crate::event::Event::FinishNode => sink.finish_node(),
+                    crate::event::Event::Error { message, span } => sink.error(message, span),
+                }
+            }
+            return;
+        }
+    }
+
+    // If protocol parsing failed, try struct declaration
+    {
+        let mut temp_sink = EventSink::new();
+        parse_struct_declaration(source, tokens_clone4, &mut temp_sink);
 
         // Check if there were errors
         let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
@@ -338,7 +383,7 @@ where
     // If struct parsing failed, try function declaration
     {
         let mut temp_sink = EventSink::new();
-        parse_function_declaration(source, tokens_clone4, &mut temp_sink);
+        parse_function_declaration(source, tokens_clone5, &mut temp_sink);
 
         // Check if there were errors
         let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
@@ -359,7 +404,7 @@ where
     // If function parsing failed, try field declaration
     {
         let mut temp_sink = EventSink::new();
-        parse_field_declaration(source, tokens_clone5, &mut temp_sink);
+        parse_field_declaration(source, tokens_clone6, &mut temp_sink);
 
         // Check if there were errors
         let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
@@ -379,7 +424,7 @@ where
 
     // If field parsing failed, try type alias declaration
     let mut temp_sink = EventSink::new();
-    parse_type_alias_declaration(source, tokens_clone6, &mut temp_sink);
+    parse_type_alias_declaration(source, tokens_clone7, &mut temp_sink);
 
     // Check if there were errors
     let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
@@ -397,7 +442,7 @@ where
     }
 
     // All failed - emit error (no specific span available since all parsers failed)
-    sink.error_no_span("Expected module, import, class, struct, function, field, or type alias declaration".to_string());
+    sink.error_no_span("Expected module, import, class, protocol, struct, function, field, or type alias declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -431,6 +476,10 @@ where
                         // Emit class declaration events
                         emit_class_declaration(sink, visibility, class_span, name_span, lbrace_span, body, rbrace_span);
                     }
+                    DeclarationItemData::Protocol(visibility, protocol_span, name_span, lbrace_span, body, rbrace_span) => {
+                        // Emit protocol declaration events
+                        emit_protocol_declaration(sink, visibility, protocol_span, name_span, lbrace_span, body, rbrace_span);
+                    }
                     DeclarationItemData::Struct(visibility, struct_span, name_span, lbrace_span, body, rbrace_span) => {
                         // Emit struct declaration events
                         emit_struct_declaration(sink, visibility, struct_span, name_span, lbrace_span, body, rbrace_span);
@@ -439,9 +488,9 @@ where
                         // Emit field declaration events
                         emit_field_declaration(sink, visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty);
                     }
-                    DeclarationItemData::Function(visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, lbrace, rbrace) => {
+                    DeclarationItemData::Function(visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body) => {
                         // Emit function declaration events
-                        emit_function_declaration(sink, visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, lbrace, rbrace);
+                        emit_function_declaration(sink, visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body);
                     }
                     DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span) => {
                         // Emit type alias declaration events
@@ -510,6 +559,55 @@ fn emit_class_declaration(
     sink.finish_node(); // Finish ClassBody
 
     sink.finish_node(); // Finish ClassDeclaration
+}
+
+/// Emit events for a protocol declaration
+/// Helper function used by parse_source_file
+fn emit_protocol_declaration(
+    sink: &mut EventSink,
+    visibility: Option<(Token, Span)>,
+    protocol_span: Span,
+    name_span: Span,
+    lbrace_span: Span,
+    body: Vec<DeclarationItemData>,
+    rbrace_span: Span,
+) {
+    sink.start_node(SyntaxKind::ProtocolDeclaration);
+
+    // Always emit Visibility node (may be empty)
+    sink.start_node(SyntaxKind::Visibility);
+    if let Some((vis_token, vis_span)) = visibility {
+        let vis_kind = match vis_token {
+            Token::Public => SyntaxKind::Public,
+            Token::Private => SyntaxKind::Private,
+            Token::Internal => SyntaxKind::Internal,
+            Token::Fileprivate => SyntaxKind::Fileprivate,
+            _ => unreachable!("visibility_parser_internal only returns visibility tokens"),
+        };
+        sink.add_token(vis_kind, vis_span);
+    }
+    sink.finish_node(); // Finish Visibility
+
+    sink.add_token(SyntaxKind::Protocol, protocol_span);
+
+    // Emit Name node wrapping the identifier
+    sink.start_node(SyntaxKind::Name);
+    sink.add_token(SyntaxKind::Identifier, name_span);
+    sink.finish_node(); // Finish Name
+
+    // Emit ProtocolBody node wrapping the body content
+    sink.start_node(SyntaxKind::ProtocolBody);
+    sink.add_token(SyntaxKind::LBrace, lbrace_span);
+
+    // Emit nested declaration items (should only be function declarations)
+    for item_data in body {
+        emit_declaration_item_internal(sink, item_data);
+    }
+
+    sink.add_token(SyntaxKind::RBrace, rbrace_span);
+    sink.finish_node(); // Finish ProtocolBody
+
+    sink.finish_node(); // Finish ProtocolDeclaration
 }
 
 /// Emit events for a struct declaration
@@ -638,8 +736,7 @@ fn emit_function_declaration(
     parameters: Vec<ParameterData>,
     rparen: Span,
     return_type: Option<(Span, TyVariant)>,
-    lbrace: Span,
-    rbrace: Span,
+    body: Option<(Span, Span)>,
 ) {
     use crate::ty::{emit_unit_type, emit_never_type, emit_tuple_type, emit_function_type, emit_path_type};
 
@@ -667,7 +764,7 @@ fn emit_function_declaration(
     }
 
     // Emit fn keyword
-    sink.add_token(SyntaxKind::Fn, fn_span);
+    sink.add_token(SyntaxKind::Func, fn_span);
 
     // Emit Name node wrapping the identifier
     sink.start_node(SyntaxKind::Name);
@@ -731,12 +828,14 @@ fn emit_function_declaration(
         sink.finish_node(); // Finish ReturnType
     }
 
-    // Emit FunctionBody node
-    sink.start_node(SyntaxKind::FunctionBody);
-    sink.add_token(SyntaxKind::LBrace, lbrace);
-    // TODO: Function body contents will be added later
-    sink.add_token(SyntaxKind::RBrace, rbrace);
-    sink.finish_node(); // Finish FunctionBody
+    // Emit FunctionBody node if present (optional for protocol methods)
+    if let Some((lbrace, rbrace)) = body {
+        sink.start_node(SyntaxKind::FunctionBody);
+        sink.add_token(SyntaxKind::LBrace, lbrace);
+        // TODO: Function body contents will be added later
+        sink.add_token(SyntaxKind::RBrace, rbrace);
+        sink.finish_node(); // Finish FunctionBody
+    }
 
     sink.finish_node(); // Finish FunctionDeclaration
 }
@@ -803,14 +902,17 @@ fn emit_declaration_item_internal(sink: &mut EventSink, item_data: DeclarationIt
         DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span) => {
             emit_class_declaration(sink, visibility, class_span, name_span, lbrace_span, body, rbrace_span);
         }
+        DeclarationItemData::Protocol(visibility, protocol_span, name_span, lbrace_span, body, rbrace_span) => {
+            emit_protocol_declaration(sink, visibility, protocol_span, name_span, lbrace_span, body, rbrace_span);
+        }
         DeclarationItemData::Struct(visibility, struct_span, name_span, lbrace_span, body, rbrace_span) => {
             emit_struct_declaration(sink, visibility, struct_span, name_span, lbrace_span, body, rbrace_span);
         }
         DeclarationItemData::Field(visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty) => {
             emit_field_declaration(sink, visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty);
         }
-        DeclarationItemData::Function(visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, lbrace, rbrace) => {
-            emit_function_declaration(sink, visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, lbrace, rbrace);
+        DeclarationItemData::Function(visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body) => {
+            emit_function_declaration(sink, visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body);
         }
         DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span) => {
             emit_type_alias_declaration(sink, visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span);

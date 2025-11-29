@@ -172,6 +172,35 @@ fn main() {
         "tests/functions/in_structs.ks",
     ]);
 
+    // Test protocol declarations
+    process_file_group("Protocol Basic Declarations", &[
+        "tests/protocol/basic.ks",
+    ]);
+
+    process_file_group("Protocol Methods", &[
+        "tests/protocol/methods.ks",
+    ]);
+
+    process_file_group("Protocol Visibility", &[
+        "tests/protocol/visibility.ks",
+    ]);
+
+    process_file_group("Protocol Nested", &[
+        "tests/protocol/nested.ks",
+    ]);
+
+    process_file_group("Protocol Complex Types", &[
+        "tests/protocol/complex_types.ks",
+    ]);
+
+    process_file_group("Protocol Edge Cases", &[
+        "tests/protocol/edge_cases.ks",
+    ]);
+
+    process_file_group("Protocol Error Cases", &[
+        "tests/protocol/error_cases.ks",
+    ]);
+
     println!("\n{}", "=".repeat(70));
     println!("All test groups processed!");
     println!("{}", "=".repeat(70));

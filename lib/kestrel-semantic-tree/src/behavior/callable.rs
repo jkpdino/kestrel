@@ -145,6 +145,9 @@ impl SignatureType {
             TyKind::Struct(s) => {
                 SignatureType::Named(vec![s.metadata().name().value.clone()])
             }
+            TyKind::Protocol(p) => {
+                SignatureType::Named(vec![p.metadata().name().value.clone()])
+            }
             TyKind::TypeAlias(alias) => {
                 // For type aliases, use the alias name
                 // (could also resolve to underlying type)

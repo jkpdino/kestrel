@@ -6,65 +6,65 @@ module Functions.EdgeCases
 
 // --- Empty parameter list ---
 
-fn emptyParams() { }
+func emptyParams() { }
 
 // --- Single character names ---
 
-fn a() { }
-fn b(x: Int) { }
-fn c(a b: Int) { }
+func a() { }
+func b(x: Int) { }
+func c(a b: Int) { }
 
 // --- Long names ---
 
-fn veryLongFunctionNameThatShouldStillWorkCorrectly() { }
-fn anotherLongName(veryLongParameterName: Int) { }
-fn withLongLabel(veryLongLabelName paramName: String) { }
+func veryLongFunctionNameThatShouldStillWorkCorrectly() { }
+func anotherLongName(veryLongParameterName: Int) { }
+func withLongLabel(veryLongLabelName paramName: String) { }
 
 // --- All visibility + static combinations ---
 
-fn plain() { }
-public fn pub() { }
-private fn priv() { }
-internal fn intern() { }
-fileprivate fn filepriv() { }
-static fn stat() { }
-public static fn pubStat() { }
-private static fn privStat() { }
-internal static fn internStat() { }
-fileprivate static fn fileprivStat() { }
+func plain() { }
+public func pub() { }
+private func priv() { }
+internal func intern() { }
+fileprivate func filepriv() { }
+static func stat() { }
+public static func pubStat() { }
+private static func privStat() { }
+internal static func internStat() { }
+fileprivate static func fileprivStat() { }
 
 // --- Label same as bind name ---
 
-fn labelSameAsBind(x x: Int) { }
+func labelSameAsBind(x x: Int) { }
 
 // --- Label same as function name ---
 
-fn sameName(sameName x: Int) { }
+func sameName(sameName x: Int) { }
 
 // --- Multiple functions, same labels, different positions ---
 
-fn labelPosition(first a: Int, b: Int) { }
-fn labelPosition(a: Int, second b: Int) { }
+func labelPosition(first a: Int, b: Int) { }
+func labelPosition(a: Int, second b: Int) { }
 
 // --- Unit type in various positions ---
 
-fn unitReturn() -> () { }
+func unitReturn() -> () { }
 
 // --- Never type ---
 
-fn neverReturn() -> ! { }
+func neverReturn() -> ! { }
 
 // --- Overload with labeled vs unlabeled ---
 // The unlabeled uses bind name as external name
 
-fn labeledVsUnlabeled(x: Int) { }
-fn labeledVsUnlabeled(label x: Int) { }
+func labeledVsUnlabeled(x: Int) { }
+func labeledVsUnlabeled(label x: Int) { }
 
 // --- Same label, different bind names (should be duplicate) ---
 
-fn sameLabelTest(with a: Int) { }
-fn sameLabelTest(with b: Int) { }
+func sameLabelTest(with a: Int) { }
+func sameLabelTest(with b: Int) { }
 
 // --- Many parameters ---
 
-fn manyParams(a: Int, b: Int, c: Int, d: Int) { }
+func manyParams(a: Int, b: Int, c: Int, d: Int) { }

@@ -56,11 +56,18 @@
 
 ### Functions
 
-- [ ] Function Declarations - Standalone functions (not methods yet)
-  - [ ] Parser support (reimplement properly)
-  - [ ] Function signatures with parameter types
-  - [ ] Return type declarations
-  - [ ] Function type resolution
+- [x] Function Declarations - `(visibility)? (static)? fn name(params) (-> Type)? { }`
+  - [x] Parser support for function declarations
+  - [x] Function signatures with parameter types
+  - [x] Return type declarations
+  - [x] Labeled parameters (`fn greet(with name: String)`)
+  - [x] Semantic tree representation (FunctionSymbol)
+  - [x] CallableBehavior for callable semantics
+- [x] Function Overloading
+  - [x] Overloading by arity (different parameter counts)
+  - [x] Overloading by parameter types
+  - [x] Overloading by labels (labeled vs unlabeled)
+  - [x] Duplicate signature detection with clear error messages
 - [x] Function Types - First-class function types `(Int, Int) -> Int`
   - [x] Parser support for function type syntax
   - [x] TyKind::Function representation
@@ -125,7 +132,7 @@
 
 ## Phase 5: Advanced Features
 
-- [ ] Methods - Functions on structs
+- [x] Methods - Functions on structs (basic support via function declarations in struct bodies)
 - [ ] Protocol Implementations - `impl Protocol for Struct`
 - [ ] Associated Types - Types within protocols
 - [ ] Error Handling - Result types, error propagation
@@ -147,18 +154,19 @@
 ## Current Status
 
 **Phase**: Phase 1 (Type System Foundation)
-**Progress**: ~80% of Phase 1 complete
+**Progress**: ~90% of Phase 1 complete
 **Next Tasks**:
 
-1. Function Declarations (medium)
-2. Protocols (medium)
-3. Type Checking Infrastructure
+1. Protocols (medium)
+2. Type Checking Infrastructure
 
 ## Notes
 
 - Structs replace classes for a simpler, more flexible type system
 - Protocols provide interface abstraction without inheritance complexity
 - Functions are first-class, enabling functional programming patterns
+- Function overloading supported via arity, types, and labels
+- Labeled parameters enable Swift-style named arguments
 - Import resolution must work before advanced features (generics, protocols)
 - Values/expressions come after types are solid
 - Classes are implemented as a stepping stone; will be replaced by Structs

@@ -2,143 +2,143 @@
 
 // Authentication service with multiple methods
 public class AuthService {
-  public fn login(username: String, password: String) -> Bool {}
-  public fn logout(userId: Int) -> Bool {}
-  private fn validateCredentials(username: String, password: String) -> Bool {}
-  private fn hashPassword(password: String) -> String {}
-  internal fn refreshToken(token: String) -> String {}
+  public func login(username: String, password: String) -> Bool {}
+  public func logout(userId: Int) -> Bool {}
+  private func validateCredentials(username: String, password: String) -> Bool {}
+  private func hashPassword(password: String) -> String {}
+  internal func refreshToken(token: String) -> String {}
 }
 
 // User repository with CRUD operations
 public class UserRepository {
-  public fn create(name: String, email: String) -> Int {}
-  public fn findById(id: Int) -> String {}
-  public fn update(id: Int, name: String) -> Bool {}
-  public fn delete(id: Int) -> Bool {}
-  private fn validate(email: String) -> Bool {}
+  public func create(name: String, email: String) -> Int {}
+  public func findById(id: Int) -> String {}
+  public func update(id: Int, name: String) -> Bool {}
+  public func delete(id: Int) -> Bool {}
+  private func validate(email: String) -> Bool {}
 }
 
 // ===== Nested Service Architecture =====
 
 public class PaymentService {
-  public fn processPayment(amount: Int, method: String) -> Bool {}
+  public func processPayment(amount: Int, method: String) -> Bool {}
 
   class CreditCard {
-    fn validate(number: String) -> Bool {}
-    fn charge(amount: Int) -> String {}
+    func validate(number: String) -> Bool {}
+    func charge(amount: Int) -> String {}
   }
 
   class PayPal {
-    fn authenticate(token: String) -> Bool {}
-    fn transfer(amount: Int) -> String {}
+    func authenticate(token: String) -> Bool {}
+    func transfer(amount: Int) -> String {}
   }
 
-  private fn logTransaction(id: String) -> Bool {}
+  private func logTransaction(id: String) -> Bool {}
 }
 
 // ===== Mixed Declarations in a Module Context =====
 
 class DatabaseConnection {
-  fn connect(host: String) -> Bool {}
-  fn disconnect() -> Bool {}
+  func connect(host: String) -> Bool {}
+  func disconnect() -> Bool {}
 
   class QueryBuilder {
-    fn select(table: String) -> String {}
-    fn where(condition: String) -> String {}
-    fn limit(count: Int) -> String {}
+    func select(table: String) -> String {}
+    func where(condition: String) -> String {}
+    func limit(count: Int) -> String {}
   }
 }
 
-fn globalHelper(data: String) -> String {}
-fn anotherHelper(value: Int) -> Bool {}
+func globalHelper(data: String) -> String {}
+func anotherHelper(value: Int) -> Bool {}
 
 // ===== Multiple Levels of Nesting =====
 
 public class Application {
-  public fn start() -> Bool {}
+  public func start() -> Bool {}
 
   class Server {
-    fn initialize(port: Int) -> Bool {}
+    func initialize(port: Int) -> Bool {}
 
     class Router {
-      fn addRoute(path: String) -> Bool {}
-      fn handleRequest(request: String) -> String {}
+      func addRoute(path: String) -> Bool {}
+      func handleRequest(request: String) -> String {}
     }
 
     class Middleware {
-      fn authenticate(token: String) -> Bool {}
-      fn authorize(userId: Int, resource: String) -> Bool {}
+      func authenticate(token: String) -> Bool {}
+      func authorize(userId: Int, resource: String) -> Bool {}
     }
   }
 
   class Database {
-    fn connect() -> Bool {}
-    fn query(sql: String) -> String {}
+    func connect() -> Bool {}
+    func query(sql: String) -> String {}
   }
 
-  private fn configure() -> Bool {}
+  private func configure() -> Bool {}
 }
 
 // ===== Utility Classes with Static-like Functions =====
 
 public class StringUtils {
-  public fn uppercase(text: String) -> String {}
-  public fn lowercase(text: String) -> String {}
-  public fn trim(text: String) -> String {}
-  public fn concat(a: String, b: String) -> String {}
-  private fn validateNotEmpty(text: String) -> Bool {}
+  public func uppercase(text: String) -> String {}
+  public func lowercase(text: String) -> String {}
+  public func trim(text: String) -> String {}
+  public func concat(a: String, b: String) -> String {}
+  private func validateNotEmpty(text: String) -> Bool {}
 }
 
 public class MathUtils {
-  public fn add(a: Int, b: Int) -> Int {}
-  public fn subtract(a: Int, b: Int) -> Int {}
-  public fn multiply(a: Int, b: Int) -> Int {}
-  public fn divide(a: Int, b: Int) -> Float {}
-  private fn checkDivisionByZero(b: Int) -> Bool {}
+  public func add(a: Int, b: Int) -> Int {}
+  public func subtract(a: Int, b: Int) -> Int {}
+  public func multiply(a: Int, b: Int) -> Int {}
+  public func divide(a: Int, b: Int) -> Float {}
+  private func checkDivisionByZero(b: Int) -> Bool {}
 }
 
 // ===== API Controller Pattern =====
 
 public class UserController {
-  public fn getUser(id: Int) -> String {}
-  public fn createUser(name: String, email: String) -> Int {}
-  public fn updateUser(id: Int, name: String) -> Bool {}
-  public fn deleteUser(id: Int) -> Bool {}
+  public func getUser(id: Int) -> String {}
+  public func createUser(name: String, email: String) -> Int {}
+  public func updateUser(id: Int, name: String) -> Bool {}
+  public func deleteUser(id: Int) -> Bool {}
 
   private class Validator {
-    fn validateName(name: String) -> Bool {}
-    fn validateEmail(email: String) -> Bool {}
+    func validateName(name: String) -> Bool {}
+    func validateEmail(email: String) -> Bool {}
   }
 
   private class Serializer {
-    fn toJson(data: String) -> String {}
-    fn fromJson(json: String) -> String {}
+    func toJson(data: String) -> String {}
+    func fromJson(json: String) -> String {}
   }
 
-  private fn authorize(userId: Int) -> Bool {}
+  private func authorize(userId: Int) -> Bool {}
 }
 
 // ===== Standalone Helper Functions =====
 
-fn formatDate(timestamp: Int) -> String {}
-fn parseDate(dateString: String) -> Int {}
-fn generateId() -> Int {}
-fn validateInput(input: String) -> Bool {}
+func formatDate(timestamp: Int) -> String {}
+func parseDate(dateString: String) -> Int {}
+func generateId() -> Int {}
+func validateInput(input: String) -> Bool {}
 
 // ===== Mixed Visibility in Same Class =====
 
 public class ComplexService {
   // Public API
-  public fn publicMethod(data: String) -> Bool {}
-  public fn anotherPublicMethod(id: Int) -> String {}
+  public func publicMethod(data: String) -> Bool {}
+  public func anotherPublicMethod(id: Int) -> String {}
 
   // Internal helpers
-  internal fn internalHelper(value: Int) -> Bool {}
+  internal func internalHelper(value: Int) -> Bool {}
 
   // Private implementation details
-  private fn privateImplementation(data: String) -> String {}
-  private fn anotherPrivateHelper(x: Int, y: Int) -> Int {}
+  private func privateImplementation(data: String) -> String {}
+  private func anotherPrivateHelper(x: Int, y: Int) -> Int {}
 
   // Default visibility
-  fn defaultMethod() -> Bool {}
+  func defaultMethod() -> Bool {}
 }

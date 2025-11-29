@@ -4,6 +4,7 @@ pub mod function;
 pub mod import;
 pub mod kind;
 pub mod module;
+pub mod protocol;
 pub mod source_file;
 pub mod r#struct;
 pub mod type_alias;

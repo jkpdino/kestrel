@@ -7,6 +7,7 @@ pub enum KestrelSymbolKind {
     Function,
     Import,
     Module,
+    Protocol,
     SourceFile,
     Struct,
     TypeAlias,

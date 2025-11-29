@@ -1,64 +1,64 @@
 module Functions.Basic
 
 // Basic function with no parameters
-fn empty() { }
+func empty() { }
 
 // Function with single parameter
-fn single(x: Int) { }
+func single(x: Int) { }
 
 // Function with multiple parameters
-fn multiple(a: Int, b: String, c: Float) { }
+func multiple(a: Int, b: String, c: Float) { }
 
 // Function with return type
-fn withReturn() -> Int { }
+func withReturn() -> Int { }
 
 // Function with parameters and return type
-fn addNumbers(x: Int, y: Int) -> Int { }
+func addNumbers(x: Int, y: Int) -> Int { }
 
 // Public function
-public fn publicFunc() { }
+public func publicFunc() { }
 
 // Private function
-private fn privateFunc() { }
+private func privateFunc() { }
 
 // Internal function
-internal fn internalFunc() { }
+internal func internalFunc() { }
 
 // Fileprivate function
-fileprivate fn fileprivateFunc() { }
+fileprivate func fileprivateFunc() { }
 
 // Static function
-static fn staticFunc() { }
+static func staticFunc() { }
 
 // Public static function
-public static fn publicStaticFunc() { }
+public static func publicStaticFunc() { }
 
 // Function with labeled parameter (Swift-style)
-fn greetPerson(with name: String) { }
+func greetPerson(with name: String) { }
 
 // Function with multiple labeled parameters
-fn sendMessage(from sender: String, to recipient: String) { }
+func sendMessage(from sender: String, to recipient: String) { }
 
 // Function with mixed labeled and unlabeled parameters
-fn mixedParams(label1 x: Int, y: Int, label2 z: String) { }
+func mixedParams(label1 x: Int, y: Int, label2 z: String) { }
 
 // Function returning unit type explicitly
-fn returnsUnit() -> () { }
+func returnsUnit() -> () { }
 
 // Function returning never type
-fn returnsNever() -> ! { }
+func returnsNever() -> ! { }
 
 // Function returning tuple
-fn returnsTuple() -> (Int, String) { }
+func returnsTuple() -> (Int, String) { }
 
 // Function returning function type
-fn returnsFunction() -> (Int) -> String { }
+func returnsFunction() -> (Int) -> String { }
 
 // Function with function type parameter
-fn takesFunction(f: (Int, Int) -> Bool) { }
+func takesFunction(f: (Int, Int) -> Bool) { }
 
 // Function with complex nested type
-fn complexTypes(f: ((Int) -> String, Bool) -> (Float, Float)) { }
+func complexTypes(f: ((Int) -> String, Bool) -> (Float, Float)) { }
 
 // Function with path type parameter
-fn pathType(point: Geometry.Point) { }
+func pathType(point: Geometry.Point) { }

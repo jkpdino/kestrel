@@ -22,10 +22,10 @@ class αβγ { }
 class 世界 { }
 
 // Unicode in function names
-fn café() {}
-fn 世界() {}
-fn привет() {}
-fn αβγ() {}
+func café() {}
+func 世界() {}
+func привет() {}
+func αβγ() {}
 
 // Unicode in type aliases
 type café = Coffee
@@ -41,14 +41,14 @@ type مرحبا = ArabicHello
 class VeryLongClassNameThatIsStillValid { }
 
 // Long function name
-fn thisIsAVeryLongFunctionNameThatIsStillValidButUnusual() {}
+func thisIsAVeryLongFunctionNameThatIsStillValidButUnusual() {}
 
 // Long parameter name
-fn withParams(veryLongParameterName: String) {}
-fn anotherFunction(anotherLongParameterName: Int) {}
+func withParams(veryLongParameterName: String) {}
+func anotherFunction(anotherLongParameterName: Int) {}
 
 // Long function with return type
-fn veryLongFunctionNameWithParametersAndReturnType() -> String {}
+func veryLongFunctionNameWithParametersAndReturnType() -> String {}
 
 // Long type alias
 type VeryLongTypeAliasNameThatGoesOnAndOnAndOnAndOnAndOn = SomeType
@@ -91,7 +91,7 @@ class A { }
 
 module A
 
-fn x() {}
+func x() {}
 
 type A = Foo
 type B = Bar

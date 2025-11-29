@@ -54,6 +54,9 @@ pub fn resolve_type(
         // Struct types are already resolved
         TyKind::Struct(_) => Some(ty.clone()),
 
+        // Protocol types are already resolved
+        TyKind::Protocol(_) => Some(ty.clone()),
+
         // Type alias types should be resolved to their underlying type
         // Note: This might need special handling to prevent infinite recursion
         TyKind::TypeAlias(_) => {

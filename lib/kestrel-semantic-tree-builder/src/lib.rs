@@ -685,6 +685,7 @@ fn bind_symbol(
     let syntax_kind = match kind {
         KestrelSymbolKind::Import => Some(SyntaxKind::ImportDeclaration),
         KestrelSymbolKind::Class => Some(SyntaxKind::ClassDeclaration),
+        KestrelSymbolKind::Protocol => Some(SyntaxKind::ProtocolDeclaration),
         KestrelSymbolKind::Struct => Some(SyntaxKind::StructDeclaration),
         KestrelSymbolKind::Field => Some(SyntaxKind::FieldDeclaration),
         KestrelSymbolKind::Function => Some(SyntaxKind::FunctionDeclaration),
@@ -779,6 +780,7 @@ fn format_type(ty: &Ty) -> String {
         }
         TyKind::Path(segments) => segments.join("."),
         TyKind::Class(class_symbol) => class_symbol.metadata().name().value.clone(),
+        TyKind::Protocol(protocol_symbol) => protocol_symbol.metadata().name().value.clone(),
         TyKind::Struct(struct_symbol) => struct_symbol.metadata().name().value.clone(),
         TyKind::TypeAlias(type_alias_symbol) => type_alias_symbol.metadata().name().value.clone(),
     }

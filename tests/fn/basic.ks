@@ -1,56 +1,56 @@
 // ===== Basic Standalone Usage =====
 
 // Simplest function declaration
-fn simple() {}
+func simple() {}
 
 // Multiple functions
-fn first() {}
-fn second() {}
-fn third() {}
+func first() {}
+func second() {}
+func third() {}
 
 // ===== Visibility Modifiers =====
 
 // Default visibility (no modifier)
-fn defaultVisibility() {}
+func defaultVisibility() {}
 
 // Public function
-public fn publicFunction() {}
+public func publicFunction() {}
 
 // Private function
-private fn privateFunction() {}
+private func privateFunction() {}
 
 // Internal function
-internal fn internalFunction() {}
+internal func internalFunction() {}
 
 // Fileprivate function
-fileprivate fn fileprivateFunction() {}
+fileprivate func fileprivateFunction() {}
 
 // ===== Multiple Features Together =====
 
 class Service {
-  fn initialize() {}
-  fn process() {}
-  fn cleanup() {}
+  func initialize() {}
+  func process() {}
+  func cleanup() {}
 }
 
 public class PublicService {
-  public fn publicAPI() {}
-  private fn internalHelper() {}
+  public func publicAPI() {}
+  private func internalHelper() {}
 }
 
 // ===== Error Cases (commented out) =====
 
 // ERROR: Missing identifier
-// fn () {}
+// func () {}
 
 // ERROR: Missing parentheses
-// fn noParens {}
+// func noParens {}
 
 // ERROR: Invalid visibility
-// invalid fn wrongVisibility() {}
+// invalid func wrongVisibility() {}
 
 // ERROR: Reserved keyword as name
-// fn class() {}
+// func class() {}
 
 // ERROR: Number as identifier
-// fn 123() {}
+// func 123() {}

@@ -41,6 +41,8 @@ pub enum SyntaxKind {
     DeclarationItem,
     ClassDeclaration,
     ClassBody,
+    ProtocolDeclaration,
+    ProtocolBody,
     StructDeclaration,
     StructBody,
     ImportDeclaration,
@@ -86,13 +88,14 @@ pub enum SyntaxKind {
     Class,
     Else,
     Fileprivate,
-    Fn,
+    Func,
     If,
     Import,
     Internal,
     Let,
     Module,
     Private,
+    Protocol,
     Public,
     Static,
     Struct,
@@ -156,13 +159,14 @@ impl From<Token> for SyntaxKind {
             Token::Class => SyntaxKind::Class,
             Token::Else => SyntaxKind::Else,
             Token::Fileprivate => SyntaxKind::Fileprivate,
-            Token::Fn => SyntaxKind::Fn,
+            Token::Func => SyntaxKind::Func,
             Token::If => SyntaxKind::If,
             Token::Import => SyntaxKind::Import,
             Token::Internal => SyntaxKind::Internal,
             Token::Let => SyntaxKind::Let,
             Token::Module => SyntaxKind::Module,
             Token::Private => SyntaxKind::Private,
+            Token::Protocol => SyntaxKind::Protocol,
             Token::Public => SyntaxKind::Public,
             Token::Static => SyntaxKind::Static,
             Token::Struct => SyntaxKind::Struct,
@@ -205,6 +209,8 @@ impl Language for KestrelLanguage {
         const DECLARATION_ITEM: u16 = SyntaxKind::DeclarationItem as u16;
         const CLASS_DECLARATION: u16 = SyntaxKind::ClassDeclaration as u16;
         const CLASS_BODY: u16 = SyntaxKind::ClassBody as u16;
+        const PROTOCOL_DECLARATION: u16 = SyntaxKind::ProtocolDeclaration as u16;
+        const PROTOCOL_BODY: u16 = SyntaxKind::ProtocolBody as u16;
         const STRUCT_DECLARATION: u16 = SyntaxKind::StructDeclaration as u16;
         const STRUCT_BODY: u16 = SyntaxKind::StructBody as u16;
         const IMPORT_DECLARATION: u16 = SyntaxKind::ImportDeclaration as u16;
@@ -241,13 +247,14 @@ impl Language for KestrelLanguage {
         const CLASS: u16 = SyntaxKind::Class as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
-        const FN: u16 = SyntaxKind::Fn as u16;
+        const FUNC: u16 = SyntaxKind::Func as u16;
         const IF: u16 = SyntaxKind::If as u16;
         const IMPORT: u16 = SyntaxKind::Import as u16;
         const INTERNAL: u16 = SyntaxKind::Internal as u16;
         const LET: u16 = SyntaxKind::Let as u16;
         const MODULE: u16 = SyntaxKind::Module as u16;
         const PRIVATE: u16 = SyntaxKind::Private as u16;
+        const PROTOCOL: u16 = SyntaxKind::Protocol as u16;
         const PUBLIC: u16 = SyntaxKind::Public as u16;
         const STATIC: u16 = SyntaxKind::Static as u16;
         const STRUCT: u16 = SyntaxKind::Struct as u16;
@@ -280,6 +287,8 @@ impl Language for KestrelLanguage {
             DECLARATION_ITEM => SyntaxKind::DeclarationItem,
             CLASS_DECLARATION => SyntaxKind::ClassDeclaration,
             CLASS_BODY => SyntaxKind::ClassBody,
+            PROTOCOL_DECLARATION => SyntaxKind::ProtocolDeclaration,
+            PROTOCOL_BODY => SyntaxKind::ProtocolBody,
             STRUCT_DECLARATION => SyntaxKind::StructDeclaration,
             STRUCT_BODY => SyntaxKind::StructBody,
             IMPORT_DECLARATION => SyntaxKind::ImportDeclaration,
@@ -316,13 +325,14 @@ impl Language for KestrelLanguage {
             CLASS => SyntaxKind::Class,
             ELSE => SyntaxKind::Else,
             FILEPRIVATE => SyntaxKind::Fileprivate,
-            FN => SyntaxKind::Fn,
+            FUNC => SyntaxKind::Func,
             IF => SyntaxKind::If,
             IMPORT => SyntaxKind::Import,
             INTERNAL => SyntaxKind::Internal,
             LET => SyntaxKind::Let,
             MODULE => SyntaxKind::Module,
             PRIVATE => SyntaxKind::Private,
+            PROTOCOL => SyntaxKind::Protocol,
             PUBLIC => SyntaxKind::Public,
             STATIC => SyntaxKind::Static,
             STRUCT => SyntaxKind::Struct,
