@@ -4,60 +4,15 @@ use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
+    behavior::callable::{CallableBehavior, CallableParameter, CallableSignature},
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     ty::Ty,
 };
 
-/// Represents a function parameter with label, binding name, and type.
-///
-/// Parameters support Swift-style labeled arguments:
-/// - `label` is the external name used by callers (optional)
-/// - `bind_name` is the internal name used in the function body
-///
-/// Examples:
-/// - `x: Int` -> label=None, bind_name="x"
-/// - `with x: Int` -> label="with", bind_name="x"
-#[derive(Debug, Clone)]
-pub struct Parameter {
-    /// Optional external label for callers
-    pub label: Option<Name>,
-    /// Internal binding name used in function body
-    pub bind_name: Name,
-    /// The parameter's type
-    pub ty: Ty,
-}
-
-impl Parameter {
-    /// Create a new parameter without a label
-    pub fn new(bind_name: Name, ty: Ty) -> Self {
-        Self {
-            label: None,
-            bind_name,
-            ty,
-        }
-    }
-
-    /// Create a new parameter with a label
-    pub fn with_label(label: Name, bind_name: Name, ty: Ty) -> Self {
-        Self {
-            label: Some(label),
-            bind_name,
-            ty,
-        }
-    }
-
-    /// Get the external label (or bind_name if no label)
-    pub fn external_name(&self) -> &str {
-        self.label.as_ref().unwrap_or(&self.bind_name).value.as_str()
-    }
-
-    /// Get the internal binding name
-    pub fn internal_name(&self) -> &str {
-        &self.bind_name.value
-    }
-}
+// Re-export CallableParameter as Parameter for backwards compatibility
+pub use crate::behavior::callable::CallableParameter as Parameter;
 
 /// Represents a function declaration in the semantic tree.
 ///
@@ -67,20 +22,20 @@ impl Parameter {
 /// - Methods (within structs/classes) - indicated by having a parent
 /// - Static functions (don't receive `self`)
 ///
-/// # Callable Design
+/// # Callable/Overloading System
 ///
-/// This symbol is designed to support a future callable/overloading system:
+/// Functions use `CallableBehavior` for overload resolution:
 /// - Labels enable overloading by external parameter names
+/// - Parameter types enable type-based overloading
 /// - Parameter count enables overloading by arity
-/// - Return type is tracked for type checking calls
 ///
-/// Other callable entities (initializers, closures) will share this pattern.
+/// Two functions with the same `CallableSignature` are duplicates (error).
+/// Functions with different signatures can coexist as overloads.
 #[derive(Debug)]
 pub struct FunctionSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
     is_static: bool,
-    parameters: Vec<Parameter>,
-    return_type: Ty,
+    callable: CallableBehavior,
 }
 
 impl Symbol<KestrelLanguage> for FunctionSymbol {
@@ -100,11 +55,15 @@ impl FunctionSymbol {
         return_type: Ty,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
+        // Create the callable behavior
+        let callable = CallableBehavior::new(parameters, return_type, span.clone());
+
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Function)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
             .with_span(span)
-            .with_behavior(Arc::new(visibility));
+            .with_behavior(Arc::new(visibility))
+            .with_behavior(Arc::new(callable.clone()));
 
         if let Some(p) = parent {
             builder = builder.with_parent(Arc::downgrade(&p));
@@ -113,8 +72,7 @@ impl FunctionSymbol {
         FunctionSymbol {
             metadata: builder.build(),
             is_static,
-            parameters,
-            return_type,
+            callable,
         }
     }
 
@@ -123,37 +81,44 @@ impl FunctionSymbol {
         self.is_static
     }
 
+    /// Get the callable behavior
+    pub fn callable(&self) -> &CallableBehavior {
+        &self.callable
+    }
+
     /// Get the function's parameters
     pub fn parameters(&self) -> &[Parameter] {
-        &self.parameters
+        self.callable.parameters()
     }
 
     /// Get the function's return type
     pub fn return_type(&self) -> &Ty {
-        &self.return_type
+        self.callable.return_type()
     }
 
     /// Get the number of parameters (arity)
     pub fn arity(&self) -> usize {
-        self.parameters.len()
+        self.callable.arity()
+    }
+
+    /// Get the callable signature for overload resolution and duplicate detection.
+    ///
+    /// Two functions with the same signature are considered duplicates.
+    pub fn signature(&self) -> CallableSignature {
+        self.callable.signature(&self.metadata.name().value)
     }
 
     /// Get the function signature as a Ty::Function
     ///
     /// This is useful for type checking and storing the function's type.
-    pub fn signature_type(&self) -> Ty {
-        let param_types: Vec<Ty> = self.parameters.iter().map(|p| p.ty.clone()).collect();
-        Ty::function(param_types, self.return_type.clone(), self.metadata.span().clone())
+    pub fn function_type(&self) -> Ty {
+        self.callable.function_type()
     }
 
-    /// Get parameter labels for overload resolution
+    /// Get parameter labels for display/debugging
     ///
     /// Returns a list of external labels (or None for unlabeled parameters).
-    /// Two functions with different label patterns can coexist.
     pub fn parameter_labels(&self) -> Vec<Option<&str>> {
-        self.parameters
-            .iter()
-            .map(|p| p.label.as_ref().map(|l| l.value.as_str()))
-            .collect()
+        self.callable.parameter_labels()
     }
 }

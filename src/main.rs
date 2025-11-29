@@ -151,6 +151,27 @@ fn main() {
         "tests/struct/edge_cases.ks",
     ]);
 
+    // Test function declarations
+    process_file_group("Function Basic Declarations", &[
+        "tests/functions/basic.ks",
+    ]);
+
+    process_file_group("Function Valid Overloads", &[
+        "tests/functions/valid_overloads.ks",
+    ]);
+
+    process_file_group("Function Duplicate Errors", &[
+        "tests/functions/duplicate_errors.ks",
+    ]);
+
+    process_file_group("Function Edge Cases", &[
+        "tests/functions/edge_cases.ks",
+    ]);
+
+    process_file_group("Functions In Structs", &[
+        "tests/functions/in_structs.ks",
+    ]);
+
     println!("\n{}", "=".repeat(70));
     println!("All test groups processed!");
     println!("{}", "=".repeat(70));

@@ -414,6 +414,10 @@ pub fn bind_tree(
     // Post-binding pass: detect type alias cycles
     // This catches cycles like A -> B -> A that can't be detected during sequential binding
     check_type_alias_cycles(tree.root(), &db, diagnostics);
+
+    // Post-binding pass: detect duplicate function signatures
+    // This catches overloads with identical signatures which are errors
+    check_duplicate_signatures(tree.root(), diagnostics);
 }
 
 /// Check for circular type alias dependencies by following alias chains
@@ -546,6 +550,95 @@ fn follow_type_alias_chain(
             follow_type_alias_chain(return_type, visited)
         }
         _ => None,
+    }
+}
+
+/// Check for duplicate function signatures within each scope.
+///
+/// This walks the symbol tree and for each scope (module, struct, class),
+/// checks if there are multiple functions with the same signature.
+fn check_duplicate_signatures(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    diagnostics: &mut DiagnosticContext,
+) {
+    use kestrel_semantic_tree::behavior::callable::CallableSignature;
+    use std::collections::HashMap;
+
+    let kind = symbol.metadata().kind();
+
+    // Scopes that can contain functions: Module, Struct, Class, SourceFile
+    let is_scope = matches!(
+        kind,
+        KestrelSymbolKind::Module
+            | KestrelSymbolKind::Struct
+            | KestrelSymbolKind::Class
+            | KestrelSymbolKind::SourceFile
+    );
+
+    if is_scope {
+        // Collect all function signatures in this scope
+        let mut signatures: HashMap<CallableSignature, Vec<Arc<dyn Symbol<KestrelLanguage>>>> =
+            HashMap::new();
+
+        for child in symbol.metadata().children() {
+            if child.metadata().kind() == KestrelSymbolKind::Function {
+                // Get the CallableBehavior from the symbol's behaviors
+                let behaviors = child.metadata().behaviors();
+                if let Some(callable) = behaviors.iter().find_map(|b| {
+                    if matches!(b.kind(), KestrelBehaviorKind::Callable) {
+                        b.as_ref().downcast_ref::<kestrel_semantic_tree::behavior::callable::CallableBehavior>()
+                    } else {
+                        None
+                    }
+                }) {
+                    // Build signature using name from metadata and callable info
+                    let name = child.metadata().name().value.clone();
+                    let sig = callable.signature(&name);
+                    signatures.entry(sig).or_default().push(child.clone());
+                }
+            }
+        }
+
+        // Report duplicates
+        for (sig, funcs) in signatures {
+            if funcs.len() > 1 {
+                // Build the error message
+                let message = format!(
+                    "duplicate function signature: {}",
+                    sig.display()
+                );
+
+                // Build labels for all occurrences
+                let mut labels = Vec::new();
+                for (i, func) in funcs.iter().enumerate() {
+                    let span = func.metadata().declaration_span().clone();
+                    let func_file_id = get_file_id_for_symbol(func, diagnostics);
+                    if i == 0 {
+                        labels.push(
+                            kestrel_reporting::Label::secondary(func_file_id, span)
+                                .with_message("first defined here"),
+                        );
+                    } else {
+                        labels.push(
+                            kestrel_reporting::Label::primary(func_file_id, span.clone())
+                                .with_message("duplicate definition"),
+                        );
+                    }
+                }
+
+                // Create and add the diagnostic
+                let diagnostic = kestrel_reporting::Diagnostic::error()
+                    .with_message(message)
+                    .with_labels(labels);
+
+                diagnostics.add_diagnostic(diagnostic);
+            }
+        }
+    }
+
+    // Recursively check children
+    for child in symbol.metadata().children() {
+        check_duplicate_signatures(&child, diagnostics);
     }
 }
 
@@ -747,6 +840,21 @@ fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
                                 }).collect();
                                 format!("Import({}.({}))", path, item_strs.join(", "))
                             }
+                        } else {
+                            format!("{:?}", b.kind())
+                        }
+                    }
+                    KestrelBehaviorKind::Callable => {
+                        use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+                        if let Some(callable) = b.as_ref().downcast_ref::<CallableBehavior>() {
+                            let params: Vec<String> = callable.parameters().iter()
+                                .map(|p| {
+                                    let label = p.external_label().unwrap_or("_");
+                                    format!("{}: {}", label, format_type(&p.ty))
+                                })
+                                .collect();
+                            let ret = format_type(callable.return_type());
+                            format!("Callable(({}) -> {})", params.join(", "), ret)
                         } else {
                             format!("{:?}", b.kind())
                         }

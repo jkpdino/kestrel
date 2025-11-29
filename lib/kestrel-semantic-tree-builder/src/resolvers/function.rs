@@ -118,21 +118,30 @@ fn extract_single_parameter(param_node: &SyntaxNode, source: &str) -> Option<Par
         return None;
     }
 
+    // Helper function to extract identifier text from a Name node
+    fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
+        name_node
+            .children_with_tokens()
+            .filter_map(|elem| elem.into_token())
+            .find(|tok| tok.kind() == SyntaxKind::Identifier)
+            .map(|tok| tok.text().to_string())
+    }
+
     // Extract name strings and spans
     let (label, bind_name) = if name_nodes.len() >= 2 {
         // Two names: first is label, second is bind_name
-        let label_str = extract_name(&name_nodes[0])?;
+        let label_str = extract_identifier_from_name(&name_nodes[0])?;
         let label_span = get_node_span(&name_nodes[0], source);
         let label = Spanned::new(label_str, label_span);
 
-        let bind_str = extract_name(&name_nodes[1])?;
+        let bind_str = extract_identifier_from_name(&name_nodes[1])?;
         let bind_span = get_node_span(&name_nodes[1], source);
         let bind_name = Spanned::new(bind_str, bind_span);
 
         (Some(label), bind_name)
     } else {
         // One name: it's the bind_name
-        let bind_str = extract_name(&name_nodes[0])?;
+        let bind_str = extract_identifier_from_name(&name_nodes[0])?;
         let bind_span = get_node_span(&name_nodes[0], source);
         let bind_name = Spanned::new(bind_str, bind_span);
 
