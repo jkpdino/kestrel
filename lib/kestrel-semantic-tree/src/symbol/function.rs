@@ -5,6 +5,7 @@ use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
     behavior::callable::{CallableBehavior, CallableParameter, CallableSignature},
+    behavior::function_data::FunctionDataBehavior,
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
@@ -35,6 +36,7 @@ pub use crate::behavior::callable::CallableParameter as Parameter;
 pub struct FunctionSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
     is_static: bool,
+    has_body: bool,
     callable: CallableBehavior,
 }
 
@@ -51,6 +53,7 @@ impl FunctionSymbol {
         span: Span,
         visibility: VisibilityBehavior,
         is_static: bool,
+        has_body: bool,
         parameters: Vec<Parameter>,
         return_type: Ty,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
@@ -58,12 +61,16 @@ impl FunctionSymbol {
         // Create the callable behavior
         let callable = CallableBehavior::new(parameters, return_type, span.clone());
 
+        // Create the function data behavior
+        let function_data = FunctionDataBehavior::new(has_body, is_static);
+
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Function)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
             .with_span(span)
             .with_behavior(Arc::new(visibility))
-            .with_behavior(Arc::new(callable.clone()));
+            .with_behavior(Arc::new(callable.clone()))
+            .with_behavior(Arc::new(function_data));
 
         if let Some(p) = parent {
             builder = builder.with_parent(Arc::downgrade(&p));
@@ -72,6 +79,7 @@ impl FunctionSymbol {
         FunctionSymbol {
             metadata: builder.build(),
             is_static,
+            has_body,
             callable,
         }
     }
@@ -79,6 +87,11 @@ impl FunctionSymbol {
     /// Check if this function is static
     pub fn is_static(&self) -> bool {
         self.is_static
+    }
+
+    /// Check if this function has a body
+    pub fn has_body(&self) -> bool {
+        self.has_body
     }
 
     /// Get the callable behavior

@@ -51,6 +51,11 @@ impl Resolver for FunctionResolver {
             .children()
             .any(|child| child.kind() == SyntaxKind::StaticModifier);
 
+        // Check if this function has a body
+        let has_body = syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::FunctionBody);
+
         // Extract parameters
         let parameters = extract_parameters(syntax, source);
 
@@ -66,6 +71,7 @@ impl Resolver for FunctionResolver {
             full_span,
             visibility_behavior,
             is_static,
+            has_body,
             parameters,
             return_type,
             parent.cloned(),

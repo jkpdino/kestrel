@@ -7,6 +7,7 @@ mod resolvers;
 pub mod type_builder;
 pub mod type_resolver;
 mod utils;
+pub mod validation;
 
 use std::sync::Arc;
 
@@ -382,10 +383,23 @@ fn walk_node(
 ///
 /// This resolves all imports and checks visibility. Should be called after
 /// all files have been added to the tree.
+///
+/// Optionally accepts a `ValidationConfig` to control which validation passes run.
+/// If `None`, all passes run with default configuration.
 pub fn bind_tree(
     tree: &SemanticTree,
     diagnostics: &mut DiagnosticContext,
     _file_id: usize,
+) {
+    bind_tree_with_config(tree, diagnostics, _file_id, None);
+}
+
+/// Run the binding phase with explicit validation configuration
+pub fn bind_tree_with_config(
+    tree: &SemanticTree,
+    diagnostics: &mut DiagnosticContext,
+    _file_id: usize,
+    config: Option<&validation::ValidationConfig>,
 ) {
     // Build the symbol registry from the tree
     let registry = SymbolRegistry::new();
@@ -418,6 +432,11 @@ pub fn bind_tree(
     // Post-binding pass: detect duplicate function signatures
     // This catches overloads with identical signatures which are errors
     check_duplicate_signatures(tree.root(), diagnostics);
+
+    // Run validation passes
+    let validation_config = config.cloned().unwrap_or_default();
+    let runner = validation::ValidationRunner::new();
+    runner.run(tree.root(), &db, diagnostics, &validation_config);
 }
 
 /// Check for circular type alias dependencies by following alias chains
@@ -857,6 +876,18 @@ fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
                                 .collect();
                             let ret = format_type(callable.return_type());
                             format!("Callable(({}) -> {})", params.join(", "), ret)
+                        } else {
+                            format!("{:?}", b.kind())
+                        }
+                    }
+                    KestrelBehaviorKind::FunctionData => {
+                        use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
+                        if let Some(fd) = b.as_ref().downcast_ref::<FunctionDataBehavior>() {
+                            format!(
+                                "FunctionData(has_body={}, is_static={})",
+                                fd.has_body(),
+                                fd.is_static()
+                            )
                         } else {
                             format!("{:?}", b.kind())
                         }

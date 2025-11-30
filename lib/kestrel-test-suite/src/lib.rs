@@ -163,6 +163,33 @@ impl Expectable for Compiles {
     }
 }
 
+/// Expects compilation to fail with an error containing a specific message
+pub struct HasError(pub &'static str);
+
+impl Expectable for HasError {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if !ctx.has_errors {
+            return Err("Expected compilation to fail with an error, but it succeeded".to_string());
+        }
+
+        // Check if any error contains the expected message
+        let has_matching_error = ctx
+            .diagnostics
+            .diagnostics()
+            .iter()
+            .any(|diag| diag.message.contains(self.0));
+
+        if has_matching_error {
+            Ok(())
+        } else {
+            Err(format!(
+                "Expected an error containing '{}', but no matching error was found",
+                self.0
+            ))
+        }
+    }
+}
+
 /// Symbol expectation with chainable behavior checks
 pub struct Symbol {
     path: String,

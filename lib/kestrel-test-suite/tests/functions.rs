@@ -47,10 +47,16 @@ mod basic {
     }
 
     #[test]
-    fn static_function() {
-        Test::new("module Test\nstatic func staticFn() { }")
-            .expect(Compiles)
-            .expect(Symbol::new("staticFn").is(SymbolKind::Function));
+    fn static_function_in_struct() {
+        Test::new(
+            r#"module Test
+            struct Counter {
+                static func staticFn() { }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("staticFn").is(SymbolKind::Function));
     }
 }
 
