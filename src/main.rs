@@ -1,21 +1,65 @@
+use clap::{Parser, Subcommand};
 use kestrel_lexer::lex;
-use kestrel_parser::{parse_source_file, Parser};
+use kestrel_parser::{parse_source_file, Parser as KestrelParser};
 use kestrel_reporting::DiagnosticContext;
 use std::fs;
+use std::process::ExitCode;
+
+#[derive(Parser)]
+#[command(name = "kestrel")]
+#[command(about = "The Kestrel compiler", long_about = None)]
+#[command(version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Source files to process
+    #[arg(global = true)]
+    files: Vec<String>,
+
+    /// Show semantic tree after analysis
+    #[arg(long, global = true)]
+    tree: bool,
+
+    /// Show symbol table after analysis
+    #[arg(long, global = true)]
+    symbols: bool,
+
+    /// Verbose output
+    #[arg(short, long, global = true)]
+    verbose: bool,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Type-check source files
+    Check {
+        /// Source files to check
+        files: Vec<String>,
+    },
+    /// Parse source files and show syntax tree
+    Parse {
+        /// Source files to parse
+        files: Vec<String>,
+    },
+}
 
 /// Parse a single file and add it to an existing semantic tree
 fn add_file(
     path: &str,
     semantic_tree: &mut kestrel_semantic_tree_builder::SemanticTree,
     diagnostics: &mut DiagnosticContext,
-) {
-    println!("\n  Adding file: {}", path);
+    verbose: bool,
+) -> bool {
+    if verbose {
+        eprintln!("  Parsing {}", path);
+    }
 
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
-            println!("    ❌ Error reading file: {}", e);
-            return;
+            eprintln!("error: cannot read '{}': {}", path, e);
+            return false;
         }
     };
 
@@ -25,17 +69,19 @@ fn add_file(
         .map(|spanned| (spanned.value, spanned.span))
         .collect();
 
-    // Parse the entire file using the new Parser API
-    let result = Parser::parse(&content, tokens.into_iter(), parse_source_file);
+    // Parse the entire file
+    let result = KestrelParser::parse(&content, tokens.into_iter(), parse_source_file);
 
-    // Display results
     if !result.errors.is_empty() {
-        println!("    ❌ Parse errors ({} errors):", result.errors.len());
         for error in &result.errors {
-            println!("       {}", error.message);
+            let span = error.span.clone().unwrap_or(0..1);
+            let file_id = diagnostics.add_file(path.to_string(), content.clone());
+            let diagnostic = kestrel_reporting::Diagnostic::error()
+                .with_message(&error.message)
+                .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)]);
+            diagnostics.add_diagnostic(diagnostic);
         }
-    } else {
-        println!("    ✓ Parsed successfully!");
+        return false;
     }
 
     // Add to semantic tree
@@ -48,160 +94,130 @@ fn add_file(
         diagnostics,
         file_id,
     );
+
+    true
 }
 
-/// Process a group of files together (for testing cross-file imports)
-fn process_file_group(name: &str, files: &[&str]) {
-    println!("\n{}", "=".repeat(70));
-    println!("Processing group: {}", name);
-    println!("{}", "=".repeat(70));
+fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: bool) -> ExitCode {
+    if files.is_empty() {
+        eprintln!("error: no input files");
+        return ExitCode::from(1);
+    }
 
     let mut semantic_tree = kestrel_semantic_tree_builder::SemanticTree::new();
     let mut diagnostics = DiagnosticContext::new();
+    let mut parse_ok = true;
 
-    // Add all files to the same semantic tree
+    // Parse all files
     for file in files {
-        add_file(file, &mut semantic_tree, &mut diagnostics);
+        if !add_file(file, &mut semantic_tree, &mut diagnostics, verbose) {
+            parse_ok = false;
+        }
     }
 
-    // Run binding phase to resolve imports
-    println!("\n  Running bind phase...");
+    // Run binding phase
+    if verbose {
+        eprintln!("  Running semantic analysis...");
+    }
     kestrel_semantic_tree_builder::bind_tree(&semantic_tree, &mut diagnostics, 0);
-    println!("    ✓ Bind phase complete!");
 
-    // Check for diagnostics (validation errors, import errors, etc.)
-    if diagnostics.len() > 0 {
-        println!("\n--- Diagnostics ---");
-        diagnostics.emit().unwrap();
+    // Show results
+    if show_tree {
+        println!("--- Semantic Tree ---");
+        kestrel_semantic_tree_builder::print_semantic_tree(&semantic_tree);
+        println!();
     }
 
-    // Print semantic tree (shows hierarchy)
-    println!("\n--- Semantic Tree ---");
-    kestrel_semantic_tree_builder::print_semantic_tree(&semantic_tree);
+    if show_symbols {
+        println!("--- Symbol Table ---");
+        kestrel_semantic_tree_builder::print_symbol_table(&semantic_tree);
+        println!();
+    }
 
-    // Print symbol table
-    println!("\n--- Symbol Table ---");
-    kestrel_semantic_tree_builder::print_symbol_table(&semantic_tree);
-
-    println!();
+    // Emit diagnostics
+    let has_errors = diagnostics.len() > 0 || !parse_ok;
+    if has_errors {
+        diagnostics.emit().ok();
+        ExitCode::from(1)
+    } else {
+        if verbose {
+            eprintln!("  No errors found.");
+        }
+        ExitCode::SUCCESS
+    }
 }
 
-fn main() {
-    // Test basic import resolution
-    process_file_group("Basic Import Resolution", &[
-        "tests/import_resolution/library.ks",
-        "tests/import_resolution/consumer.ks",
-        "tests/import_resolution/specific_import.ks",
-        "tests/import_resolution/aliased_import.ks",
-    ]);
+fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
+    if files.is_empty() {
+        eprintln!("error: no input files");
+        return ExitCode::from(1);
+    }
 
-    // Test error cases
-    process_file_group("Import Errors", &[
-        "tests/import_resolution/library.ks",
-        "tests/import_resolution/import_private.ks",
-        "tests/import_resolution/import_nonexistent.ks",
-        "tests/import_resolution/import_bad_module.ks",
-    ]);
+    let mut has_errors = false;
 
-    // Test nested modules
-    process_file_group("Nested Modules", &[
-        "tests/import_resolution/nested/math.ks",
-        "tests/import_resolution/nested/math_geometry.ks",
-        "tests/import_resolution/nested/math_algebra.ks",
-        "tests/import_resolution/nested/consumer.ks",
-    ]);
+    for file in files {
+        let content = match fs::read_to_string(file) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: cannot read '{}': {}", file, e);
+                has_errors = true;
+                continue;
+            }
+        };
 
-    // Test import conflicts
-    process_file_group("Import Conflicts", &[
-        "tests/import_resolution/conflict/module_a.ks",
-        "tests/import_resolution/conflict/module_b.ks",
-        "tests/import_resolution/conflict/consumer_conflict.ks",
-        "tests/import_resolution/conflict/consumer_aliased.ks",
-        "tests/import_resolution/conflict/consumer_local_conflict.ks",
-    ]);
+        let tokens: Vec<_> = lex(&content)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
 
-    // Test visibility semantics
-    process_file_group("Visibility Semantics", &[
-        "tests/import_resolution/visibility_semantics.ks",
-    ]);
+        let result = KestrelParser::parse(&content, tokens.into_iter(), parse_source_file);
 
-    // Test cycle detection
-    process_file_group("Circular Type Alias Detection", &[
-        "tests/cycle_detection/circular_alias.ks",
-    ]);
+        println!("=== {} ===", file);
 
-    process_file_group("Self-Referential Type Alias Detection", &[
-        "tests/cycle_detection/self_cycle.ks",
-    ]);
+        if !result.errors.is_empty() {
+            has_errors = true;
+            for error in &result.errors {
+                println!("error: {}", error.message);
+            }
+        } else {
+            println!("Parsed successfully.");
+        }
 
-    // Test struct declarations
-    process_file_group("Basic Struct Declarations", &[
-        "tests/struct/basic.ks",
-    ]);
+        if show_tree {
+            println!("\n{:#?}", result.tree);
+        }
 
-    process_file_group("Nested Struct Declarations", &[
-        "tests/struct/nested.ks",
-    ]);
+        println!();
+    }
 
-    process_file_group("Struct Fields", &[
-        "tests/struct/fields.ks",
-    ]);
+    if has_errors {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
 
-    process_file_group("Struct Edge Cases", &[
-        "tests/struct/edge_cases.ks",
-    ]);
+fn main() -> ExitCode {
+    let cli = Cli::parse();
 
-    // Test function declarations
-    process_file_group("Function Basic Declarations", &[
-        "tests/functions/basic.ks",
-    ]);
-
-    process_file_group("Function Valid Overloads", &[
-        "tests/functions/valid_overloads.ks",
-    ]);
-
-    process_file_group("Function Duplicate Errors", &[
-        "tests/functions/duplicate_errors.ks",
-    ]);
-
-    process_file_group("Function Edge Cases", &[
-        "tests/functions/edge_cases.ks",
-    ]);
-
-    process_file_group("Functions In Structs", &[
-        "tests/functions/in_structs.ks",
-    ]);
-
-    // Test protocol declarations
-    process_file_group("Protocol Basic Declarations", &[
-        "tests/protocol/basic.ks",
-    ]);
-
-    process_file_group("Protocol Methods", &[
-        "tests/protocol/methods.ks",
-    ]);
-
-    process_file_group("Protocol Visibility", &[
-        "tests/protocol/visibility.ks",
-    ]);
-
-    process_file_group("Protocol Nested", &[
-        "tests/protocol/nested.ks",
-    ]);
-
-    process_file_group("Protocol Complex Types", &[
-        "tests/protocol/complex_types.ks",
-    ]);
-
-    process_file_group("Protocol Edge Cases", &[
-        "tests/protocol/edge_cases.ks",
-    ]);
-
-    process_file_group("Protocol Error Cases", &[
-        "tests/protocol/error_cases.ks",
-    ]);
-
-    println!("\n{}", "=".repeat(70));
-    println!("All test groups processed!");
-    println!("{}", "=".repeat(70));
+    match cli.command {
+        Some(Commands::Check { files }) => {
+            let all_files: Vec<_> = files.iter().chain(cli.files.iter()).cloned().collect();
+            run_check(&all_files, cli.tree, cli.symbols, cli.verbose)
+        }
+        Some(Commands::Parse { files }) => {
+            let all_files: Vec<_> = files.iter().chain(cli.files.iter()).cloned().collect();
+            run_parse(&all_files, cli.tree)
+        }
+        None => {
+            // Default: check files if provided
+            if cli.files.is_empty() {
+                eprintln!("error: no input files");
+                eprintln!("Run 'kestrel --help' for usage.");
+                ExitCode::from(1)
+            } else {
+                run_check(&cli.files, cli.tree, cli.symbols, cli.verbose)
+            }
+        }
+    }
 }
