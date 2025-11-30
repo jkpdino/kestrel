@@ -258,7 +258,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "kestrel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chumsky 0.11.1",
  "clap",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-compiler"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kestrel-lexer",
  "kestrel-parser",
@@ -288,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-lexer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kestrel-span",
  "logos 0.14.4",
@@ -297,7 +297,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-parser"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chumsky 0.9.3",
  "kestrel-lexer",
@@ -307,14 +307,14 @@ dependencies = [
 
 [[package]]
 name = "kestrel-reporting"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "codespan-reporting",
 ]
 
 [[package]]
 name = "kestrel-semantic-tree"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "downcast-rs",
  "kestrel-reporting",
@@ -324,9 +324,10 @@ dependencies = [
 
 [[package]]
 name = "kestrel-semantic-tree-builder"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "downcast-rs",
+ "kestrel-lexer",
  "kestrel-parser",
  "kestrel-reporting",
  "kestrel-semantic-tree",
@@ -337,14 +338,14 @@ dependencies = [
 
 [[package]]
 name = "kestrel-span"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "codespan-reporting",
 ]
 
 [[package]]
 name = "kestrel-syntax-tree"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kestrel-lexer",
  "kestrel-span",
@@ -353,8 +354,9 @@ dependencies = [
 
 [[package]]
 name = "kestrel-test-suite"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "downcast-rs",
  "kestrel-lexer",
  "kestrel-parser",
  "kestrel-reporting",
@@ -551,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "semantic-tree"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "downcast-rs",
  "kestrel-span",

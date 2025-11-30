@@ -7,3 +7,4 @@ pub mod protocol;
 pub mod source_file;
 pub mod r#struct;
 pub mod type_alias;
+pub mod type_parameter;

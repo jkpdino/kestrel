@@ -1,10 +1,15 @@
 mod kind;
+pub mod substitutions;
+pub mod where_clause;
 
 pub use kind::{FloatBits, IntBits, TyKind};
+pub use substitutions::Substitutions;
+pub use where_clause::{Constraint, WhereClause};
 
 use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
+use crate::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_span::Span;
 use std::sync::Arc;
 
@@ -84,19 +89,87 @@ impl Ty {
         Self::new(TyKind::Path(segments), span)
     }
 
-    /// Create a protocol type (resolved)
+    /// Create a type parameter reference
+    pub fn type_parameter(param_symbol: Arc<TypeParameterSymbol>, span: Span) -> Self {
+        Self::new(TyKind::TypeParameter(param_symbol), span)
+    }
+
+    /// Create a protocol type (resolved) with no type arguments
     pub fn protocol(protocol_symbol: Arc<ProtocolSymbol>, span: Span) -> Self {
-        Self::new(TyKind::Protocol(protocol_symbol), span)
+        Self::new(
+            TyKind::Protocol {
+                symbol: protocol_symbol,
+                substitutions: Substitutions::new(),
+            },
+            span,
+        )
     }
 
-    /// Create a struct type (resolved)
+    /// Create a generic protocol type (resolved) with type arguments
+    pub fn generic_protocol(
+        protocol_symbol: Arc<ProtocolSymbol>,
+        substitutions: Substitutions,
+        span: Span,
+    ) -> Self {
+        Self::new(
+            TyKind::Protocol {
+                symbol: protocol_symbol,
+                substitutions,
+            },
+            span,
+        )
+    }
+
+    /// Create a struct type (resolved) with no type arguments
     pub fn r#struct(struct_symbol: Arc<StructSymbol>, span: Span) -> Self {
-        Self::new(TyKind::Struct(struct_symbol), span)
+        Self::new(
+            TyKind::Struct {
+                symbol: struct_symbol,
+                substitutions: Substitutions::new(),
+            },
+            span,
+        )
     }
 
-    /// Create a type alias type
+    /// Create a generic struct type (resolved) with type arguments
+    pub fn generic_struct(
+        struct_symbol: Arc<StructSymbol>,
+        substitutions: Substitutions,
+        span: Span,
+    ) -> Self {
+        Self::new(
+            TyKind::Struct {
+                symbol: struct_symbol,
+                substitutions,
+            },
+            span,
+        )
+    }
+
+    /// Create a type alias type with no type arguments
     pub fn type_alias(type_alias_symbol: Arc<TypeAliasSymbol>, span: Span) -> Self {
-        Self::new(TyKind::TypeAlias(type_alias_symbol), span)
+        Self::new(
+            TyKind::TypeAlias {
+                symbol: type_alias_symbol,
+                substitutions: Substitutions::new(),
+            },
+            span,
+        )
+    }
+
+    /// Create a generic type alias type with type arguments
+    pub fn generic_type_alias(
+        type_alias_symbol: Arc<TypeAliasSymbol>,
+        substitutions: Substitutions,
+        span: Span,
+    ) -> Self {
+        Self::new(
+            TyKind::TypeAlias {
+                symbol: type_alias_symbol,
+                substitutions,
+            },
+            span,
+        )
     }
 
     // === Type checking methods ===
@@ -146,19 +219,24 @@ impl Ty {
         matches!(self.kind, TyKind::Path(_))
     }
 
+    /// Check if this is a type parameter type
+    pub fn is_type_parameter(&self) -> bool {
+        matches!(self.kind, TyKind::TypeParameter(_))
+    }
+
     /// Check if this is a protocol type (resolved)
     pub fn is_protocol(&self) -> bool {
-        matches!(self.kind, TyKind::Protocol(_))
+        matches!(self.kind, TyKind::Protocol { .. })
     }
 
     /// Check if this is a struct type (resolved)
     pub fn is_struct(&self) -> bool {
-        matches!(self.kind, TyKind::Struct(_))
+        matches!(self.kind, TyKind::Struct { .. })
     }
 
     /// Check if this is a type alias type
     pub fn is_type_alias(&self) -> bool {
-        matches!(self.kind, TyKind::TypeAlias(_))
+        matches!(self.kind, TyKind::TypeAlias { .. })
     }
 
     // === Accessor methods ===
@@ -203,10 +281,26 @@ impl Ty {
         }
     }
 
+    /// Get type parameter symbol if this is a type parameter type
+    pub fn as_type_parameter(&self) -> Option<&Arc<TypeParameterSymbol>> {
+        match &self.kind {
+            TyKind::TypeParameter(symbol) => Some(symbol),
+            _ => None,
+        }
+    }
+
     /// Get protocol symbol if this is a protocol type
     pub fn as_protocol(&self) -> Option<&Arc<ProtocolSymbol>> {
         match &self.kind {
-            TyKind::Protocol(symbol) => Some(symbol),
+            TyKind::Protocol { symbol, .. } => Some(symbol),
+            _ => None,
+        }
+    }
+
+    /// Get protocol symbol and substitutions if this is a protocol type
+    pub fn as_protocol_with_subs(&self) -> Option<(&Arc<ProtocolSymbol>, &Substitutions)> {
+        match &self.kind {
+            TyKind::Protocol { symbol, substitutions } => Some((symbol, substitutions)),
             _ => None,
         }
     }
@@ -214,7 +308,15 @@ impl Ty {
     /// Get struct symbol if this is a struct type
     pub fn as_struct(&self) -> Option<&Arc<StructSymbol>> {
         match &self.kind {
-            TyKind::Struct(symbol) => Some(symbol),
+            TyKind::Struct { symbol, .. } => Some(symbol),
+            _ => None,
+        }
+    }
+
+    /// Get struct symbol and substitutions if this is a struct type
+    pub fn as_struct_with_subs(&self) -> Option<(&Arc<StructSymbol>, &Substitutions)> {
+        match &self.kind {
+            TyKind::Struct { symbol, substitutions } => Some((symbol, substitutions)),
             _ => None,
         }
     }
@@ -222,7 +324,15 @@ impl Ty {
     /// Get type alias symbol if this is a type alias type
     pub fn as_type_alias(&self) -> Option<&Arc<TypeAliasSymbol>> {
         match &self.kind {
-            TyKind::TypeAlias(symbol) => Some(symbol),
+            TyKind::TypeAlias { symbol, .. } => Some(symbol),
+            _ => None,
+        }
+    }
+
+    /// Get type alias symbol and substitutions if this is a type alias type
+    pub fn as_type_alias_with_subs(&self) -> Option<(&Arc<TypeAliasSymbol>, &Substitutions)> {
+        match &self.kind {
+            TyKind::TypeAlias { symbol, substitutions } => Some((symbol, substitutions)),
             _ => None,
         }
     }

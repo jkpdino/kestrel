@@ -5,10 +5,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
 use crate::common::visibility_parser_internal;
-use crate::ty::{
-    emit_function_type, emit_never_type, emit_path_type, emit_tuple_type, emit_unit_type,
-    ty_parser, TyVariant,
-};
+use crate::ty::{ty_parser, TyVariant};
 
 /// Represents a type alias declaration: (visibility)? type Alias = Aliased;
 ///
@@ -117,15 +114,17 @@ fn type_alias_declaration_parser_internal() -> impl Parser<
     ),
     Error = Simple<Token>,
 > + Clone {
+    use crate::common::skip_trivia;
+
     visibility_parser_internal()
-        .then(just(Token::Type).map_with_span(|_, span| span))
-        .then(filter_map(|span, token| match token {
+        .then(skip_trivia().ignore_then(just(Token::Type).map_with_span(|_, span| span)))
+        .then(skip_trivia().ignore_then(filter_map(|span, token| match token {
             Token::Identifier => Ok(span),
             _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-        }))
-        .then(just(Token::Equals).map_with_span(|_, span| span))
+        })))
+        .then(skip_trivia().ignore_then(just(Token::Equals).map_with_span(|_, span| span)))
         .then(ty_parser())
-        .then(just(Token::Semicolon).map_with_span(|_, span| span))
+        .then(skip_trivia().ignore_then(just(Token::Semicolon).map_with_span(|_, span| span)))
         .map(
             |(((((visibility, type_span), name_span), equals_span), aliased_type_variant), semicolon_span)| {
                 (
@@ -217,18 +216,10 @@ fn emit_type_alias_declaration(
 
     // Emit AliasedType node wrapping the aliased type
     sink.start_node(SyntaxKind::AliasedType);
-    
-    // Delegate to ty module emitters
-    match aliased_type_variant {
-        TyVariant::Unit(lparen, rparen) => emit_unit_type(sink, lparen, rparen),
-        TyVariant::Never(bang) => emit_never_type(sink, bang),
-        TyVariant::Tuple(lparen, types, rparen) => emit_tuple_type(sink, lparen, types, rparen),
-        TyVariant::Function(lparen, params, rparen, arrow, ret) => {
-            emit_function_type(sink, lparen, params, rparen, arrow, ret)
-        }
-        TyVariant::Path(segments) => emit_path_type(sink, &segments),
-    }
-    
+
+    // Delegate to ty module emitter
+    crate::ty::emit_ty_variant(sink, &aliased_type_variant);
+
     sink.finish_node(); // Finish AliasedType
 
     sink.add_token(SyntaxKind::Semicolon, semicolon_span);

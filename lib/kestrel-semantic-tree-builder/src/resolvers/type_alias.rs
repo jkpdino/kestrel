@@ -12,6 +12,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{BindingContext, Resolver};
+use crate::resolvers::type_parameter::{extract_type_parameters, extract_where_clause};
 use crate::type_resolver::{resolve_type, TypeResolutionContext};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
@@ -70,12 +71,20 @@ impl Resolver for TypeAliasResolver {
         // This will be used during the binding phase to resolve Path variants
         let syntactic_typed_behavior = TypedBehavior::new(aliased_type.clone(), full_span.clone());
 
-        // Create the type alias symbol
-        let type_alias_symbol = TypeAliasSymbol::new(
+        // Extract type parameters (will be empty if not a generic type alias)
+        let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
+
+        // Extract where clause (uses type_parameters to look up SymbolIds)
+        let where_clause = extract_where_clause(syntax, source, &type_parameters);
+
+        // Create the type alias symbol with type parameters and where clause
+        let type_alias_symbol = TypeAliasSymbol::with_generics(
             name.clone(),
             full_span.clone(),
             visibility_behavior,
             syntactic_typed_behavior,
+            type_parameters,
+            where_clause,
             parent.cloned(),
         );
         let type_alias_arc = Arc::new(type_alias_symbol);
@@ -182,7 +191,7 @@ fn check_type_for_cycles_recursive(
     context: &mut BindingContext,
 ) -> Option<CircularTypeAliasError> {
     match ty.kind() {
-        TyKind::TypeAlias(alias_symbol) => {
+        TyKind::TypeAlias { symbol: alias_symbol, .. } => {
             let alias_id = alias_symbol.metadata().id();
             let current_id = current_symbol.metadata().id();
 

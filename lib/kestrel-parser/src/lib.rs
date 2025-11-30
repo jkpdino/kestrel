@@ -66,6 +66,7 @@ pub mod r#struct;
 pub mod field;
 pub mod function;
 pub mod type_alias;
+pub mod type_param;
 pub mod declaration_item;
 pub mod parser;
 pub mod ty;

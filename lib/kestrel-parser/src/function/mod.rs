@@ -223,7 +223,7 @@ fn function_body_parser_internal() -> impl Parser<Token, Option<(Span, Span)>, E
 
 /// Internal Chumsky parser for function declaration
 /// Returns: FunctionDeclarationData
-fn function_declaration_parser_internal() -> impl Parser<Token, FunctionDeclarationData, Error = Simple<Token>> + Clone {
+pub(crate) fn function_declaration_parser_internal() -> impl Parser<Token, FunctionDeclarationData, Error = Simple<Token>> + Clone {
     use crate::common::skip_trivia;
 
     visibility_parser_internal()
@@ -356,7 +356,7 @@ fn emit_parameter_list(sink: &mut EventSink, lparen: Span, parameters: Vec<Param
 
 /// Emit events for a single parameter
 fn emit_parameter(sink: &mut EventSink, param: ParameterData) {
-    use crate::ty::{emit_unit_type, emit_never_type, emit_tuple_type, emit_function_type, emit_path_type};
+    use crate::ty::emit_ty_variant;
 
     sink.start_node(SyntaxKind::Parameter);
 
@@ -375,36 +375,20 @@ fn emit_parameter(sink: &mut EventSink, param: ParameterData) {
     sink.add_token(SyntaxKind::Colon, param.colon);
 
     // Emit the type
-    match param.ty {
-        TyVariant::Unit(lparen, rparen) => emit_unit_type(sink, lparen, rparen),
-        TyVariant::Never(bang) => emit_never_type(sink, bang),
-        TyVariant::Tuple(lparen, types, rparen) => emit_tuple_type(sink, lparen, types, rparen),
-        TyVariant::Function(lparen, params, rparen, arrow, ret) => {
-            emit_function_type(sink, lparen, params, rparen, arrow, ret)
-        }
-        TyVariant::Path(segments) => emit_path_type(sink, &segments),
-    }
+    emit_ty_variant(sink, &param.ty);
 
     sink.finish_node(); // Finish Parameter
 }
 
 /// Emit events for a return type
 fn emit_return_type(sink: &mut EventSink, arrow_span: Span, return_ty: TyVariant) {
-    use crate::ty::{emit_unit_type, emit_never_type, emit_tuple_type, emit_function_type, emit_path_type};
+    use crate::ty::emit_ty_variant;
 
     sink.start_node(SyntaxKind::ReturnType);
     sink.add_token(SyntaxKind::Arrow, arrow_span);
 
     // Emit the return type
-    match return_ty {
-        TyVariant::Unit(lparen, rparen) => emit_unit_type(sink, lparen, rparen),
-        TyVariant::Never(bang) => emit_never_type(sink, bang),
-        TyVariant::Tuple(lparen, types, rparen) => emit_tuple_type(sink, lparen, types, rparen),
-        TyVariant::Function(lparen, params, rparen, arrow, ret) => {
-            emit_function_type(sink, lparen, params, rparen, arrow, ret)
-        }
-        TyVariant::Path(segments) => emit_path_type(sink, &segments),
-    }
+    emit_ty_variant(sink, &return_ty);
 
     sink.finish_node(); // Finish ReturnType
 }
@@ -417,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_function_declaration_basic() {
-        let source = "fn test() { }";
+        let source = "func test() { }";
         let tokens: Vec<_> = lex(source)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
@@ -439,7 +423,7 @@ mod tests {
 
     #[test]
     fn test_function_declaration_with_visibility() {
-        let source = "public fn greet() { }";
+        let source = "public func greet() { }";
         let tokens: Vec<_> = lex(source)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
@@ -460,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_function_declaration_static() {
-        let source = "static fn create() { }";
+        let source = "static func create() { }";
         let tokens: Vec<_> = lex(source)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
@@ -481,7 +465,7 @@ mod tests {
 
     #[test]
     fn test_function_declaration_with_params() {
-        let source = "fn add(a: Int, b: Int) { }";
+        let source = "func add(a: Int, b: Int) { }";
         let tokens: Vec<_> = lex(source)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
@@ -502,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_function_declaration_with_labeled_param() {
-        let source = "fn greet(with name: String) { }";
+        let source = "func greet(with name: String) { }";
         let tokens: Vec<_> = lex(source)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
@@ -523,7 +507,7 @@ mod tests {
 
     #[test]
     fn test_function_declaration_with_return_type() {
-        let source = "fn multiply(x: Int, y: Int) -> Int { }";
+        let source = "func multiply(x: Int, y: Int) -> Int { }";
         let tokens: Vec<_> = lex(source)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
@@ -544,7 +528,7 @@ mod tests {
 
     #[test]
     fn test_function_declaration_full() {
-        let source = "public static fn calculate(value: Float, multiplier: Float) -> Float { }";
+        let source = "public static func calculate(value: Float, multiplier: Float) -> Float { }";
         let tokens: Vec<_> = lex(source)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))

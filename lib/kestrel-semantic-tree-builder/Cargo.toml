@@ -1,6 +1,6 @@
 [package]
 name = "kestrel-semantic-tree-builder"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -11,3 +11,6 @@ kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-parser = { path = "../kestrel-parser" }
 semantic-tree = { path = "../semantic-tree" }
 downcast-rs = "2.0.2"
+
+[dev-dependencies]
+kestrel-lexer = { path = "../kestrel-lexer" }

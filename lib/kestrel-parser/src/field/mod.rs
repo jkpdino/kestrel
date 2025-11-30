@@ -94,29 +94,38 @@ struct FieldDeclarationData {
 
 /// Static modifier parser
 fn static_parser_internal() -> impl Parser<Token, Option<Span>, Error = Simple<Token>> + Clone {
-    just(Token::Static)
-        .map_with_span(|_, span| Some(span))
+    use crate::common::skip_trivia;
+
+    skip_trivia()
+        .ignore_then(just(Token::Static).map_with_span(|_, span| Some(span)))
         .or(empty().map(|_| None))
 }
 
 /// Let/var parser - returns (span, is_mutable)
 fn let_var_parser_internal() -> impl Parser<Token, (Span, bool), Error = Simple<Token>> + Clone {
-    just(Token::Let)
-        .map_with_span(|_, span| (span, false))
-        .or(just(Token::Var).map_with_span(|_, span| (span, true)))
+    use crate::common::skip_trivia;
+
+    skip_trivia()
+        .ignore_then(
+            just(Token::Let)
+                .map_with_span(|_, span| (span, false))
+                .or(just(Token::Var).map_with_span(|_, span| (span, true)))
+        )
 }
 
 /// Internal Chumsky parser for field declaration
 /// Returns: FieldDeclarationData
 fn field_declaration_parser_internal() -> impl Parser<Token, FieldDeclarationData, Error = Simple<Token>> + Clone {
+    use crate::common::skip_trivia;
+
     visibility_parser_internal()
         .then(static_parser_internal())
         .then(let_var_parser_internal())
-        .then(filter_map(|span, token| match token {
+        .then(skip_trivia().ignore_then(filter_map(|span, token| match token {
             Token::Identifier => Ok(span),
             _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-        }))
-        .then(just(Token::Colon).map_with_span(|_, span| span))
+        })))
+        .then(skip_trivia().ignore_then(just(Token::Colon).map_with_span(|_, span| span)))
         .then(ty_parser())
         .map(|(((((visibility, is_static), (mutability_span, is_mutable)), name_span), colon_span), ty)| {
             FieldDeclarationData {
@@ -194,24 +203,9 @@ fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) {
     sink.add_token(SyntaxKind::Colon, data.colon_span);
 
     // Emit the type
-    emit_ty_variant(sink, data.ty);
+    crate::ty::emit_ty_variant(sink, &data.ty);
 
     sink.finish_node(); // Finish FieldDeclaration
-}
-
-/// Emit a type variant
-fn emit_ty_variant(sink: &mut EventSink, ty: TyVariant) {
-    use crate::ty::{emit_unit_type, emit_never_type, emit_tuple_type, emit_function_type, emit_path_type};
-
-    match ty {
-        TyVariant::Unit(lparen, rparen) => emit_unit_type(sink, lparen, rparen),
-        TyVariant::Never(bang) => emit_never_type(sink, bang),
-        TyVariant::Tuple(lparen, types, rparen) => emit_tuple_type(sink, lparen, types, rparen),
-        TyVariant::Function(lparen, params, rparen, arrow, ret) => {
-            emit_function_type(sink, lparen, params, rparen, arrow, ret)
-        }
-        TyVariant::Path(segments) => emit_path_type(sink, &segments),
-    }
 }
 
 #[cfg(test)]

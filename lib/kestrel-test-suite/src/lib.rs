@@ -117,6 +117,11 @@ impl Test {
         // Run binding phase
         kestrel_semantic_tree_builder::bind_tree(&semantic_tree, &mut diagnostics, 0);
 
+        // Run validation passes
+        if !has_parse_errors {
+            kestrel_semantic_tree_builder::run_validation(&semantic_tree, &mut diagnostics);
+        }
+
         let has_errors = has_parse_errors || diagnostics.len() > 0;
 
         self.context = Some(TestContext {
@@ -280,6 +285,10 @@ impl Expectable for Symbol {
 pub enum Behavior {
     /// Expected visibility
     Visibility(Visibility),
+    /// Expected number of type parameters (for generic types)
+    TypeParamCount(usize),
+    /// Check if symbol is generic (has at least one type parameter)
+    IsGeneric(bool),
 }
 
 impl Behavior {
@@ -330,6 +339,53 @@ impl Behavior {
                 }
                 Ok(())
             }
+            Behavior::TypeParamCount(expected) => {
+                let count = get_type_param_count(symbol);
+                if count != *expected {
+                    return Err(format!(
+                        "Symbol '{}' has {} type parameter(s), expected {}",
+                        path, count, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::IsGeneric(expected) => {
+                let is_generic = get_type_param_count(symbol) > 0;
+                if is_generic != *expected {
+                    return Err(format!(
+                        "Symbol '{}' is{} generic, expected it to be{} generic",
+                        path,
+                        if is_generic { "" } else { " not" },
+                        if *expected { "" } else { " not" }
+                    ));
+                }
+                Ok(())
+            }
         }
     }
+}
+
+/// Helper to get type parameter count for a symbol
+fn get_type_param_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize {
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+    use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
+    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
+    use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
+
+    // Dereference Arc to get the trait object, then use as_any
+    let symbol_ref: &dyn SymbolTrait<KestrelLanguage> = symbol.as_ref();
+
+    if let Some(s) = symbol_ref.as_any().downcast_ref::<StructSymbol>() {
+        return s.type_parameters().len();
+    }
+    if let Some(f) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
+        return f.type_parameters().len();
+    }
+    if let Some(p) = symbol_ref.as_any().downcast_ref::<ProtocolSymbol>() {
+        return p.type_parameters().len();
+    }
+    if let Some(a) = symbol_ref.as_any().downcast_ref::<TypeAliasSymbol>() {
+        return a.type_parameters().len();
+    }
+    0
 }

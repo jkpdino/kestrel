@@ -158,8 +158,8 @@ mod tests {
         // Test case 1: Parser handles valid code correctly
         let valid_source = r#"
 module Test
-public class A {}
-public class B {}
+public struct A {}
+public struct B {}
 "#;
         let tokens: Vec<_> = lex(valid_source)
             .filter_map(|t| t.ok())
@@ -190,7 +190,7 @@ public class B {}
     fn test_error_spans_present() {
         // Test that parse errors include span information when errors occur
         // Use a syntax that will definitely cause a parse error
-        let source = "class 123"; // class keyword followed by number instead of identifier
+        let source = "struct 123"; // struct keyword followed by number instead of identifier
         let tokens: Vec<_> = lex(source)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))

@@ -6,6 +6,7 @@
 
 mod duplicate_symbol;
 mod function_body;
+mod generics;
 mod protocol_method;
 mod static_context;
 mod visibility_consistency;
@@ -21,6 +22,7 @@ use crate::db::SemanticDatabase;
 
 pub use duplicate_symbol::DuplicateSymbolPass;
 pub use function_body::FunctionBodyPass;
+pub use generics::GenericsPass;
 pub use protocol_method::ProtocolMethodPass;
 pub use static_context::StaticContextPass;
 pub use visibility_consistency::VisibilityConsistencyPass;
@@ -95,6 +97,7 @@ impl ValidationRunner {
             Box::new(StaticContextPass),
             Box::new(DuplicateSymbolPass),
             Box::new(VisibilityConsistencyPass),
+            Box::new(GenericsPass),
         ];
 
         Self { passes }

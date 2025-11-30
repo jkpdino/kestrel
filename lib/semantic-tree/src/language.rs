@@ -7,7 +7,7 @@ pub trait SymbolKind: Copy + Clone {
     fn is_transparent(&self) -> bool;
 }
 
-pub trait Language {
+pub trait Language: 'static {
     type BehaviorKind;
     type SymbolKind: SymbolKind;
 }

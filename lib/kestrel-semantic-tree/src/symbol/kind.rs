@@ -10,6 +10,7 @@ pub enum KestrelSymbolKind {
     SourceFile,
     Struct,
     TypeAlias,
+    TypeParameter,
 }
 
 impl SymbolKind for KestrelSymbolKind {

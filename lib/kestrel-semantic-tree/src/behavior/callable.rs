@@ -138,16 +138,19 @@ impl SignatureType {
                 return_type: Box::new(SignatureType::from_ty(return_type)),
             },
             TyKind::Path(segments) => SignatureType::Named(segments.clone()),
-            TyKind::Struct(s) => {
-                SignatureType::Named(vec![s.metadata().name().value.clone()])
+            TyKind::TypeParameter(param) => {
+                SignatureType::Named(vec![param.metadata().name().value.clone()])
             }
-            TyKind::Protocol(p) => {
-                SignatureType::Named(vec![p.metadata().name().value.clone()])
+            TyKind::Struct { symbol, .. } => {
+                SignatureType::Named(vec![symbol.metadata().name().value.clone()])
             }
-            TyKind::TypeAlias(alias) => {
+            TyKind::Protocol { symbol, .. } => {
+                SignatureType::Named(vec![symbol.metadata().name().value.clone()])
+            }
+            TyKind::TypeAlias { symbol, .. } => {
                 // For type aliases, use the alias name
                 // (could also resolve to underlying type)
-                SignatureType::Named(vec![alias.metadata().name().value.clone()])
+                SignatureType::Named(vec![symbol.metadata().name().value.clone()])
             }
         }
     }

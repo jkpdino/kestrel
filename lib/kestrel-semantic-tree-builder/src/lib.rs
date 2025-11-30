@@ -394,6 +394,26 @@ pub fn bind_tree(
     bind_tree_with_config(tree, diagnostics, _file_id, None);
 }
 
+/// Run validation passes on the semantic tree
+pub fn run_validation(tree: &SemanticTree, diagnostics: &mut DiagnosticContext) {
+    run_validation_with_config(tree, diagnostics, None);
+}
+
+/// Run validation passes with explicit configuration
+pub fn run_validation_with_config(
+    tree: &SemanticTree,
+    diagnostics: &mut DiagnosticContext,
+    config: Option<&validation::ValidationConfig>,
+) {
+    let registry = SymbolRegistry::new();
+    registry.register_tree(tree.root());
+    let db = SemanticDatabase::new(registry);
+
+    let validation_config = config.cloned().unwrap_or_default();
+    let runner = validation::ValidationRunner::new();
+    runner.run(tree.root(), &db, diagnostics, &validation_config);
+}
+
 /// Run the binding phase with explicit validation configuration
 pub fn bind_tree_with_config(
     tree: &SemanticTree,
@@ -521,7 +541,7 @@ fn follow_type_alias_chain(
     use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
 
     match ty.kind() {
-        TyKind::TypeAlias(alias_symbol) => {
+        TyKind::TypeAlias { symbol: alias_symbol, .. } => {
             let alias_id = alias_symbol.metadata().id();
 
             // Try to enter - if it fails, we found a cycle
@@ -708,6 +728,7 @@ fn bind_symbol(
         KestrelSymbolKind::Function => Some(SyntaxKind::FunctionDeclaration),
         KestrelSymbolKind::Module => Some(SyntaxKind::ModuleDeclaration),
         KestrelSymbolKind::TypeAlias => Some(SyntaxKind::TypeAliasDeclaration),
+        KestrelSymbolKind::TypeParameter => Some(SyntaxKind::TypeParameter),
         KestrelSymbolKind::SourceFile => None,
     };
 
@@ -796,9 +817,34 @@ fn format_type(ty: &Ty) -> String {
             )
         }
         TyKind::Path(segments) => segments.join("."),
-        TyKind::Protocol(protocol_symbol) => protocol_symbol.metadata().name().value.clone(),
-        TyKind::Struct(struct_symbol) => struct_symbol.metadata().name().value.clone(),
-        TyKind::TypeAlias(type_alias_symbol) => type_alias_symbol.metadata().name().value.clone(),
+        TyKind::TypeParameter(param_symbol) => param_symbol.metadata().name().value.clone(),
+        TyKind::Protocol { symbol: protocol_symbol, substitutions } => {
+            let name = protocol_symbol.metadata().name().value.clone();
+            if substitutions.is_empty() {
+                name
+            } else {
+                let args: Vec<String> = substitutions.iter().map(|(_, ty)| format_type(ty)).collect();
+                format!("{}[{}]", name, args.join(", "))
+            }
+        }
+        TyKind::Struct { symbol: struct_symbol, substitutions } => {
+            let name = struct_symbol.metadata().name().value.clone();
+            if substitutions.is_empty() {
+                name
+            } else {
+                let args: Vec<String> = substitutions.iter().map(|(_, ty)| format_type(ty)).collect();
+                format!("{}[{}]", name, args.join(", "))
+            }
+        }
+        TyKind::TypeAlias { symbol: type_alias_symbol, substitutions } => {
+            let name = type_alias_symbol.metadata().name().value.clone();
+            if substitutions.is_empty() {
+                name
+            } else {
+                let args: Vec<String> = substitutions.iter().map(|(_, ty)| format_type(ty)).collect();
+                format!("{}[{}]", name, args.join(", "))
+            }
+        }
     }
 }
 

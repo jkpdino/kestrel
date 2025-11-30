@@ -6,6 +6,7 @@ mod protocol;
 mod r#struct;
 mod terminal;
 mod type_alias;
+pub mod type_parameter;
 
 pub use field::FieldResolver;
 pub use function::FunctionResolver;

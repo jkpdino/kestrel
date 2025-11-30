@@ -107,7 +107,7 @@ impl TyExpression {
 }
 
 /// Internal parser for unit type: ()
-/// Note: This is now handled by parse_tuple_or_function_type_parser, but kept for reference
+/// Note: This is now handled by ty_parser directly, but kept for reference
 #[allow(dead_code)]
 fn unit_type_parser() -> impl Parser<Token, (Span, Span), Error = Simple<Token>> + Clone {
     just(Token::LParen)
@@ -124,9 +124,9 @@ fn never_type_parser() -> impl Parser<Token, Span, Error = Simple<Token>> + Clon
         .ignore_then(just(Token::Bang).map_with_span(|_, span| span))
 }
 
-/// Internal parser for path type: Ident or Ident.Ident.Ident
+/// Internal parser for path segments: Ident or Ident.Ident.Ident
 /// Skips leading whitespace before the first identifier
-fn path_type_parser() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
+fn path_segments_parser() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + Clone {
     use crate::common::skip_trivia;
 
     skip_trivia()
@@ -141,18 +141,63 @@ fn path_type_parser() -> impl Parser<Token, Vec<Span>, Error = Simple<Token>> + 
 }
 
 /// Combined type parser that returns a variant
+/// Supports: !, (), (T1, T2), (T1) -> T2, Path, Path[Args]
 pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>> + Clone {
-    // Never type: !
-    let never = never_type_parser().map(TyVariant::Never);
+    recursive(|ty| {
+        use crate::common::skip_trivia;
 
-    // Unit type or tuple/function type
-    let paren_types = parse_tuple_or_function_type_parser();
+        // Never type: !
+        let never = never_type_parser().map(TyVariant::Never);
 
-    // Path type: Ident.Ident.Ident
-    let path = path_type_parser().map(TyVariant::Path);
+        // Unit type or tuple/function type
+        let paren_types = {
+            skip_trivia()
+                .ignore_then(just(Token::LParen).map_with_span(|_, span| span))
+                .then(
+                    ty.clone()
+                        .separated_by(just(Token::Comma))
+                        .allow_trailing()
+                )
+                .then(just(Token::RParen).map_with_span(|_, span| span))
+                .then(
+                    // Optional arrow and return type for function types
+                    skip_trivia()
+                        .ignore_then(just(Token::Arrow))
+                        .map_with_span(|_, span| span)
+                        .then(ty.clone())
+                        .or_not()
+                )
+                .map(|(((lparen, types), rparen), arrow_and_return)| {
+                    if let Some((arrow_span, return_ty)) = arrow_and_return {
+                        TyVariant::Function(lparen, types, rparen, arrow_span, Box::new(return_ty))
+                    } else if types.is_empty() {
+                        TyVariant::Unit(lparen, rparen)
+                    } else {
+                        TyVariant::Tuple(lparen, types, rparen)
+                    }
+                })
+        };
 
-    // Try never first, then paren types, then path
-    never.or(paren_types).or(path)
+        // Path type with optional type arguments: Foo or Foo[Int, String]
+        let path = path_segments_parser()
+            .then(
+                // Optional type arguments: [T1, T2]
+                skip_trivia()
+                    .ignore_then(just(Token::LBracket))
+                    .ignore_then(
+                        ty.clone()
+                            .separated_by(just(Token::Comma))
+                            .allow_trailing()
+                    )
+                    .then_ignore(skip_trivia())
+                    .then_ignore(just(Token::RBracket))
+                    .or_not()
+            )
+            .map(|(segments, args)| TyVariant::Path { segments, args });
+
+        // Try never first, then paren types, then path
+        never.or(paren_types).or(path)
+    })
 }
 
 /// Parse a type expression and emit events
@@ -166,30 +211,34 @@ where
 
     match ty_parser().parse(stream) {
         Ok(variant) => {
-            match variant {
-                TyVariant::Unit(lparen_span, rparen_span) => {
-                    emit_unit_type(sink, lparen_span, rparen_span);
-                }
-                TyVariant::Never(bang_span) => {
-                    emit_never_type(sink, bang_span);
-                }
-                TyVariant::Tuple(lparen, types, rparen) => {
-                    emit_tuple_type(sink, lparen, types, rparen);
-                }
-                TyVariant::Function(lparen, params, rparen, arrow, return_ty) => {
-                    emit_function_type(sink, lparen, params, rparen, arrow, return_ty);
-                }
-                TyVariant::Path(segments) => {
-                    emit_path_type(sink, &segments);
-                }
-            }
+            emit_ty_variant(sink, &variant);
         }
         Err(errors) => {
             for error in errors {
-                // Chumsky errors have span information
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), span);
             }
+        }
+    }
+}
+
+/// Emit events for any type variant
+pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
+    match variant {
+        TyVariant::Unit(lparen_span, rparen_span) => {
+            emit_unit_type(sink, lparen_span.clone(), rparen_span.clone());
+        }
+        TyVariant::Never(bang_span) => {
+            emit_never_type(sink, bang_span.clone());
+        }
+        TyVariant::Tuple(lparen, types, rparen) => {
+            emit_tuple_type(sink, lparen.clone(), types, rparen.clone());
+        }
+        TyVariant::Function(lparen, params, rparen, arrow, return_ty) => {
+            emit_function_type(sink, lparen.clone(), params, rparen.clone(), arrow.clone(), return_ty);
+        }
+        TyVariant::Path { segments, args } => {
+            emit_path_type(sink, segments, args.as_ref());
         }
     }
 }
@@ -199,46 +248,13 @@ where
 pub(crate) enum TyVariant {
     Unit(Span, Span),
     Never(Span),
-    Tuple(Span, Vec<Vec<Span>>, Span),
-    Function(Span, Vec<Vec<Span>>, Span, Span, Vec<Span>),
-    Path(Vec<Span>),
-}
-
-/// Parser for tuple or function type (they both start with '(')
-/// Tuple: (type1, type2, ...)
-/// Function: (param1, param2, ...) -> return_type
-/// Unit: ()
-/// Skips leading whitespace
-fn parse_tuple_or_function_type_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>> + Clone {
-    use crate::common::skip_trivia;
-
-    // Parse: ( type_list ) (-> type)?
-    skip_trivia()
-        .ignore_then(just(Token::LParen).map_with_span(|_, span| span))
-        .then(
-            // Parse a list of path types separated by commas
-            path_type_parser()
-                .separated_by(just(Token::Comma))
-                .allow_trailing()
-        )
-        .then(just(Token::RParen).map_with_span(|_, span| span))
-        .then(
-            // Optional arrow and return type
-            just(Token::Arrow)
-                .map_with_span(|_, span| span)
-                .then(path_type_parser())
-                .or_not()
-        )
-        .map(|(((lparen, types), rparen), arrow_and_return)| {
-            if let Some((arrow_span, return_ty_segments)) = arrow_and_return {
-                TyVariant::Function(lparen, types, rparen, arrow_span, return_ty_segments)
-            } else if types.is_empty() {
-                // Empty parens = unit type
-                TyVariant::Unit(lparen, rparen)
-            } else {
-                TyVariant::Tuple(lparen, types, rparen)
-            }
-        })
+    Tuple(Span, Vec<TyVariant>, Span),
+    Function(Span, Vec<TyVariant>, Span, Span, Box<TyVariant>),
+    /// Path with optional type arguments: Foo or Foo[Int, String]
+    Path {
+        segments: Vec<Span>,
+        args: Option<Vec<TyVariant>>,
+    },
 }
 
 /// Emit events for a unit type
@@ -280,31 +296,37 @@ fn emit_path(sink: &mut EventSink, segments: &[Span]) {
     sink.finish_node(); // Finish Path
 }
 
-/// Emit events for a path type
+/// Emit events for a path type with optional type arguments
 /// Structure: Ty -> TyPath -> Path -> PathElement -> Identifier
-pub(crate) fn emit_path_type(sink: &mut EventSink, segments: &[Span]) {
+///            (optional) TypeArgumentList -> Ty...
+pub(crate) fn emit_path_type(sink: &mut EventSink, segments: &[Span], args: Option<&Vec<TyVariant>>) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyPath);
     emit_path(sink, segments);
+
+    // Emit type arguments if present: [Int, String]
+    if let Some(type_args) = args {
+        sink.start_node(SyntaxKind::TypeArgumentList);
+        for arg in type_args {
+            emit_ty_variant(sink, arg);
+        }
+        sink.finish_node(); // Finish TypeArgumentList
+    }
+
     sink.finish_node(); // Finish TyPath
     sink.finish_node(); // Finish Ty
 }
 
 /// Emit events for a tuple type
-pub(crate) fn emit_tuple_type(sink: &mut EventSink, lparen: Span, types: Vec<Vec<Span>>, rparen: Span) {
+pub(crate) fn emit_tuple_type(sink: &mut EventSink, lparen: Span, types: &[TyVariant], rparen: Span) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyTuple);
 
     sink.add_token(SyntaxKind::LParen, lparen);
 
     // Emit each type in the tuple
-    for type_segments in types.iter() {
-        // Each element is a nested Ty node with path structure
-        sink.start_node(SyntaxKind::Ty);
-        sink.start_node(SyntaxKind::TyPath);
-        emit_path(sink, type_segments);
-        sink.finish_node(); // Finish TyPath
-        sink.finish_node(); // Finish Ty
+    for ty in types {
+        emit_ty_variant(sink, ty);
     }
 
     sink.add_token(SyntaxKind::RParen, rparen);
@@ -317,10 +339,10 @@ pub(crate) fn emit_tuple_type(sink: &mut EventSink, lparen: Span, types: Vec<Vec
 pub(crate) fn emit_function_type(
     sink: &mut EventSink,
     lparen: Span,
-    params: Vec<Vec<Span>>,
+    params: &[TyVariant],
     rparen: Span,
     arrow: Span,
-    return_ty: Vec<Span>,
+    return_ty: &TyVariant,
 ) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyFunction);
@@ -329,12 +351,8 @@ pub(crate) fn emit_function_type(
     sink.start_node(SyntaxKind::TyList);
     sink.add_token(SyntaxKind::LParen, lparen);
 
-    for param_segments in params.iter() {
-        sink.start_node(SyntaxKind::Ty);
-        sink.start_node(SyntaxKind::TyPath);
-        emit_path(sink, param_segments);
-        sink.finish_node(); // Finish TyPath
-        sink.finish_node(); // Finish Ty
+    for param in params {
+        emit_ty_variant(sink, param);
     }
 
     sink.add_token(SyntaxKind::RParen, rparen);
@@ -344,11 +362,7 @@ pub(crate) fn emit_function_type(
     sink.add_token(SyntaxKind::Arrow, arrow);
 
     // Return type
-    sink.start_node(SyntaxKind::Ty);
-    sink.start_node(SyntaxKind::TyPath);
-    emit_path(sink, &return_ty);
-    sink.finish_node(); // Finish TyPath
-    sink.finish_node(); // Finish Ty
+    emit_ty_variant(sink, return_ty);
 
     sink.finish_node(); // Finish TyFunction
     sink.finish_node(); // Finish Ty
@@ -450,6 +464,35 @@ mod tests {
         let ty = parse_ty_from_source(source);
 
         assert!(ty.is_function());
+    }
+
+    #[test]
+    fn test_generic_type_simple() {
+        let source = "List[Int]";
+        let ty = parse_ty_from_source(source);
+
+        assert!(ty.is_path());
+        // Check that it parsed the base type
+        assert_eq!(ty.path_segments(), Some(vec!["List".to_string()]));
+        // The type arguments are part of the TyPath node
+    }
+
+    #[test]
+    fn test_generic_type_multiple_args() {
+        let source = "Map[String, Int]";
+        let ty = parse_ty_from_source(source);
+
+        assert!(ty.is_path());
+        assert_eq!(ty.path_segments(), Some(vec!["Map".to_string()]));
+    }
+
+    #[test]
+    fn test_generic_type_nested() {
+        let source = "List[Option[Int]]";
+        let ty = parse_ty_from_source(source);
+
+        assert!(ty.is_path());
+        assert_eq!(ty.path_segments(), Some(vec!["List".to_string()]));
     }
 
     #[test]

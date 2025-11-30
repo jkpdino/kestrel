@@ -1,0 +1,160 @@
+use semantic_tree::symbol::{Symbol, SymbolId};
+use std::collections::HashMap;
+
+use crate::language::KestrelLanguage;
+
+use super::Ty;
+
+/// Maps type parameter SymbolIds to their substituted types.
+///
+/// This is used when instantiating generic types, e.g., `List[Int]` creates
+/// a Substitutions mapping the `T` parameter's SymbolId to `Int`.
+#[derive(Debug, Clone, Default)]
+pub struct Substitutions {
+    map: HashMap<SymbolId, Ty>,
+}
+
+impl Substitutions {
+    /// Create an empty substitution map
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    /// Check if there are no substitutions
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
+    /// Get the number of substitutions
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Insert a type substitution for a type parameter
+    pub fn insert(&mut self, param_id: SymbolId, ty: Ty) {
+        self.map.insert(param_id, ty);
+    }
+
+    /// Get the substituted type for a type parameter
+    pub fn get(&self, param_id: SymbolId) -> Option<&Ty> {
+        self.map.get(&param_id)
+    }
+
+    /// Check if a type parameter has a substitution
+    pub fn contains(&self, param_id: SymbolId) -> bool {
+        self.map.contains_key(&param_id)
+    }
+
+    /// Iterate over all substitutions
+    pub fn iter(&self) -> impl Iterator<Item = (&SymbolId, &Ty)> {
+        self.map.iter()
+    }
+
+    /// Iterate over just the types (values)
+    pub fn types(&self) -> impl Iterator<Item = &Ty> {
+        self.map.values()
+    }
+
+    /// Apply substitutions to a type, replacing any type parameters with their
+    /// substituted types. Returns a new type with substitutions applied.
+    pub fn apply(&self, ty: &Ty) -> Ty {
+        use super::TyKind;
+
+        match ty.kind() {
+            // Type parameter - look up in substitutions
+            TyKind::TypeParameter(param_symbol) => {
+                let param_id = Symbol::<KestrelLanguage>::metadata(param_symbol.as_ref()).id();
+                if let Some(substituted) = self.get(param_id) {
+                    // Recursively apply in case the substituted type also has type params
+                    self.apply(substituted)
+                } else {
+                    // No substitution found, return as-is
+                    ty.clone()
+                }
+            }
+
+            // Composite types - recursively apply to components
+            TyKind::Tuple(elements) => {
+                let new_elements: Vec<Ty> = elements.iter().map(|e| self.apply(e)).collect();
+                Ty::tuple(new_elements, ty.span().clone())
+            }
+
+            TyKind::Function { params, return_type } => {
+                let new_params: Vec<Ty> = params.iter().map(|p| self.apply(p)).collect();
+                let new_return = self.apply(return_type);
+                Ty::function(new_params, new_return, ty.span().clone())
+            }
+
+            // Instantiated types - recursively apply to their substitutions
+            TyKind::Struct { symbol, substitutions } => {
+                let new_subs = self.apply_to_substitutions(substitutions);
+                Ty::generic_struct(symbol.clone(), new_subs, ty.span().clone())
+            }
+
+            TyKind::Protocol { symbol, substitutions } => {
+                let new_subs = self.apply_to_substitutions(substitutions);
+                Ty::generic_protocol(symbol.clone(), new_subs, ty.span().clone())
+            }
+
+            TyKind::TypeAlias { symbol, substitutions } => {
+                let new_subs = self.apply_to_substitutions(substitutions);
+                Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
+            }
+
+            // Base types and paths - return as-is
+            TyKind::Unit
+            | TyKind::Never
+            | TyKind::Int(_)
+            | TyKind::Float(_)
+            | TyKind::Bool
+            | TyKind::String
+            | TyKind::Path(_) => ty.clone(),
+        }
+    }
+
+    /// Apply substitutions to another Substitutions map
+    fn apply_to_substitutions(&self, other: &Substitutions) -> Substitutions {
+        let mut result = Substitutions::new();
+        for (id, ty) in other.iter() {
+            result.insert(*id, self.apply(ty));
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_substitutions() {
+        let subs = Substitutions::new();
+        assert!(subs.is_empty());
+        assert_eq!(subs.len(), 0);
+    }
+
+    #[test]
+    fn test_insert_and_get() {
+        let mut subs = Substitutions::new();
+        let id = SymbolId::new();
+        let ty = Ty::unit(0..2);
+
+        subs.insert(id, ty);
+
+        assert!(!subs.is_empty());
+        assert_eq!(subs.len(), 1);
+        assert!(subs.contains(id));
+        assert!(subs.get(id).unwrap().is_unit());
+    }
+
+    #[test]
+    fn test_apply_to_base_type() {
+        let subs = Substitutions::new();
+        let ty = Ty::int(super::super::IntBits::I32, 0..3);
+
+        let result = subs.apply(&ty);
+        assert!(result.is_int());
+    }
+}

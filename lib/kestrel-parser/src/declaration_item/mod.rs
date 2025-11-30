@@ -17,6 +17,11 @@ use crate::common::{
 };
 use crate::ty::{ty_parser, TyVariant};
 use crate::function::ParameterData;
+use crate::type_param::{
+    TypeParameterData, WhereClauseData,
+    type_parameter_list_parser, where_clause_parser,
+    emit_type_parameter_list, emit_where_clause,
+};
 
 /// Represents a declaration item - a top-level unit of code in a Kestrel file
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,14 +68,53 @@ impl DeclarationItem {
 enum DeclarationItemData {
     Module(Span, Vec<Span>),
     Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>),
-    /// Protocol: visibility, protocol_span, name_span, lbrace_span, body (functions), rbrace_span
-    Protocol(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
-    Struct(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
+    /// Protocol: visibility, protocol_span, name_span, type_params, where_clause, lbrace_span, body (functions), rbrace_span
+    Protocol {
+        visibility: Option<(Token, Span)>,
+        protocol_span: Span,
+        name_span: Span,
+        type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+        where_clause: Option<WhereClauseData>,
+        lbrace_span: Span,
+        body: Vec<DeclarationItemData>,
+        rbrace_span: Span,
+    },
+    /// Struct: visibility, struct_span, name_span, type_params, where_clause, lbrace_span, body, rbrace_span
+    Struct {
+        visibility: Option<(Token, Span)>,
+        struct_span: Span,
+        name_span: Span,
+        type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+        where_clause: Option<WhereClauseData>,
+        lbrace_span: Span,
+        body: Vec<DeclarationItemData>,
+        rbrace_span: Span,
+    },
     /// Field: visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty
     Field(Option<(Token, Span)>, Option<Span>, Span, bool, Span, Span, TyVariant),
-    /// Function: visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body (optional)
-    Function(Option<(Token, Span)>, Option<Span>, Span, Span, Span, Vec<ParameterData>, Span, Option<(Span, TyVariant)>, Option<(Span, Span)>),
-    TypeAlias(Option<(Token, Span)>, Span, Span, Span, Span, Span),
+    /// Function: visibility, is_static, fn_span, name_span, type_params, lparen, parameters, rparen, return_type, where_clause, body (optional)
+    Function {
+        visibility: Option<(Token, Span)>,
+        is_static: Option<Span>,
+        fn_span: Span,
+        name_span: Span,
+        type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+        lparen: Span,
+        parameters: Vec<ParameterData>,
+        rparen: Span,
+        return_type: Option<(Span, TyVariant)>,
+        where_clause: Option<WhereClauseData>,
+        body: Option<(Span, Span)>,
+    },
+    TypeAlias {
+        visibility: Option<(Token, Span)>,
+        type_span: Span,
+        name_span: Span,
+        type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+        equals_span: Span,
+        aliased_type_span: Span,
+        semicolon_span: Span,
+    },
 }
 
 /// Static modifier parser
@@ -166,23 +210,45 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
         let struct_parser = visibility_parser_internal()
             .then(token(Token::Struct))
             .then(identifier())
+            .then(type_parameter_list_parser().or_not())
+            .then(where_clause_parser().or_not())
             .then(token(Token::LBrace))
             .then(declaration_item.clone().repeated())
             .then(token(Token::RBrace))
-            .map(|(((((visibility, struct_span), name_span), lbrace_span), body), rbrace_span)| {
-                DeclarationItemData::Struct(visibility, struct_span, name_span, lbrace_span, body, rbrace_span)
+            .map(|(((((((visibility, struct_span), name_span), type_params), where_clause), lbrace_span), body), rbrace_span)| {
+                DeclarationItemData::Struct {
+                    visibility,
+                    struct_span,
+                    name_span,
+                    type_params,
+                    where_clause,
+                    lbrace_span,
+                    body,
+                    rbrace_span,
+                }
             });
 
-        // Protocol: (visibility)? protocol Name { (function declarations)* }
+        // Protocol: (visibility)? protocol Name[T, U]? (where T: ...)? { (function declarations)* }
         // Protocol body only contains function declarations (methods)
         let protocol_parser = visibility_parser_internal()
             .then(token(Token::Protocol))
             .then(identifier())
+            .then(type_parameter_list_parser().or_not())
+            .then(where_clause_parser().or_not())
             .then(token(Token::LBrace))
             .then(declaration_item.clone().repeated())
             .then(token(Token::RBrace))
-            .map(|(((((visibility, protocol_span), name_span), lbrace_span), body), rbrace_span)| {
-                DeclarationItemData::Protocol(visibility, protocol_span, name_span, lbrace_span, body, rbrace_span)
+            .map(|(((((((visibility, protocol_span), name_span), type_params), where_clause), lbrace_span), body), rbrace_span)| {
+                DeclarationItemData::Protocol {
+                    visibility,
+                    protocol_span,
+                    name_span,
+                    type_params,
+                    where_clause,
+                    lbrace_span,
+                    body,
+                    rbrace_span,
+                }
             });
 
         // Field: (visibility)? (static)? let/var name: Type
@@ -202,28 +268,51 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
             .map(|(lbrace, rbrace)| Some((lbrace, rbrace)))
             .or(empty().map(|_| None));
 
-        // Function: (visibility)? (static)? fn name(params) (-> Type)? ({ })?
+        // Function: (visibility)? (static)? fn name[T, U]?(params) (-> Type)? (where T: ...)? ({ })?
         let function_parser = visibility_parser_internal()
             .then(static_parser_internal())
             .then(token(Token::Func))
             .then(identifier())
+            .then(type_parameter_list_parser().or_not())
             .then(token(Token::LParen))
             .then(parameter_list_parser_internal())
             .then(token(Token::RParen))
             .then(return_type_parser_internal())
+            .then(where_clause_parser().or_not())
             .then(function_body_parser)
-            .map(|((((((((visibility, is_static), fn_span), name_span), lparen), parameters), rparen), return_type), body)| {
-                DeclarationItemData::Function(visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body)
+            .map(|((((((((((visibility, is_static), fn_span), name_span), type_params), lparen), parameters), rparen), return_type), where_clause), body)| {
+                DeclarationItemData::Function {
+                    visibility,
+                    is_static,
+                    fn_span,
+                    name_span,
+                    type_params,
+                    lparen,
+                    parameters,
+                    rparen,
+                    return_type,
+                    where_clause,
+                    body,
+                }
             });
 
         let type_alias_parser = visibility_parser_internal()
             .then(token(Token::Type))
             .then(identifier())
+            .then(type_parameter_list_parser().or_not())
             .then(token(Token::Equals))
             .then(identifier())
             .then(token(Token::Semicolon))
-            .map(|(((((visibility, type_span), name_span), equals_span), aliased_type_span), semicolon_span)| {
-                DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span)
+            .map(|((((((visibility, type_span), name_span), type_params), equals_span), aliased_type_span), semicolon_span)| {
+                DeclarationItemData::TypeAlias {
+                    visibility,
+                    type_span,
+                    name_span,
+                    type_params,
+                    equals_span,
+                    aliased_type_span,
+                    semicolon_span,
+                }
             });
 
         module_parser.or(import_parser).or(protocol_parser).or(struct_parser).or(function_parser).or(field_parser).or(type_alias_parser)
@@ -437,25 +526,25 @@ where
                         // Emit import declaration events
                         crate::common::emit_import_declaration(sink, import_span, &path_segments, alias, items);
                     }
-                    DeclarationItemData::Protocol(visibility, protocol_span, name_span, lbrace_span, body, rbrace_span) => {
+                    DeclarationItemData::Protocol { visibility, protocol_span, name_span, type_params, where_clause, lbrace_span, body, rbrace_span } => {
                         // Emit protocol declaration events
-                        emit_protocol_declaration(sink, visibility, protocol_span, name_span, lbrace_span, body, rbrace_span);
+                        emit_protocol_declaration(sink, visibility, protocol_span, name_span, type_params, where_clause, lbrace_span, body, rbrace_span);
                     }
-                    DeclarationItemData::Struct(visibility, struct_span, name_span, lbrace_span, body, rbrace_span) => {
+                    DeclarationItemData::Struct { visibility, struct_span, name_span, type_params, where_clause, lbrace_span, body, rbrace_span } => {
                         // Emit struct declaration events
-                        emit_struct_declaration(sink, visibility, struct_span, name_span, lbrace_span, body, rbrace_span);
+                        emit_struct_declaration(sink, visibility, struct_span, name_span, type_params, where_clause, lbrace_span, body, rbrace_span);
                     }
                     DeclarationItemData::Field(visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty) => {
                         // Emit field declaration events
                         emit_field_declaration(sink, visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty);
                     }
-                    DeclarationItemData::Function(visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body) => {
+                    DeclarationItemData::Function { visibility, is_static, fn_span, name_span, type_params, lparen, parameters, rparen, return_type, where_clause, body } => {
                         // Emit function declaration events
-                        emit_function_declaration(sink, visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body);
+                        emit_function_declaration(sink, visibility, is_static, fn_span, name_span, type_params, lparen, parameters, rparen, return_type, where_clause, body);
                     }
-                    DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span) => {
+                    DeclarationItemData::TypeAlias { visibility, type_span, name_span, type_params, equals_span, aliased_type_span, semicolon_span } => {
                         // Emit type alias declaration events
-                        emit_type_alias_declaration(sink, visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span);
+                        emit_type_alias_declaration(sink, visibility, type_span, name_span, type_params, equals_span, aliased_type_span, semicolon_span);
                     }
                 }
             }
@@ -480,6 +569,8 @@ fn emit_protocol_declaration(
     visibility: Option<(Token, Span)>,
     protocol_span: Span,
     name_span: Span,
+    type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    where_clause: Option<WhereClauseData>,
     lbrace_span: Span,
     body: Vec<DeclarationItemData>,
     rbrace_span: Span,
@@ -507,6 +598,16 @@ fn emit_protocol_declaration(
     sink.add_token(SyntaxKind::Identifier, name_span);
     sink.finish_node(); // Finish Name
 
+    // Emit TypeParameterList if present
+    if let Some((lbracket, params, rbracket)) = type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    // Emit WhereClause if present
+    if let Some(wc) = where_clause {
+        emit_where_clause(sink, wc);
+    }
+
     // Emit ProtocolBody node wrapping the body content
     sink.start_node(SyntaxKind::ProtocolBody);
     sink.add_token(SyntaxKind::LBrace, lbrace_span);
@@ -529,6 +630,8 @@ fn emit_struct_declaration(
     visibility: Option<(Token, Span)>,
     struct_span: Span,
     name_span: Span,
+    type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    where_clause: Option<WhereClauseData>,
     lbrace_span: Span,
     body: Vec<DeclarationItemData>,
     rbrace_span: Span,
@@ -555,6 +658,16 @@ fn emit_struct_declaration(
     sink.start_node(SyntaxKind::Name);
     sink.add_token(SyntaxKind::Identifier, name_span);
     sink.finish_node(); // Finish Name
+
+    // Emit TypeParameterList if present
+    if let Some((lbracket, params, rbracket)) = type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    // Emit WhereClause if present
+    if let Some(wc) = where_clause {
+        emit_where_clause(sink, wc);
+    }
 
     // Emit StructBody node wrapping the body content
     sink.start_node(SyntaxKind::StructBody);
@@ -583,8 +696,6 @@ fn emit_field_declaration(
     colon_span: Span,
     ty: TyVariant,
 ) {
-    use crate::ty::{emit_unit_type, emit_never_type, emit_tuple_type, emit_function_type, emit_path_type};
-
     sink.start_node(SyntaxKind::FieldDeclaration);
 
     // Always emit Visibility node (may be empty)
@@ -623,15 +734,7 @@ fn emit_field_declaration(
     sink.add_token(SyntaxKind::Colon, colon_span);
 
     // Emit the type
-    match ty {
-        TyVariant::Unit(lparen, rparen) => emit_unit_type(sink, lparen, rparen),
-        TyVariant::Never(bang) => emit_never_type(sink, bang),
-        TyVariant::Tuple(lparen, types, rparen) => emit_tuple_type(sink, lparen, types, rparen),
-        TyVariant::Function(lparen, params, rparen, arrow, ret) => {
-            emit_function_type(sink, lparen, params, rparen, arrow, ret)
-        }
-        TyVariant::Path(segments) => emit_path_type(sink, &segments),
-    }
+    crate::ty::emit_ty_variant(sink, &ty);
 
     sink.finish_node(); // Finish FieldDeclaration
 }
@@ -644,14 +747,14 @@ fn emit_function_declaration(
     is_static: Option<Span>,
     fn_span: Span,
     name_span: Span,
+    type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
     lparen: Span,
     parameters: Vec<ParameterData>,
     rparen: Span,
     return_type: Option<(Span, TyVariant)>,
+    where_clause: Option<WhereClauseData>,
     body: Option<(Span, Span)>,
 ) {
-    use crate::ty::{emit_unit_type, emit_never_type, emit_tuple_type, emit_function_type, emit_path_type};
-
     sink.start_node(SyntaxKind::FunctionDeclaration);
 
     // Always emit Visibility node (may be empty)
@@ -683,6 +786,11 @@ fn emit_function_declaration(
     sink.add_token(SyntaxKind::Identifier, name_span);
     sink.finish_node(); // Finish Name
 
+    // Emit TypeParameterList if present
+    if let Some((lbracket, params, rbracket)) = type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
     // Emit ParameterList node
     sink.start_node(SyntaxKind::ParameterList);
     sink.add_token(SyntaxKind::LParen, lparen);
@@ -705,15 +813,7 @@ fn emit_function_declaration(
         sink.add_token(SyntaxKind::Colon, param.colon);
 
         // Emit the type
-        match param.ty {
-            TyVariant::Unit(lp, rp) => emit_unit_type(sink, lp, rp),
-            TyVariant::Never(bang) => emit_never_type(sink, bang),
-            TyVariant::Tuple(lp, types, rp) => emit_tuple_type(sink, lp, types, rp),
-            TyVariant::Function(lp, params, rp, arrow, ret) => {
-                emit_function_type(sink, lp, params, rp, arrow, ret)
-            }
-            TyVariant::Path(segments) => emit_path_type(sink, &segments),
-        }
+        crate::ty::emit_ty_variant(sink, &param.ty);
 
         sink.finish_node(); // Finish Parameter
     }
@@ -727,17 +827,14 @@ fn emit_function_declaration(
         sink.add_token(SyntaxKind::Arrow, arrow_span);
 
         // Emit the return type
-        match return_ty {
-            TyVariant::Unit(lp, rp) => emit_unit_type(sink, lp, rp),
-            TyVariant::Never(bang) => emit_never_type(sink, bang),
-            TyVariant::Tuple(lp, types, rp) => emit_tuple_type(sink, lp, types, rp),
-            TyVariant::Function(lp, params, rp, arrow, ret) => {
-                emit_function_type(sink, lp, params, rp, arrow, ret)
-            }
-            TyVariant::Path(segments) => emit_path_type(sink, &segments),
-        }
+        crate::ty::emit_ty_variant(sink, &return_ty);
 
         sink.finish_node(); // Finish ReturnType
+    }
+
+    // Emit WhereClause if present
+    if let Some(wc) = where_clause {
+        emit_where_clause(sink, wc);
     }
 
     // Emit FunctionBody node if present (optional for protocol methods)
@@ -759,6 +856,7 @@ fn emit_type_alias_declaration(
     visibility: Option<(Token, Span)>,
     type_span: Span,
     name_span: Span,
+    type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
     equals_span: Span,
     aliased_type_span: Span,
     semicolon_span: Span,
@@ -786,6 +884,11 @@ fn emit_type_alias_declaration(
     sink.add_token(SyntaxKind::Identifier, name_span);
     sink.finish_node(); // Finish Name
 
+    // Emit type parameters if present
+    if let Some((lbracket, params, rbracket)) = type_params {
+        emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
     sink.add_token(SyntaxKind::Equals, equals_span);
 
     // Emit AliasedType node wrapping the aliased type identifier
@@ -811,20 +914,20 @@ fn emit_declaration_item_internal(sink: &mut EventSink, item_data: DeclarationIt
         DeclarationItemData::Import(import_span, path_segments, alias, items) => {
             crate::common::emit_import_declaration(sink, import_span, &path_segments, alias, items);
         }
-        DeclarationItemData::Protocol(visibility, protocol_span, name_span, lbrace_span, body, rbrace_span) => {
-            emit_protocol_declaration(sink, visibility, protocol_span, name_span, lbrace_span, body, rbrace_span);
+        DeclarationItemData::Protocol { visibility, protocol_span, name_span, type_params, where_clause, lbrace_span, body, rbrace_span } => {
+            emit_protocol_declaration(sink, visibility, protocol_span, name_span, type_params, where_clause, lbrace_span, body, rbrace_span);
         }
-        DeclarationItemData::Struct(visibility, struct_span, name_span, lbrace_span, body, rbrace_span) => {
-            emit_struct_declaration(sink, visibility, struct_span, name_span, lbrace_span, body, rbrace_span);
+        DeclarationItemData::Struct { visibility, struct_span, name_span, type_params, where_clause, lbrace_span, body, rbrace_span } => {
+            emit_struct_declaration(sink, visibility, struct_span, name_span, type_params, where_clause, lbrace_span, body, rbrace_span);
         }
         DeclarationItemData::Field(visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty) => {
             emit_field_declaration(sink, visibility, is_static, mutability_span, is_mutable, name_span, colon_span, ty);
         }
-        DeclarationItemData::Function(visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body) => {
-            emit_function_declaration(sink, visibility, is_static, fn_span, name_span, lparen, parameters, rparen, return_type, body);
+        DeclarationItemData::Function { visibility, is_static, fn_span, name_span, type_params, lparen, parameters, rparen, return_type, where_clause, body } => {
+            emit_function_declaration(sink, visibility, is_static, fn_span, name_span, type_params, lparen, parameters, rparen, return_type, where_clause, body);
         }
-        DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span) => {
-            emit_type_alias_declaration(sink, visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span);
+        DeclarationItemData::TypeAlias { visibility, type_span, name_span, type_params, equals_span, aliased_type_span, semicolon_span } => {
+            emit_type_alias_declaration(sink, visibility, type_span, name_span, type_params, equals_span, aliased_type_span, semicolon_span);
         }
     }
 }
@@ -890,5 +993,47 @@ mod tests {
             matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::ImportDeclaration)
         });
         assert!(has_import, "Should have parsed as import declaration");
+    }
+
+    #[test]
+    fn test_generic_struct() {
+        let source = "module Test\nstruct Box[T] {}";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        // Check that we have TypeParameterList
+        let events = sink.events();
+        let has_type_param_list = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::TypeParameterList)
+        });
+        assert!(has_type_param_list, "Should have TypeParameterList in syntax tree");
+    }
+
+    #[test]
+    fn test_generic_type_alias() {
+        let source = "module Test\ntype List[T] = T;";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        // Check that we have TypeParameterList
+        let events = sink.events();
+        let has_type_param_list = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::TypeParameterList)
+        });
+        let has_type_alias = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::TypeAliasDeclaration)
+        });
+        assert!(has_type_alias, "Should have TypeAliasDeclaration in syntax tree");
+        assert!(has_type_param_list, "Should have TypeParameterList in syntax tree");
     }
 }

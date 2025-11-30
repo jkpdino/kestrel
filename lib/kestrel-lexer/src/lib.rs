@@ -90,6 +90,9 @@ pub enum Token {
     Null,
 
     // ===== Declaration Keywords =====
+    #[token("and")]
+    And,
+
     #[token("fileprivate")]
     Fileprivate,
 
@@ -128,6 +131,9 @@ pub enum Token {
 
     #[token("var")]
     Var,
+
+    #[token("where")]
+    Where,
 
     // ===== Statement Keywords =====
     #[token("as")]

@@ -59,6 +59,17 @@ pub enum SyntaxKind {
     Visibility,
     StaticModifier,
 
+    // Generic type parameter nodes
+    TypeParameterList,   // [T, U, V]
+    TypeParameter,       // T or T = Default
+    TypeArgumentList,    // [Int, String] in type use position
+    DefaultType,         // = SomeType
+
+    // Where clause nodes
+    WhereClause,         // where T: Proto, U: Other
+    TypeBound,           // T: Proto and Proto2
+    TypeEquality,        // T.Item = U (future)
+
     // Type nodes
     Ty,
     TyUnit,
@@ -82,6 +93,7 @@ pub enum SyntaxKind {
     Null,
 
     // Keywords
+    And,
     As,
     Else,
     Fileprivate,
@@ -98,6 +110,7 @@ pub enum SyntaxKind {
     Struct,
     Type,
     Var,
+    Where,
 
     // Braces
     LParen,
@@ -152,6 +165,7 @@ impl From<Token> for SyntaxKind {
             Token::Boolean => SyntaxKind::Boolean,
             Token::Null => SyntaxKind::Null,
             // Keywords
+            Token::And => SyntaxKind::And,
             Token::As => SyntaxKind::As,
             Token::Else => SyntaxKind::Else,
             Token::Fileprivate => SyntaxKind::Fileprivate,
@@ -168,6 +182,7 @@ impl From<Token> for SyntaxKind {
             Token::Struct => SyntaxKind::Struct,
             Token::Type => SyntaxKind::Type,
             Token::Var => SyntaxKind::Var,
+            Token::Where => SyntaxKind::Where,
             // Braces
             Token::LParen => SyntaxKind::LParen,
             Token::RParen => SyntaxKind::RParen,
@@ -222,6 +237,13 @@ impl Language for KestrelLanguage {
         const RETURN_TYPE: u16 = SyntaxKind::ReturnType as u16;
         const VISIBILITY: u16 = SyntaxKind::Visibility as u16;
         const STATIC_MODIFIER: u16 = SyntaxKind::StaticModifier as u16;
+        const TYPE_PARAMETER_LIST: u16 = SyntaxKind::TypeParameterList as u16;
+        const TYPE_PARAMETER: u16 = SyntaxKind::TypeParameter as u16;
+        const TYPE_ARGUMENT_LIST: u16 = SyntaxKind::TypeArgumentList as u16;
+        const DEFAULT_TYPE: u16 = SyntaxKind::DefaultType as u16;
+        const WHERE_CLAUSE: u16 = SyntaxKind::WhereClause as u16;
+        const TYPE_BOUND: u16 = SyntaxKind::TypeBound as u16;
+        const TYPE_EQUALITY: u16 = SyntaxKind::TypeEquality as u16;
         const TY: u16 = SyntaxKind::Ty as u16;
         const TY_UNIT: u16 = SyntaxKind::TyUnit as u16;
         const TY_NEVER: u16 = SyntaxKind::TyNever as u16;
@@ -237,6 +259,7 @@ impl Language for KestrelLanguage {
         const FLOAT: u16 = SyntaxKind::Float as u16;
         const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
         const NULL: u16 = SyntaxKind::Null as u16;
+        const AND: u16 = SyntaxKind::And as u16;
         const AS: u16 = SyntaxKind::As as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
@@ -253,6 +276,7 @@ impl Language for KestrelLanguage {
         const STRUCT: u16 = SyntaxKind::Struct as u16;
         const TYPE: u16 = SyntaxKind::Type as u16;
         const VAR: u16 = SyntaxKind::Var as u16;
+        const WHERE: u16 = SyntaxKind::Where as u16;
         const LPAREN: u16 = SyntaxKind::LParen as u16;
         const RPAREN: u16 = SyntaxKind::RParen as u16;
         const LBRACE: u16 = SyntaxKind::LBrace as u16;
@@ -297,6 +321,13 @@ impl Language for KestrelLanguage {
             RETURN_TYPE => SyntaxKind::ReturnType,
             VISIBILITY => SyntaxKind::Visibility,
             STATIC_MODIFIER => SyntaxKind::StaticModifier,
+            TYPE_PARAMETER_LIST => SyntaxKind::TypeParameterList,
+            TYPE_PARAMETER => SyntaxKind::TypeParameter,
+            TYPE_ARGUMENT_LIST => SyntaxKind::TypeArgumentList,
+            DEFAULT_TYPE => SyntaxKind::DefaultType,
+            WHERE_CLAUSE => SyntaxKind::WhereClause,
+            TYPE_BOUND => SyntaxKind::TypeBound,
+            TYPE_EQUALITY => SyntaxKind::TypeEquality,
             TY => SyntaxKind::Ty,
             TY_UNIT => SyntaxKind::TyUnit,
             TY_NEVER => SyntaxKind::TyNever,
@@ -312,6 +343,7 @@ impl Language for KestrelLanguage {
             FLOAT => SyntaxKind::Float,
             BOOLEAN => SyntaxKind::Boolean,
             NULL => SyntaxKind::Null,
+            AND => SyntaxKind::And,
             AS => SyntaxKind::As,
             ELSE => SyntaxKind::Else,
             FILEPRIVATE => SyntaxKind::Fileprivate,
@@ -328,6 +360,7 @@ impl Language for KestrelLanguage {
             STRUCT => SyntaxKind::Struct,
             TYPE => SyntaxKind::Type,
             VAR => SyntaxKind::Var,
+            WHERE => SyntaxKind::Where,
             LPAREN => SyntaxKind::LParen,
             RPAREN => SyntaxKind::RParen,
             LBRACE => SyntaxKind::LBrace,

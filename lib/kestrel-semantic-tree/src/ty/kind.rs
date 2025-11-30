@@ -1,7 +1,9 @@
-use crate::ty::Ty;
 use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
+use crate::symbol::type_parameter::TypeParameterSymbol;
+use crate::ty::substitutions::Substitutions;
+use crate::ty::Ty;
 use std::sync::Arc;
 
 /// Integer bit widths
@@ -56,16 +58,29 @@ pub enum TyKind {
     /// During semantic analysis, this should be resolved to a concrete type
     Path(Vec<String>),
 
+    /// Type parameter reference (resolved)
+    /// This represents a reference to a type parameter within a generic context
+    TypeParameter(Arc<TypeParameterSymbol>),
+
     /// Protocol type (resolved)
-    /// This is a reference to a protocol symbol
-    Protocol(Arc<ProtocolSymbol>),
+    /// This is a reference to a protocol symbol with optional type arguments
+    Protocol {
+        symbol: Arc<ProtocolSymbol>,
+        substitutions: Substitutions,
+    },
 
     /// Struct type (resolved)
-    /// This is a reference to a struct symbol
-    Struct(Arc<StructSymbol>),
+    /// This is a reference to a struct symbol with optional type arguments
+    Struct {
+        symbol: Arc<StructSymbol>,
+        substitutions: Substitutions,
+    },
 
     /// Type alias type
-    /// This is a reference to a type alias symbol
+    /// This is a reference to a type alias symbol with optional type arguments
     /// During type resolution, this should be replaced with the resolved aliased type
-    TypeAlias(Arc<TypeAliasSymbol>),
+    TypeAlias {
+        symbol: Arc<TypeAliasSymbol>,
+        substitutions: Substitutions,
+    },
 }

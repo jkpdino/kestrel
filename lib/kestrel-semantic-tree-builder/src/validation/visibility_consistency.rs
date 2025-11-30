@@ -99,29 +99,48 @@ fn get_visibility_level_from_symbol<S: Symbol<KestrelLanguage>>(symbol: &Arc<S>)
 /// Check if a type exposes a less-visible symbol, returns the offending type name and visibility
 fn find_less_visible_type(ty: &Ty, required_level: VisibilityLevel) -> Option<(String, VisibilityLevel)> {
     match ty.kind() {
-        TyKind::Struct(struct_symbol) => {
+        TyKind::TypeParameter(_) => {
+            // Type parameters are always valid - they are placeholders
+            None
+        }
+        TyKind::Struct { symbol: struct_symbol, substitutions } => {
             let level = get_visibility_level_from_symbol(struct_symbol);
             if level < required_level {
-                Some((struct_symbol.metadata().name().value.clone(), level))
-            } else {
-                None
+                return Some((struct_symbol.metadata().name().value.clone(), level));
             }
+            // Also check visibility of type arguments
+            for (_, arg_ty) in substitutions.iter() {
+                if let Some(result) = find_less_visible_type(arg_ty, required_level) {
+                    return Some(result);
+                }
+            }
+            None
         }
-        TyKind::Protocol(protocol_symbol) => {
+        TyKind::Protocol { symbol: protocol_symbol, substitutions } => {
             let level = get_visibility_level_from_symbol(protocol_symbol);
             if level < required_level {
-                Some((protocol_symbol.metadata().name().value.clone(), level))
-            } else {
-                None
+                return Some((protocol_symbol.metadata().name().value.clone(), level));
             }
+            // Also check visibility of type arguments
+            for (_, arg_ty) in substitutions.iter() {
+                if let Some(result) = find_less_visible_type(arg_ty, required_level) {
+                    return Some(result);
+                }
+            }
+            None
         }
-        TyKind::TypeAlias(alias_symbol) => {
+        TyKind::TypeAlias { symbol: alias_symbol, substitutions } => {
             let level = get_visibility_level_from_symbol(alias_symbol);
             if level < required_level {
-                Some((alias_symbol.metadata().name().value.clone(), level))
-            } else {
-                None
+                return Some((alias_symbol.metadata().name().value.clone(), level));
             }
+            // Also check visibility of type arguments
+            for (_, arg_ty) in substitutions.iter() {
+                if let Some(result) = find_less_visible_type(arg_ty, required_level) {
+                    return Some(result);
+                }
+            }
+            None
         }
         TyKind::Tuple(elements) => {
             for elem in elements {

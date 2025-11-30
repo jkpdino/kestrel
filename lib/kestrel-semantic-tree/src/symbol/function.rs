@@ -9,7 +9,8 @@ use crate::{
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
-    ty::Ty,
+    symbol::type_parameter::TypeParameterSymbol,
+    ty::{Ty, WhereClause},
 };
 
 // Re-export CallableParameter as Parameter for backwards compatibility
@@ -38,6 +39,10 @@ pub struct FunctionSymbol {
     is_static: bool,
     has_body: bool,
     callable: CallableBehavior,
+    /// Type parameters for generic functions, e.g., `func identity[T](value: T) -> T`
+    type_parameters: Vec<Arc<TypeParameterSymbol>>,
+    /// Where clause constraints for type parameters
+    where_clause: WhereClause,
 }
 
 impl Symbol<KestrelLanguage> for FunctionSymbol {
@@ -56,6 +61,33 @@ impl FunctionSymbol {
         has_body: bool,
         parameters: Vec<Parameter>,
         return_type: Ty,
+        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
+    ) -> Self {
+        Self::with_generics(
+            name,
+            span,
+            visibility,
+            is_static,
+            has_body,
+            parameters,
+            return_type,
+            Vec::new(),
+            WhereClause::new(),
+            parent,
+        )
+    }
+
+    /// Create a new generic FunctionSymbol with type parameters and where clause
+    pub fn with_generics(
+        name: Name,
+        span: Span,
+        visibility: VisibilityBehavior,
+        is_static: bool,
+        has_body: bool,
+        parameters: Vec<Parameter>,
+        return_type: Ty,
+        type_parameters: Vec<Arc<TypeParameterSymbol>>,
+        where_clause: WhereClause,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
         // Create the callable behavior
@@ -81,6 +113,8 @@ impl FunctionSymbol {
             is_static,
             has_body,
             callable,
+            type_parameters,
+            where_clause,
         }
     }
 
@@ -133,5 +167,25 @@ impl FunctionSymbol {
     /// Returns a list of external labels (or None for unlabeled parameters).
     pub fn parameter_labels(&self) -> Vec<Option<&str>> {
         self.callable.parameter_labels()
+    }
+
+    /// Get the type parameters for this function
+    pub fn type_parameters(&self) -> &[Arc<TypeParameterSymbol>] {
+        &self.type_parameters
+    }
+
+    /// Check if this function is generic (has type parameters)
+    pub fn is_generic(&self) -> bool {
+        !self.type_parameters.is_empty()
+    }
+
+    /// Get the number of type parameters
+    pub fn type_parameter_count(&self) -> usize {
+        self.type_parameters.len()
+    }
+
+    /// Get the where clause for this function
+    pub fn where_clause(&self) -> &WhereClause {
+        &self.where_clause
     }
 }

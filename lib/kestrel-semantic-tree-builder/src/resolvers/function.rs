@@ -9,6 +9,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::Resolver;
+use crate::resolvers::type_parameter::{extract_type_parameters, extract_where_clause};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -65,8 +66,14 @@ impl Resolver for FunctionResolver {
         // Create the name object
         let name = Spanned::new(name_str, name_span);
 
-        // Create the function symbol
-        let function_symbol = FunctionSymbol::new(
+        // Extract type parameters (will be empty if not a generic function)
+        let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
+
+        // Extract where clause (uses type_parameters to look up SymbolIds)
+        let where_clause = extract_where_clause(syntax, source, &type_parameters);
+
+        // Create the function symbol with type parameters and where clause
+        let function_symbol = FunctionSymbol::with_generics(
             name,
             full_span,
             visibility_behavior,
@@ -74,6 +81,8 @@ impl Resolver for FunctionResolver {
             has_body,
             parameters,
             return_type,
+            type_parameters,
+            where_clause,
             parent.cloned(),
         );
         let function_arc = Arc::new(function_symbol);

@@ -6,7 +6,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::event::{EventSink, TreeBuilder};
 use crate::common::visibility_parser_internal;
 use crate::function::ParameterData;
-use crate::ty::{ty_parser, TyVariant, emit_unit_type, emit_never_type, emit_tuple_type, emit_function_type, emit_path_type};
+use crate::ty::{ty_parser, TyVariant};
 
 /// Represents a protocol declaration: (visibility)? protocol Name { ... }
 ///
@@ -415,6 +415,8 @@ fn emit_parameter_list(sink: &mut EventSink, lparen: Span, parameters: Vec<Param
 
 /// Emit events for a single parameter
 fn emit_parameter(sink: &mut EventSink, param: ParameterData) {
+    use crate::ty::emit_ty_variant;
+
     sink.start_node(SyntaxKind::Parameter);
 
     // Emit label if present (as a Name node)
@@ -432,34 +434,20 @@ fn emit_parameter(sink: &mut EventSink, param: ParameterData) {
     sink.add_token(SyntaxKind::Colon, param.colon);
 
     // Emit the type
-    match param.ty {
-        TyVariant::Unit(lparen, rparen) => emit_unit_type(sink, lparen, rparen),
-        TyVariant::Never(bang) => emit_never_type(sink, bang),
-        TyVariant::Tuple(lparen, types, rparen) => emit_tuple_type(sink, lparen, types, rparen),
-        TyVariant::Function(lparen, params, rparen, arrow, ret) => {
-            emit_function_type(sink, lparen, params, rparen, arrow, ret)
-        }
-        TyVariant::Path(segments) => emit_path_type(sink, &segments),
-    }
+    emit_ty_variant(sink, &param.ty);
 
     sink.finish_node(); // Finish Parameter
 }
 
 /// Emit events for a return type
 fn emit_return_type(sink: &mut EventSink, arrow_span: Span, return_ty: TyVariant) {
+    use crate::ty::emit_ty_variant;
+
     sink.start_node(SyntaxKind::ReturnType);
     sink.add_token(SyntaxKind::Arrow, arrow_span);
 
     // Emit the return type
-    match return_ty {
-        TyVariant::Unit(lparen, rparen) => emit_unit_type(sink, lparen, rparen),
-        TyVariant::Never(bang) => emit_never_type(sink, bang),
-        TyVariant::Tuple(lparen, types, rparen) => emit_tuple_type(sink, lparen, types, rparen),
-        TyVariant::Function(lparen, params, rparen, arrow, ret) => {
-            emit_function_type(sink, lparen, params, rparen, arrow, ret)
-        }
-        TyVariant::Path(segments) => emit_path_type(sink, &segments),
-    }
+    emit_ty_variant(sink, &return_ty);
 
     sink.finish_node(); // Finish ReturnType
 }

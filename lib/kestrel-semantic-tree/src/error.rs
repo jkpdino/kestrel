@@ -234,3 +234,178 @@ impl IntoDiagnostic for CircularTypeAliasError {
             ])
     }
 }
+
+/// Error when wrong number of type arguments are provided
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeArityError {
+    /// Name of the type being instantiated
+    pub type_name: String,
+    /// Expected number of required type arguments
+    pub expected_min: usize,
+    /// Expected maximum (if there are defaults)
+    pub expected_max: usize,
+    /// Actual number provided
+    pub actual: usize,
+    /// Span of the type arguments
+    pub span: Span,
+}
+
+impl IntoDiagnostic for TypeArityError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let expected_msg = if self.expected_min == self.expected_max {
+            format!("{}", self.expected_min)
+        } else {
+            format!("{} to {}", self.expected_min, self.expected_max)
+        };
+
+        Diagnostic::error()
+            .with_message(format!(
+                "wrong number of type arguments for '{}': expected {}, found {}",
+                self.type_name, expected_msg, self.actual
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!("expected {} type argument(s)", expected_msg)),
+            ])
+    }
+}
+
+/// Error when type arguments are provided to a non-generic type
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeNotGenericError {
+    /// Name of the type
+    pub type_name: String,
+    /// Span of the type arguments
+    pub span: Span,
+}
+
+impl IntoDiagnostic for TypeNotGenericError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "type '{}' does not take type arguments",
+                self.type_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("unexpected type arguments"),
+            ])
+    }
+}
+
+/// Error when duplicate type parameter names are found
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuplicateTypeParameterError {
+    /// The duplicated name
+    pub name: String,
+    /// Span of the duplicate
+    pub duplicate_span: Span,
+    /// Span of the original
+    pub original_span: Span,
+}
+
+impl IntoDiagnostic for DuplicateTypeParameterError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("duplicate type parameter '{}'", self.name))
+            .with_labels(vec![
+                Label::primary(file_id, self.duplicate_span.clone())
+                    .with_message("duplicate definition"),
+                Label::secondary(file_id, self.original_span.clone())
+                    .with_message("first defined here"),
+            ])
+    }
+}
+
+/// Error when type parameter with default comes before one without
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefaultOrderingError {
+    /// Name of the type parameter with default that is out of order
+    pub param_with_default: String,
+    /// Name of the type parameter without default that comes after
+    pub param_without_default: String,
+    /// Span of the parameter with default
+    pub with_default_span: Span,
+    /// Span of the parameter without default
+    pub without_default_span: Span,
+}
+
+impl IntoDiagnostic for DefaultOrderingError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "type parameter '{}' with default must come after parameters without defaults",
+                self.param_with_default
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.with_default_span.clone())
+                    .with_message(format!("'{}' has a default", self.param_with_default)),
+                Label::secondary(file_id, self.without_default_span.clone())
+                    .with_message(format!(
+                        "'{}' has no default and comes later",
+                        self.param_without_default
+                    )),
+            ])
+            .with_notes(vec![
+                "type parameters with defaults must be declared after all required parameters"
+                    .to_string(),
+            ])
+    }
+}
+
+/// Error when a type in a where clause bound is not a protocol
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonProtocolBoundError {
+    /// Name of the type used as a bound
+    pub type_name: String,
+    /// What kind of type it is (e.g., "struct", "type alias")
+    pub type_kind: String,
+    /// Span of the bound
+    pub span: Span,
+}
+
+impl IntoDiagnostic for NonProtocolBoundError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("'{}' is not a protocol", self.type_name))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!("'{}' is a {}", self.type_name, self.type_kind)),
+            ])
+            .with_notes(vec!["only protocols can be used as type bounds".to_string()])
+    }
+}
+
+/// Error when a type parameter in where clause is not declared
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndeclaredTypeParameterError {
+    /// Name of the undeclared type parameter
+    pub name: String,
+    /// Span of the reference
+    pub span: Span,
+    /// Available type parameters in scope
+    pub available: Vec<String>,
+}
+
+impl IntoDiagnostic for UndeclaredTypeParameterError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let mut notes = vec![];
+        if !self.available.is_empty() {
+            notes.push(format!(
+                "available type parameters: {}",
+                self.available.join(", ")
+            ));
+        }
+
+        Diagnostic::error()
+            .with_message(format!(
+                "undeclared type parameter '{}' in where clause",
+                self.name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("not declared"),
+            ])
+            .with_notes(notes)
+    }
+}

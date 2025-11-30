@@ -10,6 +10,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::Resolver;
+use crate::resolvers::type_parameter::{extract_type_parameters, extract_where_clause};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -50,8 +51,21 @@ impl Resolver for ProtocolResolver {
         // Create the name object
         let name = Spanned::new(name_str, name_span);
 
-        // Create the protocol symbol with a protocol type
-        let protocol_symbol = ProtocolSymbol::new(name, full_span.clone(), visibility_behavior, parent.cloned());
+        // Extract type parameters (will be empty if not a generic protocol)
+        let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
+
+        // Extract where clause (uses type_parameters to look up SymbolIds)
+        let where_clause = extract_where_clause(syntax, source, &type_parameters);
+
+        // Create the protocol symbol with type parameters and where clause
+        let protocol_symbol = ProtocolSymbol::with_generics(
+            name,
+            full_span.clone(),
+            visibility_behavior,
+            type_parameters,
+            where_clause,
+            parent.cloned(),
+        );
         let protocol_arc = Arc::new(protocol_symbol);
 
         let protocol_type = Ty::protocol(protocol_arc.clone(), full_span.clone());
