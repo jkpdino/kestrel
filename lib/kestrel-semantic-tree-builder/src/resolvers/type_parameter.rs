@@ -214,26 +214,30 @@ pub fn extract_where_clause(
 ///     PathElement
 ///       Identifier "Protocol2"
 /// ```
+///
+/// If the type parameter name is not found in `type_params`, this creates an
+/// unresolved constraint that will be caught by the validation pass.
 fn parse_type_bound(
     syntax: &SyntaxNode,
     source: &str,
     type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<Constraint> {
-    // Find the Name node and extract the type parameter name
+    // Find the Name node and extract the type parameter name and span
     let name_node = find_child(syntax, SyntaxKind::Name)?;
-    let param_name = name_node
+    let name_token = name_node
         .children_with_tokens()
         .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)?
-        .text()
-        .to_string();
+        .find(|t| t.kind() == SyntaxKind::Identifier)?;
 
-    // Look up the type parameter
+    let param_name = name_token.text().to_string();
+    let text_range = name_token.text_range();
+    let param_span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
+
+    // Look up the type parameter (may be None if undeclared)
     let param_id = type_params
         .iter()
-        .find(|p| p.metadata().name().value == param_name)?
-        .metadata()
-        .id();
+        .find(|p| p.metadata().name().value == param_name)
+        .map(|p| p.metadata().id());
 
     // Extract bounds (Path nodes after the Name)
     let bounds: Vec<Ty> = syntax
@@ -249,7 +253,11 @@ fn parse_type_bound(
     if bounds.is_empty() {
         None
     } else {
-        Some(Constraint::type_bound(param_id, bounds))
+        // Create resolved or unresolved constraint based on whether param was found
+        match param_id {
+            Some(id) => Some(Constraint::type_bound(id, param_name, param_span, bounds)),
+            None => Some(Constraint::unresolved_type_bound(param_name, param_span, bounds)),
+        }
     }
 }
 

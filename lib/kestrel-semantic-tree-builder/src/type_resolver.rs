@@ -2,7 +2,7 @@ use kestrel_reporting::{DiagnosticContext, IntoDiagnostic};
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::diagnostics::{AmbiguousTypeError, NotATypeError, UnresolvedTypeError};
+use crate::diagnostics::{AmbiguousTypeError, NotATypeError, NotGenericError, TooFewTypeArgumentsError, TooManyTypeArgumentsError, UnresolvedTypeError};
 use crate::queries::{self, Db, TypePathResolution};
 
 /// Context for type resolution during the binding phase
@@ -168,7 +168,13 @@ pub fn resolve_type_with_diagnostics(
 
                         match resolved_args {
                             Some(args) => {
-                                apply_type_arguments(&resolved_ty, args, ty.span().clone()).ok()
+                                match apply_type_arguments(&resolved_ty, args, ty.span().clone()) {
+                                    Ok(result_ty) => Some(result_ty),
+                                    Err(err) => {
+                                        report_type_argument_error(err, ty.span().clone(), segments, diagnostics, file_id);
+                                        None
+                                    }
+                                }
                             }
                             None => None,
                         }
@@ -399,6 +405,53 @@ fn apply_type_arguments(
         | TyKind::Tuple(_)
         | TyKind::Function { .. }
         | TyKind::Path(_, _) => Err(TypeArgumentError::NotAGenericType),
+    }
+}
+
+/// Report a type argument error to the diagnostic context.
+fn report_type_argument_error(
+    error: TypeArgumentError,
+    span: kestrel_span::Span,
+    segments: &[String],
+    diagnostics: &mut DiagnosticContext,
+    file_id: usize,
+) {
+    match error {
+        TypeArgumentError::TooManyArguments { type_name, expected, got } => {
+            let err = TooManyTypeArgumentsError {
+                span,
+                type_name,
+                expected,
+                got,
+            };
+            diagnostics.add_diagnostic(err.into_diagnostic(file_id));
+        }
+        TypeArgumentError::TooFewArguments { type_name, expected, got, first_missing } => {
+            let err = TooFewTypeArgumentsError {
+                span,
+                type_name,
+                expected,
+                got,
+                first_missing,
+            };
+            diagnostics.add_diagnostic(err.into_diagnostic(file_id));
+        }
+        TypeArgumentError::NotGeneric { type_name } => {
+            let err = NotGenericError {
+                span,
+                type_name,
+            };
+            diagnostics.add_diagnostic(err.into_diagnostic(file_id));
+        }
+        TypeArgumentError::NotAGenericType => {
+            // For primitives like Int[String], use the path segments as the type name
+            let type_name = segments.join(".");
+            let err = NotGenericError {
+                span,
+                type_name,
+            };
+            diagnostics.add_diagnostic(err.into_diagnostic(file_id));
+        }
     }
 }
 

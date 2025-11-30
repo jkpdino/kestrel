@@ -416,3 +416,421 @@ mod instantiation {
         .expect(Compiles);
     }
 }
+
+mod arity_errors {
+    use super::*;
+
+    #[test]
+    fn too_few_type_arguments() {
+        // Map[K, V] requires 2 type arguments, only 1 provided
+        Test::new(
+            r#"module Test
+            struct Map[K, V] { }
+            type Bad = Map[Int];
+        "#,
+        )
+        .expect(HasError("type argument"));
+    }
+
+    #[test]
+    fn too_many_type_arguments() {
+        // Box[T] takes only 1 type argument, 2 provided
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            type Bad = Box[Int, String];
+        "#,
+        )
+        .expect(HasError("type argument"));
+    }
+
+    #[test]
+    fn zero_type_arguments_when_required() {
+        // Using a generic type without [] syntax is a raw type reference, not an instantiation.
+        // This is allowed (e.g., for passing to higher-order generics or future type inference).
+        // Using Box[] (empty brackets) would be different and could trigger arity checking.
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            type Alias = Box;
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn correct_arity_with_defaults() {
+        // Map[K, V = String] allows 1 or 2 type arguments
+        Test::new(
+            r#"module Test
+            struct Map[K, V = String] { }
+            type IntMap = Map[Int];
+            type IntToInt = Map[Int, Int];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn too_few_even_with_defaults() {
+        // Triple[A, B, C = Int] requires at least 2 type arguments
+        Test::new(
+            r#"module Test
+            struct Triple[A, B, C = Int] { }
+            type Bad = Triple[Int];
+        "#,
+        )
+        .expect(HasError("type argument"));
+    }
+}
+
+mod non_generic_errors {
+    use super::*;
+
+    #[test]
+    fn type_args_on_non_generic_struct() {
+        Test::new(
+            r#"module Test
+            struct Plain { }
+            type Bad = Plain[Int];
+        "#,
+        )
+        .expect(HasError("does not accept type arguments"));
+    }
+
+    #[test]
+    fn type_args_on_non_generic_type_alias() {
+        Test::new(
+            r#"module Test
+            type Simple = Int;
+            type Bad = Simple[String];
+        "#,
+        )
+        .expect(HasError("does not accept type arguments"));
+    }
+
+    #[test]
+    fn type_args_on_primitive() {
+        Test::new(
+            r#"module Test
+            type Bad = Int[String];
+        "#,
+        )
+        .expect(HasError("does not accept type arguments"));
+    }
+}
+
+mod undeclared_type_params {
+    use super::*;
+
+    #[test]
+    fn undeclared_in_where_clause() {
+        // U is not declared in the type parameter list
+        Test::new(
+            r#"module Test
+            protocol Equatable { }
+            struct Set[T] where U: Equatable { }
+        "#,
+        )
+        .expect(HasError("undeclared type parameter"));
+    }
+
+    #[test]
+    fn undeclared_in_function_where_clause() {
+        Test::new(
+            r#"module Test
+            protocol Comparable { }
+            func sort[T](items: T) where U: Comparable { }
+        "#,
+        )
+        .expect(HasError("undeclared type parameter"));
+    }
+
+    #[test]
+    fn typo_in_where_clause() {
+        // Tx is a typo for T
+        Test::new(
+            r#"module Test
+            protocol Display { }
+            struct Printer[T] where Tx: Display { }
+        "#,
+        )
+        .expect(HasError("undeclared type parameter"));
+    }
+}
+
+mod type_alias_resolution {
+    use super::*;
+
+    #[test]
+    fn identity_type_alias() {
+        // type Identity[T] = T should be a valid generic type alias
+        Test::new(
+            r#"module Test
+            type Identity[T] = T;
+        "#,
+        )
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Identity")
+                .is(SymbolKind::TypeAlias)
+                .has(Behavior::TypeParamCount(1)),
+        );
+    }
+
+    #[test]
+    fn identity_type_alias_instantiated() {
+        // Using Identity[Int] should work
+        Test::new(
+            r#"module Test
+            type Identity[T] = T;
+            type IntAlias = Identity[Int];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn pair_type_alias() {
+        // type Pair[T] = (T, T) - using type param multiple times
+        Test::new(
+            r#"module Test
+            type Pair[T] = (T, T);
+            type IntPair = Pair[Int];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn nested_type_param_in_alias() {
+        // Type param used as argument to another generic
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            type Boxed[T] = Box[T];
+            type BoxedInt = Boxed[Int];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn type_alias_with_function_type() {
+        // type Transformer[A, B] = (A) -> B
+        Test::new(
+            r#"module Test
+            type Transformer[A, B] = (A) -> B;
+            type IntToString = Transformer[Int, String];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_alias_chaining() {
+        // Chain of generic type aliases
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            type Boxed[T] = Box[T];
+            type DoubleBoxed[T] = Boxed[Boxed[T]];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn type_param_in_nested_tuple() {
+        Test::new(
+            r#"module Test
+            type Nested[T] = ((T, Int), (String, T));
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Nested").has(Behavior::TypeParamCount(1)));
+    }
+}
+
+mod multiple_constraints {
+    use super::*;
+
+    #[test]
+    fn two_params_with_separate_bounds() {
+        Test::new(
+            r#"module Test
+            protocol Equatable { }
+            protocol Hashable { }
+            struct BiMap[K, V] where K: Equatable, V: Hashable { }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn three_params_with_mixed_bounds() {
+        Test::new(
+            r#"module Test
+            protocol A { }
+            protocol B { }
+            protocol C { }
+            struct Complex[X, Y, Z] where X: A, Y: B and C, Z: A { }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn same_param_multiple_separate_constraints() {
+        // T has two separate constraint clauses (if syntax allows)
+        Test::new(
+            r#"module Test
+            protocol Display { }
+            protocol Debug { }
+            struct Logger[T] where T: Display, T: Debug { }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod edge_cases {
+    use super::*;
+
+    #[test]
+    fn single_letter_type_params() {
+        Test::new("module Test\nstruct A[B] {}")
+            .expect(Compiles)
+            .expect(Symbol::new("A").has(Behavior::TypeParamCount(1)));
+    }
+
+    #[test]
+    fn long_type_param_names() {
+        Test::new("module Test\nstruct Container[ElementType, KeyType, ValueType] {}")
+            .expect(Compiles)
+            .expect(Symbol::new("Container").has(Behavior::TypeParamCount(3)));
+    }
+
+    #[test]
+    fn many_type_params() {
+        Test::new("module Test\nstruct Many[A, B, C, D, E, F] {}")
+            .expect(Compiles)
+            .expect(Symbol::new("Many").has(Behavior::TypeParamCount(6)));
+    }
+
+    #[test]
+    fn type_param_same_name_as_struct() {
+        // Type parameter named same as the struct itself
+        Test::new("module Test\nstruct Box[Box] {}")
+            .expect(Compiles)
+            .expect(Symbol::new("Box").has(Behavior::TypeParamCount(1)));
+    }
+
+    #[test]
+    fn self_referential_generic() {
+        // A generic type that refers to itself with its own type param
+        Test::new(
+            r#"module Test
+            struct Node[T] {
+                let value: T
+                let next: Node[T]
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn mutually_referential_generics() {
+        Test::new(
+            r#"module Test
+            struct Tree[T] {
+                let value: T
+                let children: Forest[T]
+            }
+            struct Forest[T] {
+                let trees: Tree[T]
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn type_param_shadowing_in_nested() {
+        // Inner struct has its own T that shadows outer T
+        Test::new(
+            r#"module Test
+            struct Outer[T] {
+                struct Inner[T] {
+                    let value: T
+                }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Outer").has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("Inner").has(Behavior::TypeParamCount(1)));
+    }
+
+    #[test]
+    fn generic_protocol_method_using_struct_type_param() {
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            protocol Factory[T] {
+                func create() -> Box[T]
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn where_clause_with_generic_bound() {
+        // Bound itself is a generic type: T: Comparable[T]
+        Test::new(
+            r#"module Test
+            protocol Comparable[U] { }
+            struct Set[T] where T: Comparable[T] { }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn deeply_nested_generics() {
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            type Deep = Box[Box[Box[Box[Int]]]];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_in_optional_like_pattern() {
+        Test::new(
+            r#"module Test
+            struct Option[T] {
+                let value: T
+            }
+            type OptionalInt = Option[Int];
+            type OptionalOptional = Option[Option[String]];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_alias_preserves_param_count() {
+        Test::new(
+            r#"module Test
+            type Pair[A, B] = (A, B);
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Pair").has(Behavior::TypeParamCount(2)));
+    }
+}

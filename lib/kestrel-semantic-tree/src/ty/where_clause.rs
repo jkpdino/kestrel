@@ -1,3 +1,4 @@
+use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
 use super::Ty;
@@ -41,7 +42,7 @@ impl WhereClause {
         self.constraints
             .iter()
             .filter_map(|c| match c {
-                Constraint::TypeBound { param, bounds } if *param == param_id => Some(bounds),
+                Constraint::TypeBound { param: Some(id), bounds, .. } if *id == param_id => Some(bounds),
                 Constraint::TypeBound { .. } => None,
             })
             .flatten()
@@ -54,12 +55,17 @@ impl WhereClause {
 pub enum Constraint {
     /// A type bound constraint: `T: Protocol and Protocol2`
     ///
-    /// The `param` is the SymbolId of the type parameter being constrained.
+    /// The `param` is the SymbolId of the type parameter being constrained (None if undeclared).
     /// The `bounds` are the types that the parameter must satisfy (typically protocols,
     /// but can be generic protocol instantiations like `Iterator[Int]`).
     TypeBound {
-        /// The SymbolId of the type parameter being constrained
-        param: SymbolId,
+        /// The SymbolId of the type parameter being constrained.
+        /// None if the type parameter name was not found in the declared parameters.
+        param: Option<SymbolId>,
+        /// The name of the type parameter as written in source (for error reporting)
+        param_name: String,
+        /// The span of the type parameter name (for error reporting)
+        param_span: Span,
         /// The bounds that the type parameter must satisfy
         bounds: Vec<Ty>,
     },
@@ -68,15 +74,41 @@ pub enum Constraint {
 }
 
 impl Constraint {
-    /// Create a new type bound constraint
-    pub fn type_bound(param: SymbolId, bounds: Vec<Ty>) -> Self {
-        Constraint::TypeBound { param, bounds }
+    /// Create a new type bound constraint with a resolved parameter
+    pub fn type_bound(param: SymbolId, param_name: String, param_span: Span, bounds: Vec<Ty>) -> Self {
+        Constraint::TypeBound { param: Some(param), param_name, param_span, bounds }
     }
 
-    /// Get the type parameter this constraint applies to
-    pub fn param_id(&self) -> SymbolId {
+    /// Create a new type bound constraint with an unresolved (undeclared) parameter
+    pub fn unresolved_type_bound(param_name: String, param_span: Span, bounds: Vec<Ty>) -> Self {
+        Constraint::TypeBound { param: None, param_name, param_span, bounds }
+    }
+
+    /// Get the type parameter this constraint applies to (if resolved)
+    pub fn param_id(&self) -> Option<SymbolId> {
         match self {
             Constraint::TypeBound { param, .. } => *param,
+        }
+    }
+
+    /// Get the type parameter name
+    pub fn param_name(&self) -> &str {
+        match self {
+            Constraint::TypeBound { param_name, .. } => param_name,
+        }
+    }
+
+    /// Get the type parameter span
+    pub fn param_span(&self) -> &Span {
+        match self {
+            Constraint::TypeBound { param_span, .. } => param_span,
+        }
+    }
+
+    /// Check if this constraint references an undeclared type parameter
+    pub fn is_unresolved(&self) -> bool {
+        match self {
+            Constraint::TypeBound { param, .. } => param.is_none(),
         }
     }
 }
@@ -97,7 +129,7 @@ mod tests {
         let param_id = SymbolId::new();
         let bound = Ty::path(vec!["Hashable".to_string()], 0..8);
 
-        let constraint = Constraint::type_bound(param_id, vec![bound]);
+        let constraint = Constraint::type_bound(param_id, "T".to_string(), 0..1, vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
 
         assert!(!wc.is_empty());
@@ -113,11 +145,21 @@ mod tests {
         let other_id = SymbolId::new();
         let bound = Ty::path(vec!["Hashable".to_string()], 0..8);
 
-        let constraint = Constraint::type_bound(param_id, vec![bound]);
+        let constraint = Constraint::type_bound(param_id, "T".to_string(), 0..1, vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
 
         // Looking for bounds on a different param
         let bounds = wc.bounds_for(other_id);
         assert!(bounds.is_empty());
+    }
+
+    #[test]
+    fn test_unresolved_constraint() {
+        let bound = Ty::path(vec!["Hashable".to_string()], 0..8);
+        let constraint = Constraint::unresolved_type_bound("U".to_string(), 0..1, vec![bound]);
+
+        assert!(constraint.is_unresolved());
+        assert_eq!(constraint.param_name(), "U");
+        assert!(constraint.param_id().is_none());
     }
 }

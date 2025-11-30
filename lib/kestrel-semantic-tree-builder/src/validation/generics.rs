@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::error::{DefaultOrderingError, DuplicateTypeParameterError, NonProtocolBoundError};
+use kestrel_semantic_tree::error::{DefaultOrderingError, DuplicateTypeParameterError, NonProtocolBoundError, UndeclaredTypeParameterError};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -61,13 +61,15 @@ fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, db: &SemanticDatab
     match kind {
         KestrelSymbolKind::Struct => {
             if let Some(struct_sym) = symbol_ref.as_any().downcast_ref::<StructSymbol>() {
+                let type_params = struct_sym.type_parameters();
                 validate_type_parameters(
-                    struct_sym.type_parameters(),
+                    type_params,
                     symbol,
                     diagnostics,
                 );
                 validate_where_clause(
                     struct_sym.where_clause(),
+                    type_params,
                     symbol,
                     db,
                     diagnostics,
@@ -76,13 +78,15 @@ fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, db: &SemanticDatab
         }
         KestrelSymbolKind::Function => {
             if let Some(func_sym) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
+                let type_params = func_sym.type_parameters();
                 validate_type_parameters(
-                    func_sym.type_parameters(),
+                    type_params,
                     symbol,
                     diagnostics,
                 );
                 validate_where_clause(
                     func_sym.where_clause(),
+                    type_params,
                     symbol,
                     db,
                     diagnostics,
@@ -91,13 +95,15 @@ fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, db: &SemanticDatab
         }
         KestrelSymbolKind::Protocol => {
             if let Some(proto_sym) = symbol_ref.as_any().downcast_ref::<ProtocolSymbol>() {
+                let type_params = proto_sym.type_parameters();
                 validate_type_parameters(
-                    proto_sym.type_parameters(),
+                    type_params,
                     symbol,
                     diagnostics,
                 );
                 validate_where_clause(
                     proto_sym.where_clause(),
+                    type_params,
                     symbol,
                     db,
                     diagnostics,
@@ -106,13 +112,15 @@ fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, db: &SemanticDatab
         }
         KestrelSymbolKind::TypeAlias => {
             if let Some(alias_sym) = symbol_ref.as_any().downcast_ref::<TypeAliasSymbol>() {
+                let type_params = alias_sym.type_parameters();
                 validate_type_parameters(
-                    alias_sym.type_parameters(),
+                    type_params,
                     symbol,
                     diagnostics,
                 );
                 validate_where_clause(
                     alias_sym.where_clause(),
+                    type_params,
                     symbol,
                     db,
                     diagnostics,
@@ -205,6 +213,7 @@ fn check_default_ordering(
 /// Validate where clause constraints
 fn validate_where_clause(
     where_clause: &WhereClause,
+    type_params: &[Arc<TypeParameterSymbol>],
     container: &Arc<dyn Symbol<KestrelLanguage>>,
     db: &SemanticDatabase,
     diagnostics: &mut DiagnosticContext,
@@ -218,20 +227,35 @@ fn validate_where_clause(
 
     // Validate each constraint
     for constraint in &where_clause.constraints {
-        validate_constraint(constraint, context_id, db, file_id, diagnostics);
+        validate_constraint(constraint, type_params, context_id, db, file_id, diagnostics);
     }
 }
 
 /// Validate a single constraint in a where clause
 fn validate_constraint(
     constraint: &Constraint,
+    type_params: &[Arc<TypeParameterSymbol>],
     context_id: semantic_tree::symbol::SymbolId,
     db: &SemanticDatabase,
     file_id: usize,
     diagnostics: &mut DiagnosticContext,
 ) {
     match constraint {
-        Constraint::TypeBound { param: _, bounds } => {
+        Constraint::TypeBound { param, param_name, param_span, bounds } => {
+            // Check if the type parameter is undeclared
+            if param.is_none() {
+                let available: Vec<String> = type_params
+                    .iter()
+                    .map(|p| p.metadata().name().value.clone())
+                    .collect();
+                let error = UndeclaredTypeParameterError {
+                    name: param_name.clone(),
+                    span: param_span.clone(),
+                    available,
+                };
+                diagnostics.throw(error, file_id);
+            }
+
             // Validate each bound type
             for bound in bounds {
                 validate_bound_type(bound, context_id, db, file_id, diagnostics);
