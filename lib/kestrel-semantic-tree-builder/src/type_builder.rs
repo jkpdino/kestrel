@@ -56,9 +56,24 @@ impl TypeBuilder {
             .collect();
 
         if segments.is_empty() {
-            None
-        } else {
+            return None;
+        }
+
+        // Extract type arguments if present: List[Int, String]
+        let type_args: Vec<Ty> = find_child(node, SyntaxKind::TypeArgumentList)
+            .map(|arg_list| {
+                arg_list
+                    .children()
+                    .filter(|c| c.kind() == SyntaxKind::Ty)
+                    .filter_map(|c| Self::build(&c, source))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if type_args.is_empty() {
             Some(Ty::path(segments, span))
+        } else {
+            Some(Ty::generic_path(segments, type_args, span))
         }
     }
 

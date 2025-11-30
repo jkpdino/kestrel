@@ -3,6 +3,7 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::{Symbol, SymbolTable};
 
@@ -76,6 +77,25 @@ fn is_ancestor(
     false
 }
 
+/// Find the containing module for a symbol
+///
+/// Walks up the parent chain until it finds a Module symbol.
+/// Returns None if no module is found (e.g., for root symbols).
+fn find_containing_module(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+    let mut current = Some(symbol.clone());
+
+    while let Some(s) = current {
+        if s.metadata().kind() == KestrelSymbolKind::Module {
+            return Some(s);
+        }
+        current = s.metadata().parent();
+    }
+
+    None
+}
+
 /// Check if a symbol is visible from the given context
 ///
 /// Uses the visibility scope stored in VisibilityBehavior to determine if
@@ -109,8 +129,15 @@ pub fn is_visible_from(
         }
         Some(Visibility::Internal) => {
             // Internal symbols are visible within the same module
-            // For now, treat as always visible (module-level checking requires more info)
-            return true;
+            let target_module = find_containing_module(symbol);
+            let context_module = find_containing_module(context);
+
+            // If both are in the same module (or we can't determine), allow access
+            match (target_module, context_module) {
+                (Some(t), Some(c)) => return Arc::ptr_eq(&t, &c),
+                // If we can't determine modules, default to visible
+                _ => return true,
+            }
         }
         Some(Visibility::Fileprivate) => {
             // File-private symbols are visible within the same file
@@ -209,14 +236,9 @@ pub fn resolve_type_path(
         });
 
         // If no matches, resolution failed
+        // Note: This function is deprecated - use Db::resolve_type_path() which returns
+        // TypePathResolution with detailed error information
         if filtered.is_empty() {
-            // TODO: When error handling is added, construct PathResolutionError here
-            // let error = PathResolutionError {
-            //     failed_segment: segment.clone(),
-            //     segment_index: index,
-            //     alternatives: candidates,
-            // };
-            // return Err(error);
             return None;
         }
 

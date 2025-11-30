@@ -121,6 +121,42 @@ mod defaults {
                     .has(Behavior::TypeParamCount(1)),
             );
     }
+
+    #[test]
+    fn use_default_type_argument() {
+        // Map[K, V = String] can be used as Map[Int] with V defaulting to String
+        Test::new(
+            r#"module Test
+            struct Map[K, V = String] { }
+            type IntMap = Map[Int];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn override_default_type_argument() {
+        // Can still provide explicit value for defaulted parameter
+        Test::new(
+            r#"module Test
+            struct Map[K, V = String] { }
+            type IntToInt = Map[Int, Int];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_defaults() {
+        Test::new(
+            r#"module Test
+            struct Config[A, B = Int, C = String] { }
+            type SimpleConfig = Config[Bool];
+            type CustomConfig = Config[Bool, Float];
+        "#,
+        )
+        .expect(Compiles);
+    }
 }
 
 mod validation {
@@ -192,6 +228,55 @@ mod where_clause {
         .expect(Compiles)
         .expect(Symbol::new("sort").has(Behavior::IsGeneric(true)));
     }
+
+    #[test]
+    fn where_clause_unresolved_bound() {
+        // Test that where clause with non-existent protocol produces error
+        Test::new(
+            r#"module Test
+            struct Set[T] where T: NonExistent { }
+        "#,
+        )
+        .expect(HasError("'NonExistent' is not a protocol"));
+    }
+
+    #[test]
+    fn where_clause_bound_is_struct() {
+        // Test that where clause with struct instead of protocol produces error
+        Test::new(
+            r#"module Test
+            struct SomeStruct { }
+            struct Container[T] where T: SomeStruct { }
+        "#,
+        )
+        .expect(HasError("'SomeStruct' is not a protocol"));
+    }
+
+    #[test]
+    fn where_clause_bound_is_type_alias() {
+        // Test that where clause with type alias instead of protocol produces error
+        Test::new(
+            r#"module Test
+            type MyAlias = Int;
+            struct Container[T] where T: MyAlias { }
+        "#,
+        )
+        .expect(HasError("'MyAlias' is not a protocol"));
+    }
+
+    #[test]
+    fn where_clause_valid_protocol_bound() {
+        // Test that valid protocol bounds work correctly
+        Test::new(
+            r#"module Test
+            protocol Display { }
+            protocol Debug { }
+            struct Logger[T] where T: Display and Debug { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Logger").has(Behavior::TypeParamCount(1)));
+    }
 }
 
 mod nested_generics {
@@ -223,5 +308,111 @@ mod nested_generics {
         .expect(Compiles)
         .expect(Symbol::new("Container").has(Behavior::IsGeneric(true)))
         .expect(Symbol::new("Plain").has(Behavior::IsGeneric(false)));
+    }
+}
+
+mod instantiation {
+    use super::*;
+
+    #[test]
+    fn generic_field_type() {
+        // Test that generic types can be used as field types
+        Test::new(
+            r#"module Test
+            struct Box[T] {
+                let value: T
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Box").has(Behavior::TypeParamCount(1)));
+    }
+
+    #[test]
+    fn generic_return_type() {
+        // Test that generic types can be used as return types
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            func makeBox[T]() -> Box[T] { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("makeBox").has(Behavior::TypeParamCount(1)));
+    }
+
+    #[test]
+    fn generic_parameter_type() {
+        // Test that generic types can be used as parameter types
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            func unbox[T](box: Box[T]) -> T { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("unbox").has(Behavior::TypeParamCount(1)));
+    }
+
+    #[test]
+    fn nested_generic_types() {
+        // Test nested generic type usage: Box[Box[Int]]
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            type NestedBox = Box[Box[Int]];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_type_args() {
+        // Test types with multiple type arguments
+        Test::new(
+            r#"module Test
+            struct Map[K, V] { }
+            type StringToInt = Map[String, Int];
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn generic_type_in_protocol() {
+        // Test generic types used in protocol method signatures
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            protocol Container[T] {
+                func wrap(value: T) -> Box[T]
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn tuple_with_generic() {
+        // Test generic types inside tuples
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            func pair[A, B](a: A, b: B) -> (Box[A], Box[B]) { }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn function_type_with_generic() {
+        // Test generic types in function type signatures
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            func transform[T](f: (T) -> Box[T], value: T) -> Box[T] { }
+        "#,
+        )
+        .expect(Compiles);
     }
 }

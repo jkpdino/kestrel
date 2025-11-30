@@ -1,15 +1,19 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::{FunctionSymbol, Parameter};
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::resolver::Resolver;
-use crate::resolvers::type_parameter::{extract_type_parameters, extract_where_clause};
+use crate::resolver::{BindingContext, Resolver};
+use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
+use crate::type_resolver::{resolve_type_with_diagnostics, TypeResolutionContext};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -66,7 +70,7 @@ impl Resolver for FunctionResolver {
         // Create the name object
         let name = Spanned::new(name_str, name_span);
 
-        // Extract type parameters (will be empty if not a generic function)
+        // Extract type parameters (they'll have function as parent later)
         let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
 
         // Extract where clause (uses type_parameters to look up SymbolIds)
@@ -81,13 +85,16 @@ impl Resolver for FunctionResolver {
             has_body,
             parameters,
             return_type,
-            type_parameters,
+            type_parameters.clone(),
             where_clause,
             parent.cloned(),
         );
         let function_arc = Arc::new(function_symbol);
-
         let function_arc_dyn = function_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+
+        // Add type parameters as children of the function (not the module)
+        // This ensures type parameters are in scope during type resolution
+        add_type_params_as_children(&type_parameters, &function_arc_dyn);
 
         // Add to parent if exists
         if let Some(parent) = parent {
@@ -95,6 +102,80 @@ impl Resolver for FunctionResolver {
         }
 
         Some(function_arc)
+    }
+
+    fn bind_declaration(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        context: &mut BindingContext,
+    ) {
+        // Only process function symbols
+        if symbol.metadata().kind() != KestrelSymbolKind::Function {
+            return;
+        }
+
+        // Get the existing CallableBehavior with syntactic types
+        let behaviors = symbol.metadata().behaviors();
+        let callable = behaviors.iter().find_map(|b| {
+            if matches!(b.kind(), KestrelBehaviorKind::Callable) {
+                b.as_ref().downcast_ref::<CallableBehavior>()
+            } else {
+                None
+            }
+        });
+
+        let Some(callable) = callable else {
+            return;
+        };
+
+        let symbol_id = symbol.metadata().id();
+        let span = callable.span().clone();
+
+        // Get file_id for this symbol
+        let file_id = context.file_id_for_symbol(symbol).unwrap_or(context.file_id);
+
+        // Create type resolution context
+        let type_ctx = TypeResolutionContext { db: context.db };
+
+        // Resolve parameter types
+        let mut resolved_params = Vec::new();
+        let mut all_resolved = true;
+
+        for param in callable.parameters() {
+            if let Some(resolved_ty) = resolve_type_with_diagnostics(
+                &param.ty,
+                &type_ctx,
+                symbol_id,
+                context.diagnostics,
+                file_id,
+            ) {
+                resolved_params.push(Parameter {
+                    label: param.label.clone(),
+                    bind_name: param.bind_name.clone(),
+                    ty: resolved_ty,
+                });
+            } else {
+                all_resolved = false;
+                // Still add the parameter with unresolved type for error recovery
+                resolved_params.push(param.clone());
+            }
+        }
+
+        // Resolve return type
+        let resolved_return = resolve_type_with_diagnostics(
+            callable.return_type(),
+            &type_ctx,
+            symbol_id,
+            context.diagnostics,
+            file_id,
+        );
+
+        // Create a new CallableBehavior with resolved types (only if any were resolved)
+        if all_resolved || resolved_return.is_some() {
+            let return_ty = resolved_return.unwrap_or_else(|| callable.return_type().clone());
+            let resolved_callable = CallableBehavior::new(resolved_params, return_ty, span);
+            symbol.metadata().add_behavior(resolved_callable);
+        }
     }
 }
 

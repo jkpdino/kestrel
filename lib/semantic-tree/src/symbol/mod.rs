@@ -5,7 +5,7 @@ mod table;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use downcast_rs::{impl_downcast, Downcast};
+use downcast_rs::{impl_downcast, DowncastSync};
 
 pub use collection::SymbolCollection;
 pub use metadata::SymbolMetadata;
@@ -37,8 +37,8 @@ impl Default for SymbolId {
     }
 }
 
-pub trait Symbol<L: Language>: Debug + Send + Sync + Downcast {
+pub trait Symbol<L: Language>: Debug + Send + Sync + DowncastSync {
     fn metadata(&self) -> &SymbolMetadata<L>;
 }
 
-impl_downcast!(Symbol<L> where L: Language);
+impl_downcast!(sync Symbol<L> where L: Language);

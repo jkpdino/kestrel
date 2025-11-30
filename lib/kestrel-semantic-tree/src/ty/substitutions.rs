@@ -103,14 +103,23 @@ impl Substitutions {
                 Ty::generic_type_alias(symbol.clone(), new_subs, ty.span().clone())
             }
 
-            // Base types and paths - return as-is
+            // Path types - recursively apply to type arguments
+            TyKind::Path(segments, args) => {
+                if args.is_empty() {
+                    ty.clone()
+                } else {
+                    let new_args: Vec<Ty> = args.iter().map(|a| self.apply(a)).collect();
+                    Ty::generic_path(segments.clone(), new_args, ty.span().clone())
+                }
+            }
+
+            // Base types - return as-is
             TyKind::Unit
             | TyKind::Never
             | TyKind::Int(_)
             | TyKind::Float(_)
             | TyKind::Bool
-            | TyKind::String
-            | TyKind::Path(_) => ty.clone(),
+            | TyKind::String => ty.clone(),
         }
     }
 

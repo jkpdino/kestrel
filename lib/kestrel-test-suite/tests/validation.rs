@@ -188,4 +188,147 @@ mod duplicate_symbol {
         )
         .expect(Compiles);
     }
+
+    #[test]
+    fn duplicate_type_alias_errors() {
+        Test::new(
+            r#"module Test
+            type Alias = Int;
+            type Alias = String;
+        "#,
+        )
+        .expect(HasError("duplicate type 'Alias'"));
+    }
+
+    #[test]
+    fn duplicate_field_same_struct_errors() {
+        Test::new(
+            r#"module Test
+            struct Record {
+                let name: String
+                let name: Int
+            }
+        "#,
+        )
+        .expect(HasError("duplicate member 'name'"));
+    }
+
+    #[test]
+    fn same_field_different_structs_compiles() {
+        Test::new(
+            r#"module Test
+            struct First {
+                let value: Int
+            }
+            struct Second {
+                let value: String
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod visibility_consistency {
+    use super::*;
+
+    // These tests document expected behavior for visibility consistency validation.
+    // Some are ignored because the validation is not yet fully implemented.
+
+    #[test]
+    fn public_field_with_private_type_errors() {
+        Test::new(
+            r#"module Test
+            private struct PrivateType { }
+            public struct Container {
+                public let value: PrivateType
+            }
+        "#,
+        )
+        .expect(HasError("exposes private type"));
+    }
+
+    #[test]
+    fn public_function_with_private_return_errors() {
+        Test::new(
+            r#"module Test
+            private struct Secret { }
+            public func getSecret() -> Secret { }
+        "#,
+        )
+        .expect(HasError("exposes private type"));
+    }
+
+    #[test]
+    fn public_function_with_private_param_errors() {
+        Test::new(
+            r#"module Test
+            private struct Secret { }
+            public func process(s: Secret) { }
+        "#,
+        )
+        .expect(HasError("exposes private type"));
+    }
+
+    #[test]
+    fn internal_function_with_private_return_compiles() {
+        // Internal function can use private types within same scope
+        Test::new(
+            r#"module Test
+            private struct Internal { }
+            func helper() -> Internal { }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn public_type_alias_with_private_underlying_errors() {
+        Test::new(
+            r#"module Test
+            private struct Hidden { }
+            public type Exposed = Hidden;
+        "#,
+        )
+        .expect(HasError("exposes private type"));
+    }
+
+    #[test]
+    fn protocol_method_with_private_param_in_public_protocol_errors() {
+        Test::new(
+            r#"module Test
+            private struct Secret { }
+            public protocol Handler {
+                func handle(s: Secret) -> ()
+            }
+        "#,
+        )
+        .expect(HasError("exposes private type"));
+    }
+}
+
+mod module_resolution {
+    use super::*;
+
+    #[test]
+    fn submodule_type_resolution() {
+        Test::new(
+            r#"module Outer.Inner
+            struct NestedType { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("NestedType").is(SymbolKind::Struct));
+    }
+
+    #[test]
+    fn deeply_nested_module() {
+        Test::new(
+            r#"module A.B.C.D
+            struct DeepType { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("DeepType").is(SymbolKind::Struct));
+    }
 }

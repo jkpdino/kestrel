@@ -13,6 +13,10 @@ use crate::utils::{find_child, get_node_span};
 ///
 /// Returns a list of TypeParameterSymbols with their parsed defaults.
 /// The parent is set to the container (struct, function, etc.) that owns these type parameters.
+///
+/// IMPORTANT: This function does NOT add type parameters as children of the parent.
+/// The caller must do this after creating the owner symbol. Use `add_type_params_as_children`
+/// to add them after the owner is created.
 pub fn extract_type_parameters(
     syntax: &SyntaxNode,
     source: &str,
@@ -28,12 +32,27 @@ pub fn extract_type_parameters(
     for child in type_param_list.children() {
         if child.kind() == SyntaxKind::TypeParameter {
             if let Some(param) = parse_type_parameter(&child, source, parent.clone()) {
-                type_params.push(Arc::new(param));
+                let type_param = Arc::new(param);
+                type_params.push(type_param);
             }
         }
     }
 
     type_params
+}
+
+/// Add type parameters as children of their owner symbol.
+///
+/// This must be called after the owner (struct, function, protocol, etc.) is created,
+/// passing the owner as the parent. This ensures type parameters are in scope during
+/// type resolution within the owner's body.
+pub fn add_type_params_as_children(
+    type_params: &[Arc<TypeParameterSymbol>],
+    owner: &Arc<dyn Symbol<KestrelLanguage>>,
+) {
+    for type_param in type_params {
+        owner.metadata().add_child(&(type_param.clone() as Arc<dyn Symbol<KestrelLanguage>>));
+    }
 }
 
 /// Parse a single TypeParameter syntax node.
@@ -182,13 +201,27 @@ pub fn extract_where_clause(
 /// Parse a TypeBound syntax node.
 ///
 /// TypeBound syntax: `T: Protocol and Protocol2`
+///
+/// The structure in the syntax tree is:
+/// ```text
+/// TypeBound
+///   Name
+///     Identifier "T"
+///   Path
+///     PathElement
+///       Identifier "Protocol"
+///   Path
+///     PathElement
+///       Identifier "Protocol2"
+/// ```
 fn parse_type_bound(
     syntax: &SyntaxNode,
     source: &str,
     type_params: &[Arc<TypeParameterSymbol>],
 ) -> Option<Constraint> {
-    // Find the type parameter name (first identifier)
-    let param_name = syntax
+    // Find the Name node and extract the type parameter name
+    let name_node = find_child(syntax, SyntaxKind::Name)?;
+    let param_name = name_node
         .children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::Identifier)?
@@ -202,11 +235,15 @@ fn parse_type_bound(
         .metadata()
         .id();
 
-    // Extract bounds (Ty nodes after the colon)
+    // Extract bounds (Path nodes after the Name)
     let bounds: Vec<Ty> = syntax
         .children()
-        .filter(|c| c.kind() == SyntaxKind::Ty)
-        .filter_map(|c| extract_ty_from_node(&c, source))
+        .filter(|c| c.kind() == SyntaxKind::Path)
+        .map(|path_node| {
+            let segments = extract_path_segments(&path_node);
+            let span = get_node_span(&path_node, source);
+            Ty::path(segments, span)
+        })
         .collect();
 
     if bounds.is_empty() {

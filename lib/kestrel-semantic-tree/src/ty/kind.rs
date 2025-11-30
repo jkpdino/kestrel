@@ -56,7 +56,8 @@ pub enum TyKind {
     /// Path type (unresolved)
     /// This represents a path like A.B.C that hasn't been resolved yet
     /// During semantic analysis, this should be resolved to a concrete type
-    Path(Vec<String>),
+    /// The second element contains type arguments if present (e.g., List[Int])
+    Path(Vec<String>, Vec<Ty>),
 
     /// Type parameter reference (resolved)
     /// This represents a reference to a type parameter within a generic context

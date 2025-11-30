@@ -10,7 +10,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::Resolver;
-use crate::resolvers::type_parameter::{extract_type_parameters, extract_where_clause};
+use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -51,7 +51,7 @@ impl Resolver for ProtocolResolver {
         // Create the name object
         let name = Spanned::new(name_str, name_span);
 
-        // Extract type parameters (will be empty if not a generic protocol)
+        // Extract type parameters (they'll have protocol as parent later)
         let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
 
         // Extract where clause (uses type_parameters to look up SymbolIds)
@@ -62,7 +62,7 @@ impl Resolver for ProtocolResolver {
             name,
             full_span.clone(),
             visibility_behavior,
-            type_parameters,
+            type_parameters.clone(),
             where_clause,
             parent.cloned(),
         );
@@ -74,6 +74,10 @@ impl Resolver for ProtocolResolver {
         protocol_arc.metadata().add_behavior(typed_behavior);
 
         let protocol_arc_dyn = protocol_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+
+        // Add type parameters as children of the protocol (not the module)
+        // This ensures type parameters are in scope during type resolution
+        add_type_params_as_children(&type_parameters, &protocol_arc_dyn);
 
         // Add to parent if exists
         if let Some(parent) = parent {

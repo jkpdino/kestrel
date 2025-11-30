@@ -45,7 +45,7 @@ mod basic {
 
     #[test]
     fn fileprivate_type_alias() {
-        Test::new("module Test\nfileprivate type FilePrivateAlias = Char;")
+        Test::new("module Test\nfileprivate type FilePrivateAlias = Int;")
             .expect(Compiles)
             .expect(
                 Symbol::new("FilePrivateAlias")
@@ -58,9 +58,9 @@ mod basic {
     fn multiple_type_aliases() {
         Test::new(
             r#"module Test
-            type Result = Either;
-            type Maybe = Optional;
-            type List = Array;
+            type Result = Int;
+            type Maybe = String;
+            type List = Bool;
         "#,
         )
         .expect(Compiles)
@@ -75,35 +75,35 @@ mod naming {
 
     #[test]
     fn camel_case_alias() {
-        Test::new("module Test\ntype CamelCaseAlias = SomeType;")
+        Test::new("module Test\ntype CamelCaseAlias = Int;")
             .expect(Compiles)
             .expect(Symbol::new("CamelCaseAlias").is(SymbolKind::TypeAlias));
     }
 
     #[test]
     fn snake_case_alias() {
-        Test::new("module Test\ntype snake_case_alias = AnotherType;")
+        Test::new("module Test\ntype snake_case_alias = String;")
             .expect(Compiles)
             .expect(Symbol::new("snake_case_alias").is(SymbolKind::TypeAlias));
     }
 
     #[test]
     fn screaming_snake_alias() {
-        Test::new("module Test\ntype SCREAMING_SNAKE = YetAnotherType;")
+        Test::new("module Test\ntype SCREAMING_SNAKE = Bool;")
             .expect(Compiles)
             .expect(Symbol::new("SCREAMING_SNAKE").is(SymbolKind::TypeAlias));
     }
 
     #[test]
     fn alias_with_numbers() {
-        Test::new("module Test\ntype MixedCase123 = TypeWithNumbers;")
+        Test::new("module Test\ntype MixedCase123 = Float;")
             .expect(Compiles)
             .expect(Symbol::new("MixedCase123").is(SymbolKind::TypeAlias));
     }
 
     #[test]
     fn single_character_alias() {
-        Test::new("module Test\ntype A = Foo;\ntype B = Bar;")
+        Test::new("module Test\ntype A = Int;\ntype B = String;")
             .expect(Compiles)
             .expect(Symbol::new("A").is(SymbolKind::TypeAlias))
             .expect(Symbol::new("B").is(SymbolKind::TypeAlias));
@@ -113,10 +113,10 @@ mod naming {
     fn alias_with_underscores() {
         Test::new(
             r#"module Test
-            type _leading = LeadingUnderscore;
-            type trailing_ = TrailingUnderscore;
-            type _both_ = BothUnderscore;
-            type mid_dle = MiddleUnderscore;
+            type _leading = Int;
+            type trailing_ = String;
+            type _both_ = Bool;
+            type mid_dle = Float;
         "#,
         )
         .expect(Compiles)
@@ -130,10 +130,10 @@ mod naming {
     fn alias_with_common_suffixes() {
         Test::new(
             r#"module Test
-            type Type1 = First;
-            type Alias0 = Zero;
-            type Map2D = TwoDimensionalMap;
-            type Vector3D = ThreeDimensionalVector;
+            type Type1 = Int;
+            type Alias0 = String;
+            type Map2D = Bool;
+            type Vector3D = Float;
         "#,
         )
         .expect(Compiles)
@@ -166,8 +166,12 @@ mod realistic {
 
     #[test]
     fn collection_aliases() {
+        // Define the types that we alias to (public to match alias visibility)
         Test::new(
             r#"module Test
+            public struct Array {}
+            public struct Dictionary {}
+            struct Set {}
             public type UserList = Array;
             public type UserMap = Dictionary;
             type UserSet = Set;
@@ -181,8 +185,12 @@ mod realistic {
 
     #[test]
     fn result_type_aliases() {
+        // Define the types that we alias to (public to match alias visibility)
         Test::new(
             r#"module Test
+            public struct Either {}
+            public struct Optional {}
+            struct ErrorType {}
             public type Result = Either;
             public type Maybe = Optional;
             type Error = ErrorType;
@@ -198,7 +206,7 @@ mod realistic {
     fn chained_aliases() {
         Test::new(
             r#"module Test
-            type Base = Foundation;
+            type Base = Int;
             type Derived = Base;
             type Final = Derived;
         "#,
@@ -213,9 +221,9 @@ mod realistic {
     fn multiple_aliases_same_target() {
         Test::new(
             r#"module Test
-            type Alias1 = TargetType;
-            type Alias2 = TargetType;
-            type Alias3 = TargetType;
+            type Alias1 = Int;
+            type Alias2 = Int;
+            type Alias3 = Int;
         "#,
         )
         .expect(Compiles)
@@ -234,7 +242,12 @@ mod mixed_features {
             ("collections.ks", "module System.Collections\npublic struct Array {}"),
             (
                 "graphics.ks",
-                "module Graphics\nimport System.Collections\npublic type Color = RGB;\ntype Position = Point2D;",
+                r#"module Graphics
+                import System.Collections
+                public struct RGB {}
+                struct Point2D {}
+                public type Color = RGB;
+                type Position = Point2D;"#,
             ),
         ])
         .expect(Compiles)
@@ -246,6 +259,9 @@ mod mixed_features {
     fn type_alias_with_classes() {
         Test::new(
             r#"module Graphics
+            public struct RGB {}
+            struct Point2D {}
+            struct Coordinate {}
             public type Color = RGB;
             type Position = Point2D;
             struct Shape {}
@@ -263,6 +279,8 @@ mod mixed_features {
     fn interleaved_declarations() {
         Test::new(
             r#"module Graphics
+            struct Coordinate {}
+            struct Degree {}
             type Point = Coordinate;
             struct Triangle {}
             type Angle = Degree;
@@ -281,21 +299,21 @@ mod whitespace {
 
     #[test]
     fn standard_formatting() {
-        Test::new("module Test\ntype Standard = Normal;")
+        Test::new("module Test\ntype Standard = Int;")
             .expect(Compiles)
             .expect(Symbol::new("Standard").is(SymbolKind::TypeAlias));
     }
 
     #[test]
     fn extra_spaces() {
-        Test::new("module Test\ntype   ExtraSpaces   =   Spaced   ;")
+        Test::new("module Test\ntype   ExtraSpaces   =   String   ;")
             .expect(Compiles)
             .expect(Symbol::new("ExtraSpaces").is(SymbolKind::TypeAlias));
     }
 
     #[test]
     fn minimal_spacing() {
-        Test::new("module Test\ntype Minimal=Compact;")
+        Test::new("module Test\ntype Minimal=Bool;")
             .expect(Compiles)
             .expect(Symbol::new("Minimal").is(SymbolKind::TypeAlias));
     }
@@ -305,14 +323,247 @@ mod whitespace {
         Test::new(
             r#"module Test
 
-            type WithBlankLines = Type1;
+            type WithBlankLines = Int;
 
 
-            type MoreBlankLines = Type2;
+            type MoreBlankLines = String;
         "#,
         )
         .expect(Compiles)
         .expect(Symbol::new("WithBlankLines").is(SymbolKind::TypeAlias))
         .expect(Symbol::new("MoreBlankLines").is(SymbolKind::TypeAlias));
+    }
+}
+
+mod cycle_detection {
+    use super::*;
+
+    #[test]
+    fn direct_self_reference() {
+        Test::new("module Test\ntype A = A;")
+            .expect(HasError("circular type alias"));
+    }
+
+    #[test]
+    fn indirect_two_way_cycle() {
+        Test::new(
+            r#"module Test
+            type A = B;
+            type B = A;
+        "#,
+        )
+        .expect(HasError("circular type alias"));
+    }
+
+    #[test]
+    fn three_way_cycle() {
+        Test::new(
+            r#"module Test
+            type A = B;
+            type B = C;
+            type C = A;
+        "#,
+        )
+        .expect(HasError("circular type alias"));
+    }
+
+    #[test]
+    fn longer_cycle() {
+        Test::new(
+            r#"module Test
+            type A = B;
+            type B = C;
+            type C = D;
+            type D = E;
+            type E = A;
+        "#,
+        )
+        .expect(HasError("circular type alias"));
+    }
+
+    #[test]
+    fn valid_chain_no_cycle() {
+        Test::new(
+            r#"module Test
+            type A = B;
+            type B = Int;
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("A").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("B").is(SymbolKind::TypeAlias));
+    }
+
+    #[test]
+    fn valid_longer_chain() {
+        Test::new(
+            r#"module Test
+            type A = B;
+            type B = C;
+            type C = D;
+            type D = Int;
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("A").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("B").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("C").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("D").is(SymbolKind::TypeAlias));
+    }
+
+    #[test]
+    fn multiple_independent_chains() {
+        Test::new(
+            r#"module Test
+            type A = B;
+            type B = Int;
+            type X = Y;
+            type Y = String;
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("A").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("B").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("X").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("Y").is(SymbolKind::TypeAlias));
+    }
+
+    #[test]
+    fn cycle_in_tuple() {
+        // Note: Cycles through tuples still create a cycle in the type alias graph
+        // The cycle detection now catches this, even though B appears inside a tuple
+        Test::new(
+            r#"module Test
+            type A = (B, Int);
+            type B = A;
+        "#,
+        )
+        .expect(HasError("circular type alias"));
+    }
+
+    // Note: Function type syntax tests are commented out as they may not be fully supported yet
+    // #[test]
+    // fn cycle_in_function_params() {
+    //     Test::new(
+    //         r#"module Test
+    //         type A = (B) => Int;
+    //         type B = A;
+    //     "#,
+    //     )
+    //     .expect(Compiles)
+    //     .expect(Symbol::new("A").is(SymbolKind::TypeAlias))
+    //     .expect(Symbol::new("B").is(SymbolKind::TypeAlias));
+    // }
+    //
+    // #[test]
+    // fn cycle_in_function_return() {
+    //     Test::new(
+    //         r#"module Test
+    //         type A = () => B;
+    //         type B = A;
+    //     "#,
+    //     )
+    //     .expect(Compiles)
+    //     .expect(Symbol::new("A").is(SymbolKind::TypeAlias))
+    //     .expect(Symbol::new("B").is(SymbolKind::TypeAlias));
+    // }
+
+    #[test]
+    fn valid_recursive_structure_different_types() {
+        // This should compile because A and B point to different concrete types
+        Test::new(
+            r#"module Test
+            type A = (Int, B);
+            type B = String;
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("A").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("B").is(SymbolKind::TypeAlias));
+    }
+
+    #[test]
+    fn mixed_valid_and_invalid() {
+        // First two are valid, third creates a cycle
+        Test::new(
+            r#"module Test
+            type Valid1 = Int;
+            type Valid2 = String;
+            type Cycle1 = Cycle2;
+            type Cycle2 = Cycle1;
+        "#,
+        )
+        .expect(HasError("circular type alias"));
+    }
+}
+
+mod unresolved_types {
+    use super::*;
+
+    // These tests document expected behavior for unresolved type diagnostics.
+    // The infrastructure (resolve_type_with_diagnostics) is in place but requires
+    // type parameters to be included in scope resolution first.
+
+    #[test]
+    fn type_alias_to_unknown() {
+        Test::new(
+            r#"module Test
+            type Foo = Unknown;
+        "#,
+        )
+        .expect(HasError("cannot find type"));
+    }
+
+    #[test]
+    fn type_alias_to_unknown_in_tuple() {
+        Test::new(
+            r#"module Test
+            type Foo = (Int, Unknown, String);
+        "#,
+        )
+        .expect(HasError("cannot find type"));
+    }
+
+    #[test]
+    fn field_with_unknown_type() {
+        Test::new(
+            r#"module Test
+            struct Foo {
+                let bar: Unknown
+            }
+        "#,
+        )
+        .expect(HasError("cannot find type"));
+    }
+
+    #[test]
+    fn function_with_unknown_return_type() {
+        Test::new(
+            r#"module Test
+            func foo() -> Unknown { }
+        "#,
+        )
+        .expect(HasError("cannot find type"));
+    }
+
+    #[test]
+    fn function_with_unknown_param_type() {
+        Test::new(
+            r#"module Test
+            func foo(x: Unknown) { }
+        "#,
+        )
+        .expect(HasError("cannot find type"));
+    }
+
+    #[test]
+    fn generic_with_unknown_type_arg() {
+        Test::new(
+            r#"module Test
+            struct Box[T] { }
+            type Foo = Box[Unknown];
+        "#,
+        )
+        .expect(HasError("cannot find type"));
     }
 }

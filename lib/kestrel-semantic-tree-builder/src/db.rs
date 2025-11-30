@@ -6,7 +6,9 @@ use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::error::ModuleNotFoundError;
+use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::queries::{self, Scope, Import, ImportItem, SymbolResolution, TypePathResolution};
 use crate::path_resolver;
@@ -15,22 +17,37 @@ use crate::path_resolver;
 #[derive(Debug, Clone)]
 pub struct SymbolRegistry {
     symbols: Arc<RwLock<HashMap<SymbolId, Arc<dyn Symbol<KestrelLanguage>>>>>,
+    /// Index for O(1) lookup of symbols by (kind, name)
+    /// Used primarily for module path resolution
+    kind_name_index: Arc<RwLock<HashMap<(KestrelSymbolKind, String), Vec<SymbolId>>>>,
 }
 
 impl SymbolRegistry {
     pub fn new() -> Self {
         Self {
             symbols: Arc::new(RwLock::new(HashMap::new())),
+            kind_name_index: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Register a single symbol (called during build phase)
     pub fn register(&self, symbol: Arc<dyn Symbol<KestrelLanguage>>) {
         let id = symbol.metadata().id();
+        let kind = symbol.metadata().kind();
+        let name = symbol.metadata().name().value.clone();
+
         self.symbols
             .write()
             .expect("RwLock poisoned")
             .insert(id, symbol);
+
+        // Add to kind+name index for O(1) lookups
+        self.kind_name_index
+            .write()
+            .expect("RwLock poisoned")
+            .entry((kind, name))
+            .or_insert_with(Vec::new)
+            .push(id);
     }
 
     /// Get symbol by ID
@@ -62,6 +79,25 @@ impl SymbolRegistry {
             guard: self.symbols.read().expect("RwLock poisoned"),
             keys: None,
         }
+    }
+
+    /// Look up symbols by kind and name in O(1) time
+    pub fn find_by_kind_and_name(
+        &self,
+        kind: KestrelSymbolKind,
+        name: &str,
+    ) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
+        let index = self.kind_name_index.read().expect("RwLock poisoned");
+        let symbols = self.symbols.read().expect("RwLock poisoned");
+
+        index
+            .get(&(kind, name.to_string()))
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| symbols.get(id).cloned())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -328,26 +364,15 @@ impl queries::Db for SemanticDatabase {
             });
         }
 
-        // Simple approach: search all registered symbols for matching module name
         // Import paths are always absolute from the root
         // For a path like "Library", we search for a Module symbol named "Library"
         // For a path like "Library.Sub", we find "Library" then look for "Sub" in its children
 
-        // Find first segment - search all symbols for a top-level module
+        // Find first segment using O(1) index lookup
         let first_segment = &path[0];
-        let mut current_symbol: Option<Arc<dyn Symbol<KestrelLanguage>>> = None;
+        let modules = self.registry.find_by_kind_and_name(KestrelSymbolKind::Module, first_segment);
 
-        // Search all registered symbols for a module with the first name
-        for (_id, symbol) in self.registry.iter() {
-            if symbol.metadata().kind() == KestrelSymbolKind::Module
-                && symbol.metadata().name().value == *first_segment
-            {
-                current_symbol = Some(symbol.clone());
-                break;
-            }
-        }
-
-        let mut current = match current_symbol {
+        let mut current = match modules.into_iter().next() {
             Some(s) => s,
             None => {
                 return Err(ModuleNotFoundError {
@@ -388,6 +413,29 @@ impl queries::Db for SemanticDatabase {
                 segment: String::new(),
                 index: 0,
             };
+        }
+
+        // Handle built-in primitive types as single-segment paths
+        if path.len() == 1 {
+            let segment = &path[0];
+            let span = 0..0; // Primitive types don't have a real span
+
+            match segment.as_str() {
+                "Int" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span)),
+                "I8" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I8, span)),
+                "I16" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I16, span)),
+                "I32" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I32, span)),
+                "I64" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span)),
+                "Float" => return TypePathResolution::Resolved(Ty::float(kestrel_semantic_tree::ty::FloatBits::F64, span)),
+                "F32" => return TypePathResolution::Resolved(Ty::float(kestrel_semantic_tree::ty::FloatBits::F32, span)),
+                "F64" => return TypePathResolution::Resolved(Ty::float(kestrel_semantic_tree::ty::FloatBits::F64, span)),
+                "Bool" => return TypePathResolution::Resolved(Ty::bool(span)),
+                "String" => return TypePathResolution::Resolved(Ty::string(span)),
+                // Self is a special type that refers to the implementing type in protocols/structs
+                // It resolves to a Path("Self") for now - the type checker handles substitution
+                "Self" => return TypePathResolution::Resolved(Ty::path(vec!["Self".to_string()], span)),
+                _ => {} // Not a primitive, continue with regular resolution
+            }
         }
 
         let context_symbol = match self.symbol_by_id(context) {
@@ -466,6 +514,19 @@ impl queries::Db for SemanticDatabase {
                         index,
                         candidates: matches.iter().map(|s| s.metadata().id()).collect(),
                     };
+                }
+            }
+        }
+
+        // Handle TypeParameterSymbol specially - it IS a type, not something with a TypedBehavior
+        if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
+            // Look up the symbol from registry to get the Arc
+            if let Some(symbol) = self.symbol_by_id(current_symbol.metadata().id()) {
+                // Downcast the Arc<dyn Symbol> to Arc<TypeParameterSymbol>
+                if let Ok(type_param_arc) = symbol.into_any_arc().downcast::<TypeParameterSymbol>() {
+                    let span = type_param_arc.metadata().span().clone();
+                    let ty = Ty::type_parameter(type_param_arc, span);
+                    return TypePathResolution::Resolved(ty);
                 }
             }
         }

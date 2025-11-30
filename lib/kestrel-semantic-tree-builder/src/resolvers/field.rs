@@ -1,14 +1,17 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::field::FieldSymbol;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::resolver::Resolver;
+use crate::resolver::{BindingContext, Resolver};
+use crate::type_resolver::{resolve_type_with_diagnostics, TypeResolutionContext};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -57,8 +60,7 @@ impl Resolver for FieldResolver {
             .filter_map(|elem| elem.into_token())
             .any(|tok| tok.kind() == SyntaxKind::Var);
 
-        // Extract the type - for now create a path type from the Ty node
-        // TODO: Properly parse and resolve the type
+        // Extract the syntactic type (will be resolved in bind phase)
         let field_type = extract_field_type(syntax, source);
 
         // Create the name object
@@ -84,6 +86,50 @@ impl Resolver for FieldResolver {
         }
 
         Some(field_arc)
+    }
+
+    fn bind_declaration(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        context: &mut BindingContext,
+    ) {
+        // Only process field symbols
+        if symbol.metadata().kind() != KestrelSymbolKind::Field {
+            return;
+        }
+
+        // Downcast to FieldSymbol to get the syntactic field type
+        let field_symbol = match symbol
+            .as_ref()
+            .as_any()
+            .downcast_ref::<FieldSymbol>()
+        {
+            Some(f) => f,
+            None => return,
+        };
+
+        let syntactic_type = field_symbol.field_type();
+        let symbol_id = symbol.metadata().id();
+        let span = symbol.metadata().span().clone();
+
+        // Get file_id for this symbol
+        let file_id = context.file_id_for_symbol(symbol).unwrap_or(context.file_id);
+
+        // Create type resolution context
+        let type_ctx = TypeResolutionContext { db: context.db };
+
+        // Resolve the type with diagnostics
+        if let Some(resolved_type) = resolve_type_with_diagnostics(
+            syntactic_type,
+            &type_ctx,
+            symbol_id,
+            context.diagnostics,
+            file_id,
+        ) {
+            // Add a TypedBehavior with the resolved type
+            let typed_behavior = TypedBehavior::new(resolved_type, span);
+            symbol.metadata().add_behavior(typed_behavior);
+        }
     }
 }
 

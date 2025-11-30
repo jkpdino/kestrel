@@ -84,7 +84,8 @@ impl Symbol<KestrelLanguage> for RootSymbol {
 impl RootSymbol {
     fn new(source_span: std::ops::Range<usize>) -> Self {
         let name = Spanned::new("<root>".to_string(), 0..0);
-        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module) // TODO: Add RootSymbolKind
+        // RootSymbol uses Module kind as it represents the root of the module hierarchy
+        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
             .with_name(name)
             .with_declaration_span(0..0)
             .with_span(source_span)
@@ -445,10 +446,6 @@ pub fn bind_tree_with_config(
         &mut type_alias_cycle_detector,
     );
 
-    // Post-binding pass: detect type alias cycles
-    // This catches cycles like A -> B -> A that can't be detected during sequential binding
-    check_type_alias_cycles(tree.root(), &db, diagnostics);
-
     // Post-binding pass: detect duplicate function signatures
     // This catches overloads with identical signatures which are errors
     check_duplicate_signatures(tree.root(), diagnostics);
@@ -457,139 +454,6 @@ pub fn bind_tree_with_config(
     let validation_config = config.cloned().unwrap_or_default();
     let runner = validation::ValidationRunner::new();
     runner.run(tree.root(), &db, diagnostics, &validation_config);
-}
-
-/// Check for circular type alias dependencies by following alias chains
-fn check_type_alias_cycles(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
-) {
-    use kestrel_semantic_tree::error::{CircularTypeAliasError, CycleParticipant};
-    use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
-
-    let kind = symbol.metadata().kind();
-
-    // If this is a type alias, follow its chain to detect cycles
-    if kind == KestrelSymbolKind::TypeAlias {
-        // Get the file_id for error reporting
-        let file_id = get_file_id_for_symbol(symbol, diagnostics);
-
-        // Get the TypeAliasTypedBehavior which contains the resolved aliased type
-        let behaviors = symbol.metadata().behaviors();
-        let type_alias_typed = behaviors.iter().find_map(|b| {
-            if matches!(b.kind(), KestrelBehaviorKind::TypeAliasTyped) {
-                b.as_ref().downcast_ref::<TypeAliasTypedBehavior>()
-            } else {
-                None
-            }
-        });
-
-        if let Some(resolved) = type_alias_typed {
-            let mut visited: CycleDetector<SymbolId> = CycleDetector::new();
-            let symbol_id = symbol.metadata().id();
-
-            // Enter this type alias
-            if visited.enter(symbol_id).is_ok() {
-                // Follow the chain
-                if let Some(cycle) =
-                    follow_type_alias_chain(resolved.resolved_ty(), &mut visited)
-                {
-                    // Build error
-                    let origin = CycleParticipant {
-                        name: symbol.metadata().name().value.clone(),
-                        name_span: symbol.metadata().name().span.clone(),
-                        file_id: Some(file_id),
-                    };
-
-                    let cycle_participants: Vec<CycleParticipant> = cycle
-                        .cycle()
-                        .iter()
-                        .skip(1) // Skip the origin
-                        .filter_map(|&id| {
-                            db.symbol_by_id(id).map(|s| CycleParticipant {
-                                name: s.metadata().name().value.clone(),
-                                name_span: s.metadata().name().span.clone(),
-                                file_id: Some(get_file_id_for_symbol(&s, diagnostics)),
-                            })
-                        })
-                        .collect();
-
-                    diagnostics.throw(
-                        CircularTypeAliasError {
-                            origin,
-                            cycle: cycle_participants,
-                        },
-                        file_id,
-                    );
-                }
-            }
-        }
-    }
-
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        check_type_alias_cycles(&child, db, diagnostics);
-    }
-}
-
-/// Follow a type alias chain and return the cycle if found
-fn follow_type_alias_chain(
-    ty: &Ty,
-    visited: &mut CycleDetector<SymbolId>,
-) -> Option<semantic_tree::cycle::Cycle<SymbolId>> {
-    use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
-
-    match ty.kind() {
-        TyKind::TypeAlias { symbol: alias_symbol, .. } => {
-            let alias_id = alias_symbol.metadata().id();
-
-            // Try to enter - if it fails, we found a cycle
-            if let Err(cycle) = visited.enter(alias_id) {
-                return Some(cycle);
-            }
-
-            // Get the resolved type from this alias
-            let behaviors = alias_symbol.metadata().behaviors();
-            let type_alias_typed = behaviors.iter().find_map(|b| {
-                if matches!(b.kind(), KestrelBehaviorKind::TypeAliasTyped) {
-                    b.as_ref().downcast_ref::<TypeAliasTypedBehavior>()
-                } else {
-                    None
-                }
-            });
-
-            if let Some(resolved) = type_alias_typed {
-                // Recursively follow
-                let result = follow_type_alias_chain(resolved.resolved_ty(), visited);
-                visited.exit();
-                return result;
-            }
-
-            visited.exit();
-            None
-        }
-        TyKind::Tuple(elements) => {
-            for elem in elements {
-                if let Some(cycle) = follow_type_alias_chain(elem, visited) {
-                    return Some(cycle);
-                }
-            }
-            None
-        }
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            for param in params {
-                if let Some(cycle) = follow_type_alias_chain(param, visited) {
-                    return Some(cycle);
-                }
-            }
-            follow_type_alias_chain(return_type, visited)
-        }
-        _ => None,
-    }
 }
 
 /// Check for duplicate function signatures within each scope.
@@ -816,7 +680,14 @@ fn format_type(ty: &Ty) -> String {
                 format_type(return_type)
             )
         }
-        TyKind::Path(segments) => segments.join("."),
+        TyKind::Path(segments, type_args) => {
+            if type_args.is_empty() {
+                segments.join(".")
+            } else {
+                let args_str: Vec<String> = type_args.iter().map(format_type).collect();
+                format!("{}[{}]", segments.join("."), args_str.join(", "))
+            }
+        }
         TyKind::TypeParameter(param_symbol) => param_symbol.metadata().name().value.clone(),
         TyKind::Protocol { symbol: protocol_symbol, substitutions } => {
             let name = protocol_symbol.metadata().name().value.clone();

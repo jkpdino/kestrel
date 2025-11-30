@@ -86,7 +86,12 @@ impl Ty {
 
     /// Create a path type (unresolved): A.B.C
     pub fn path(segments: Vec<String>, span: Span) -> Self {
-        Self::new(TyKind::Path(segments), span)
+        Self::new(TyKind::Path(segments, vec![]), span)
+    }
+
+    /// Create a generic path type (unresolved): A.B.C[T1, T2]
+    pub fn generic_path(segments: Vec<String>, type_args: Vec<Ty>, span: Span) -> Self {
+        Self::new(TyKind::Path(segments, type_args), span)
     }
 
     /// Create a type parameter reference
@@ -216,7 +221,7 @@ impl Ty {
 
     /// Check if this is a path type (unresolved)
     pub fn is_path(&self) -> bool {
-        matches!(self.kind, TyKind::Path(_))
+        matches!(self.kind, TyKind::Path(_, _))
     }
 
     /// Check if this is a type parameter type
@@ -276,7 +281,15 @@ impl Ty {
     /// Get path segments if this is a path type
     pub fn as_path(&self) -> Option<&Vec<String>> {
         match &self.kind {
-            TyKind::Path(segments) => Some(segments),
+            TyKind::Path(segments, _) => Some(segments),
+            _ => None,
+        }
+    }
+
+    /// Get path segments and type arguments if this is a path type
+    pub fn as_path_with_args(&self) -> Option<(&Vec<String>, &Vec<Ty>)> {
+        match &self.kind {
+            TyKind::Path(segments, args) => Some((segments, args)),
             _ => None,
         }
     }

@@ -15,6 +15,7 @@ use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::Symbol;
 
@@ -165,7 +166,7 @@ fn find_less_visible_type(ty: &Ty, required_level: VisibilityLevel) -> Option<(S
         | TyKind::Float(_)
         | TyKind::Bool
         | TyKind::String
-        | TyKind::Path(_) => None,
+        | TyKind::Path(_, _) => None,
     }
 }
 
@@ -178,8 +179,16 @@ fn validate_symbol(
     let kind = symbol.metadata().kind();
     let symbol_level = get_symbol_visibility_level(symbol);
 
-    // Only check public symbols (they have the strictest requirements)
-    if symbol_level == VisibilityLevel::Public {
+    // Check if this is a method in a public protocol
+    let is_method_in_public_protocol = kind == KestrelSymbolKind::Function
+        && symbol.metadata().parent().map_or(false, |p| {
+            p.metadata().kind() == KestrelSymbolKind::Protocol
+                && get_symbol_visibility_level(&p) == VisibilityLevel::Public
+        });
+
+    // Check public symbols (they have the strictest requirements)
+    // Also check methods in public protocols (they inherit the public requirement)
+    if symbol_level == VisibilityLevel::Public || is_method_in_public_protocol {
         match kind {
             KestrelSymbolKind::Function => {
                 check_function_visibility(symbol, diagnostics, config);
@@ -211,8 +220,9 @@ fn check_function_visibility(
     let span = symbol.metadata().declaration_span().clone();
 
     // Get CallableBehavior for parameter and return types
+    // We want the LAST CallableBehavior because the bind phase adds a resolved one after the syntactic one
     let behaviors = symbol.metadata().behaviors();
-    let callable = behaviors.iter().find_map(|b| {
+    let callable = behaviors.iter().rev().find_map(|b| {
         if matches!(b.kind(), KestrelBehaviorKind::Callable) {
             b.as_ref().downcast_ref::<CallableBehavior>()
         } else {
@@ -296,11 +306,12 @@ fn check_type_alias_visibility(
     let file_id = get_file_id_for_symbol(symbol, diagnostics);
     let span = symbol.metadata().declaration_span().clone();
 
-    // Get TypedBehavior for the aliased type
+    // Get TypeAliasTypedBehavior for the resolved aliased type
+    // This is added during binding after type resolution
     let behaviors = symbol.metadata().behaviors();
     let typed = behaviors.iter().find_map(|b| {
-        if matches!(b.kind(), KestrelBehaviorKind::Typed) {
-            b.as_ref().downcast_ref::<TypedBehavior>()
+        if matches!(b.kind(), KestrelBehaviorKind::TypeAliasTyped) {
+            b.as_ref().downcast_ref::<TypeAliasTypedBehavior>()
         } else {
             None
         }
@@ -308,7 +319,7 @@ fn check_type_alias_visibility(
 
     if let Some(typed) = typed {
         if let Some((type_name, type_level)) =
-            find_less_visible_type(typed.ty(), VisibilityLevel::Public)
+            find_less_visible_type(typed.resolved_ty(), VisibilityLevel::Public)
         {
             let message = if config.debug_mode {
                 format!(
@@ -348,8 +359,9 @@ fn check_field_visibility(
     let span = symbol.metadata().declaration_span().clone();
 
     // Get TypedBehavior for the field type
+    // We want the LAST TypedBehavior because the bind phase adds a resolved one after the syntactic one
     let behaviors = symbol.metadata().behaviors();
-    let typed = behaviors.iter().find_map(|b| {
+    let typed = behaviors.iter().rev().find_map(|b| {
         if matches!(b.kind(), KestrelBehaviorKind::Typed) {
             b.as_ref().downcast_ref::<TypedBehavior>()
         } else {

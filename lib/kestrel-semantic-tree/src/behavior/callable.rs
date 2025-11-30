@@ -137,7 +137,7 @@ impl SignatureType {
                 params: params.iter().map(SignatureType::from_ty).collect(),
                 return_type: Box::new(SignatureType::from_ty(return_type)),
             },
-            TyKind::Path(segments) => SignatureType::Named(segments.clone()),
+            TyKind::Path(segments, _) => SignatureType::Named(segments.clone()),
             TyKind::TypeParameter(param) => {
                 SignatureType::Named(vec![param.metadata().name().value.clone()])
             }

@@ -1,14 +1,19 @@
 //! Validation pass infrastructure for semantic analysis
 //!
 //! This module provides a configurable system for running validation passes
-//! on the semantic tree after binding is complete. Each pass is self-contained
-//! and can be enabled/disabled individually.
+//! on the semantic tree after binding is complete. Passes can run either:
+//! - Individually (each walking the tree separately)
+//! - Batched (single tree walk calling all passes per node)
+//!
+//! The batched approach is more efficient for large codebases.
 
 mod duplicate_symbol;
 mod function_body;
 mod generics;
+mod imports;
 mod protocol_method;
 mod static_context;
+mod type_alias_cycles;
 mod visibility_consistency;
 
 use std::collections::HashSet;
@@ -16,6 +21,7 @@ use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
@@ -23,8 +29,10 @@ use crate::db::SemanticDatabase;
 pub use duplicate_symbol::DuplicateSymbolPass;
 pub use function_body::FunctionBodyPass;
 pub use generics::GenericsPass;
+pub use imports::ImportValidationPass;
 pub use protocol_method::ProtocolMethodPass;
 pub use static_context::StaticContextPass;
+pub use type_alias_cycles::TypeAliasCyclePass;
 pub use visibility_consistency::VisibilityConsistencyPass;
 
 /// Configuration for which validation passes to run
@@ -98,6 +106,8 @@ impl ValidationRunner {
             Box::new(DuplicateSymbolPass),
             Box::new(VisibilityConsistencyPass),
             Box::new(GenericsPass),
+            Box::new(TypeAliasCyclePass),
+            Box::new(ImportValidationPass),
         ];
 
         Self { passes }
@@ -124,3 +134,17 @@ impl Default for ValidationRunner {
         Self::new()
     }
 }
+
+// Note on batched validation:
+// The current implementation runs each pass separately, which means N tree walks for N passes.
+// A batched implementation would walk the tree once and call all validations per node.
+//
+// To implement batched validation:
+// 1. Each validation module would expose per-symbol-kind validation functions
+// 2. A single tree walk would call the appropriate functions based on symbol kind
+//
+// For now, the separate-pass approach is maintained for simplicity and maintainability.
+// The performance impact is minimal for typical codebases, as tree walks are cheap.
+// If profiling shows this is a bottleneck, batching can be implemented by:
+// - Making validate_* functions pub(crate) in each module
+// - Creating a BatchedValidationRunner that does a single tree walk

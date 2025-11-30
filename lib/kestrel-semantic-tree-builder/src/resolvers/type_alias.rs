@@ -3,17 +3,15 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-use kestrel_semantic_tree::error::{CircularTypeAliasError, CycleParticipant};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::type_alias::{TypeAliasSymbol, TypeAliasTypedBehavior};
-use kestrel_semantic_tree::ty::TyKind;
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{BindingContext, Resolver};
-use crate::resolvers::type_parameter::{extract_type_parameters, extract_where_clause};
-use crate::type_resolver::{resolve_type, TypeResolutionContext};
+use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
+use crate::type_resolver::{resolve_type_with_diagnostics, TypeResolutionContext};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -71,7 +69,7 @@ impl Resolver for TypeAliasResolver {
         // This will be used during the binding phase to resolve Path variants
         let syntactic_typed_behavior = TypedBehavior::new(aliased_type.clone(), full_span.clone());
 
-        // Extract type parameters (will be empty if not a generic type alias)
+        // Extract type parameters (they'll have type alias as parent later)
         let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
 
         // Extract where clause (uses type_parameters to look up SymbolIds)
@@ -83,7 +81,7 @@ impl Resolver for TypeAliasResolver {
             full_span.clone(),
             visibility_behavior,
             syntactic_typed_behavior,
-            type_parameters,
+            type_parameters.clone(),
             where_clause,
             parent.cloned(),
         );
@@ -104,6 +102,10 @@ impl Resolver for TypeAliasResolver {
             .add_behavior(semantic_typed_behavior);
 
         let type_alias_arc_dyn = type_alias_arc.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+
+        // Add type parameters as children of the type alias (not the module)
+        // This ensures type parameters are in scope during type resolution
+        add_type_params_as_children(&type_parameters, &type_alias_arc_dyn);
 
         // Add to parent if exists
         if let Some(parent) = parent {
@@ -150,116 +152,26 @@ impl Resolver for TypeAliasResolver {
         let type_ctx = TypeResolutionContext { db: context.db };
 
         // Resolve all Path variants in the type using scope-aware resolution
-        match resolve_type(syntactic_type, &type_ctx, symbol_id) {
+        // Use resolve_type_with_diagnostics for better error reporting
+        match resolve_type_with_diagnostics(
+            syntactic_type,
+            &type_ctx,
+            symbol_id,
+            context.diagnostics,
+            context.file_id,
+        ) {
             Some(resolved_type) => {
-                // Check if the resolved type contains a type alias that would create a cycle
-                if let Some(cycle_error) =
-                    check_resolved_type_for_cycles(&resolved_type, symbol, context)
-                {
-                    context.diagnostics.throw(cycle_error, context.file_id);
-                } else {
-                    // Add the resolved type as a TypeAliasTypedBehavior
-                    let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);
-                    symbol.metadata().add_behavior(type_alias_typed_behavior);
-                }
+                // Add the resolved type as a TypeAliasTypedBehavior
+                // Cycle detection is now handled by the TypeAliasCyclePass validation pass
+                let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);
+                symbol.metadata().add_behavior(type_alias_typed_behavior);
             }
             None => {
-                // Type resolution failed - the error will be emitted by resolve_type_path
-                // For now, we don't add a TypeAliasTypedBehavior
+                // Type resolution failed - error was already emitted by resolve_type_with_diagnostics
             }
         }
 
         // Exit the cycle detector after we're done resolving this type alias
         context.type_alias_cycle_detector.exit();
-    }
-}
-
-/// Check if a resolved type contains a type alias that would create a cycle
-/// This detects direct self-references (type A = A) and checks the cycle detector
-/// for any type aliases that are currently being resolved (indirect cycles).
-fn check_resolved_type_for_cycles(
-    ty: &kestrel_semantic_tree::ty::Ty,
-    current_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    context: &mut BindingContext,
-) -> Option<CircularTypeAliasError> {
-    check_type_for_cycles_recursive(ty, current_symbol, context)
-}
-
-fn check_type_for_cycles_recursive(
-    ty: &kestrel_semantic_tree::ty::Ty,
-    current_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    context: &mut BindingContext,
-) -> Option<CircularTypeAliasError> {
-    match ty.kind() {
-        TyKind::TypeAlias { symbol: alias_symbol, .. } => {
-            let alias_id = alias_symbol.metadata().id();
-            let current_id = current_symbol.metadata().id();
-
-            // Check for direct self-reference (type A = A)
-            if alias_id == current_id {
-                let origin = CycleParticipant {
-                    name: current_symbol.metadata().name().value.clone(),
-                    name_span: current_symbol.metadata().name().span.clone(),
-                    file_id: context.file_id_for_symbol(current_symbol),
-                };
-
-                return Some(CircularTypeAliasError {
-                    origin,
-                    cycle: vec![], // Self-cycle has no intermediate participants
-                });
-            }
-
-            // Check if this type alias is currently being resolved (indirect cycle)
-            // This would happen if: type A = B, type B = A
-            // When binding A, we enter A in the detector
-            // When resolving B in A's definition, if B were being bound, we'd detect it
-            // But since B hasn't been bound yet, we can't detect A -> B -> A this way
-            //
-            // For now, we can only detect self-references. Detecting A -> B -> A requires
-            // a post-binding pass that follows the type alias chains.
-            if context.type_alias_cycle_detector.is_active(&alias_id) {
-                let origin = CycleParticipant {
-                    name: current_symbol.metadata().name().value.clone(),
-                    name_span: current_symbol.metadata().name().span.clone(),
-                    file_id: context.file_id_for_symbol(current_symbol),
-                };
-
-                let cycle = vec![CycleParticipant {
-                    name: alias_symbol.metadata().name().value.clone(),
-                    name_span: alias_symbol.metadata().name().span.clone(),
-                    file_id: context.file_id_for_symbol(
-                        &(alias_symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
-                    ),
-                }];
-
-                return Some(CircularTypeAliasError { origin, cycle });
-            }
-
-            None
-        }
-        TyKind::Tuple(elements) => {
-            for elem in elements {
-                if let Some(err) =
-                    check_type_for_cycles_recursive(elem, current_symbol, context)
-                {
-                    return Some(err);
-                }
-            }
-            None
-        }
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            for param in params {
-                if let Some(err) =
-                    check_type_for_cycles_recursive(param, current_symbol, context)
-                {
-                    return Some(err);
-                }
-            }
-            check_type_for_cycles_recursive(return_type, current_symbol, context)
-        }
-        _ => None,
     }
 }

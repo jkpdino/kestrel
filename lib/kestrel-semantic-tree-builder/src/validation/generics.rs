@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::error::{DefaultOrderingError, DuplicateTypeParameterError};
+use kestrel_semantic_tree::error::{DefaultOrderingError, DuplicateTypeParameterError, NonProtocolBoundError};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -19,10 +19,12 @@ use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
+use kestrel_semantic_tree::ty::{Constraint, TyKind, WhereClause};
 use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
+use crate::queries::{Db, TypePathResolution};
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass for generics
@@ -40,16 +42,16 @@ impl ValidationPass for GenericsPass {
     fn validate(
         &self,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
-        _db: &SemanticDatabase,
+        db: &SemanticDatabase,
         diagnostics: &mut DiagnosticContext,
         _config: &ValidationConfig,
     ) {
-        validate_symbol(root, diagnostics);
+        validate_symbol(root, db, diagnostics);
     }
 }
 
 /// Recursively validate symbols for generics issues
-fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, diagnostics: &mut DiagnosticContext) {
+fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
     let kind = symbol.metadata().kind();
 
     // Dereference Arc to get the trait object for downcasting
@@ -64,6 +66,12 @@ fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, diagnostics: &mut 
                     symbol,
                     diagnostics,
                 );
+                validate_where_clause(
+                    struct_sym.where_clause(),
+                    symbol,
+                    db,
+                    diagnostics,
+                );
             }
         }
         KestrelSymbolKind::Function => {
@@ -71,6 +79,12 @@ fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, diagnostics: &mut 
                 validate_type_parameters(
                     func_sym.type_parameters(),
                     symbol,
+                    diagnostics,
+                );
+                validate_where_clause(
+                    func_sym.where_clause(),
+                    symbol,
+                    db,
                     diagnostics,
                 );
             }
@@ -82,6 +96,12 @@ fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, diagnostics: &mut 
                     symbol,
                     diagnostics,
                 );
+                validate_where_clause(
+                    proto_sym.where_clause(),
+                    symbol,
+                    db,
+                    diagnostics,
+                );
             }
         }
         KestrelSymbolKind::TypeAlias => {
@@ -91,6 +111,12 @@ fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, diagnostics: &mut 
                     symbol,
                     diagnostics,
                 );
+                validate_where_clause(
+                    alias_sym.where_clause(),
+                    symbol,
+                    db,
+                    diagnostics,
+                );
             }
         }
         _ => {}
@@ -98,7 +124,7 @@ fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, diagnostics: &mut 
 
     // Recursively check children
     for child in symbol.metadata().children() {
-        validate_symbol(&child, diagnostics);
+        validate_symbol(&child, db, diagnostics);
     }
 }
 
@@ -172,6 +198,147 @@ fn check_default_ordering(
             diagnostics.throw(error, file_id);
             // Only report once per ordering issue
             break;
+        }
+    }
+}
+
+/// Validate where clause constraints
+fn validate_where_clause(
+    where_clause: &WhereClause,
+    container: &Arc<dyn Symbol<KestrelLanguage>>,
+    db: &SemanticDatabase,
+    diagnostics: &mut DiagnosticContext,
+) {
+    if where_clause.is_empty() {
+        return;
+    }
+
+    let file_id = get_file_id_for_symbol(container, diagnostics);
+    let context_id = container.metadata().id();
+
+    // Validate each constraint
+    for constraint in &where_clause.constraints {
+        validate_constraint(constraint, context_id, db, file_id, diagnostics);
+    }
+}
+
+/// Validate a single constraint in a where clause
+fn validate_constraint(
+    constraint: &Constraint,
+    context_id: semantic_tree::symbol::SymbolId,
+    db: &SemanticDatabase,
+    file_id: usize,
+    diagnostics: &mut DiagnosticContext,
+) {
+    match constraint {
+        Constraint::TypeBound { param: _, bounds } => {
+            // Validate each bound type
+            for bound in bounds {
+                validate_bound_type(bound, context_id, db, file_id, diagnostics);
+            }
+        }
+    }
+}
+
+/// Validate that a bound type is a valid protocol
+fn validate_bound_type(
+    bound: &kestrel_semantic_tree::ty::Ty,
+    context_id: semantic_tree::symbol::SymbolId,
+    db: &SemanticDatabase,
+    file_id: usize,
+    diagnostics: &mut DiagnosticContext,
+) {
+    match bound.kind() {
+        // Path types need to be resolved and checked
+        TyKind::Path(segments, _type_args) => {
+            // Resolve the type path
+            let resolution = db.resolve_type_path(segments.clone(), context_id);
+
+            match resolution {
+                TypePathResolution::Resolved(ty) => {
+                    // Check if the resolved type is a protocol
+                    match ty.kind() {
+                        TyKind::Protocol { .. } => {
+                            // Valid protocol bound
+                        }
+                        TyKind::Struct { symbol, .. } => {
+                            let error = NonProtocolBoundError {
+                                type_name: symbol.metadata().name().value.clone(),
+                                type_kind: "struct".to_string(),
+                                span: bound.span().clone(),
+                            };
+                            diagnostics.throw(error, file_id);
+                        }
+                        TyKind::TypeAlias { symbol, .. } => {
+                            let error = NonProtocolBoundError {
+                                type_name: symbol.metadata().name().value.clone(),
+                                type_kind: "type alias".to_string(),
+                                span: bound.span().clone(),
+                            };
+                            diagnostics.throw(error, file_id);
+                        }
+                        TyKind::TypeParameter(param) => {
+                            let error = NonProtocolBoundError {
+                                type_name: param.metadata().name().value.clone(),
+                                type_kind: "type parameter".to_string(),
+                                span: bound.span().clone(),
+                            };
+                            diagnostics.throw(error, file_id);
+                        }
+                        _ => {
+                            // Other types (primitives, tuples, functions) can't be bounds
+                            let type_name = segments.join(".");
+                            let error = NonProtocolBoundError {
+                                type_name,
+                                type_kind: "type".to_string(),
+                                span: bound.span().clone(),
+                            };
+                            diagnostics.throw(error, file_id);
+                        }
+                    }
+                }
+                TypePathResolution::NotFound { segment, .. } => {
+                    // Type not found - report unresolved bound error
+                    let error = NonProtocolBoundError {
+                        type_name: segment,
+                        type_kind: "unresolved type".to_string(),
+                        span: bound.span().clone(),
+                    };
+                    diagnostics.throw(error, file_id);
+                }
+                TypePathResolution::Ambiguous { segment, .. } => {
+                    // Ambiguous type - report as error
+                    let error = NonProtocolBoundError {
+                        type_name: segment,
+                        type_kind: "ambiguous type".to_string(),
+                        span: bound.span().clone(),
+                    };
+                    diagnostics.throw(error, file_id);
+                }
+                TypePathResolution::NotAType { .. } => {
+                    // Not a type - report error
+                    let type_name = segments.join(".");
+                    let error = NonProtocolBoundError {
+                        type_name,
+                        type_kind: "non-type symbol".to_string(),
+                        span: bound.span().clone(),
+                    };
+                    diagnostics.throw(error, file_id);
+                }
+            }
+        }
+        // Protocol types are already resolved and valid
+        TyKind::Protocol { .. } => {
+            // Valid protocol bound
+        }
+        // All other type kinds are not valid as bounds
+        _ => {
+            let error = NonProtocolBoundError {
+                type_name: format!("{:?}", bound.kind()),
+                type_kind: "invalid type".to_string(),
+                span: bound.span().clone(),
+            };
+            diagnostics.throw(error, file_id);
         }
     }
 }
