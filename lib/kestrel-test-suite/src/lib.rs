@@ -1,0 +1,308 @@
+//! Kestrel Test Suite
+//!
+//! A fluent test API for testing the Kestrel compiler.
+//!
+//! # Example
+//!
+//! ```
+//! use kestrel_test_suite::*;
+//!
+//! #[test]
+//! fn test_struct() {
+//!     Test::new("struct Foo {}")
+//!         .expect(Compiles)
+//!         .expect(Symbol::new("Foo").is(SymbolKind::Struct));
+//! }
+//! ```
+
+use std::sync::Arc;
+
+use kestrel_lexer::lex;
+use kestrel_parser::{parse_source_file, Parser};
+use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree_builder::SemanticTree;
+use semantic_tree::symbol::Symbol as SymbolTrait;
+
+// Re-export commonly used types
+pub use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind as SymbolKind;
+
+/// Visibility levels for test expectations
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    Private,
+    Fileprivate,
+    Internal,
+    Public,
+}
+
+/// Test context containing compilation results
+pub struct TestContext {
+    pub semantic_tree: SemanticTree,
+    pub diagnostics: DiagnosticContext,
+    pub has_errors: bool,
+}
+
+/// A test case that can be run against the Kestrel compiler
+pub struct Test {
+    files: Vec<(String, String)>,
+    context: Option<TestContext>,
+}
+
+impl Test {
+    /// Create a new test from a single source string
+    pub fn new(source: &str) -> Self {
+        Test {
+            files: vec![("test.ks".to_string(), source.to_string())],
+            context: None,
+        }
+    }
+
+    /// Create a test from multiple source files
+    pub fn with_files(files: &[(&str, &str)]) -> Self {
+        Test {
+            files: files
+                .iter()
+                .map(|(name, content)| (name.to_string(), content.to_string()))
+                .collect(),
+            context: None,
+        }
+    }
+
+    /// Compile the test files and store the result
+    fn compile(&mut self) {
+        if self.context.is_some() {
+            return; // Already compiled
+        }
+
+        let mut semantic_tree = SemanticTree::new();
+        let mut diagnostics = DiagnosticContext::new();
+        let mut has_parse_errors = false;
+
+        // Parse and add all files
+        for (file_name, content) in &self.files {
+            let tokens: Vec<_> = lex(content)
+                .filter_map(|t| t.ok())
+                .map(|spanned| (spanned.value, spanned.span))
+                .collect();
+
+            let result = Parser::parse(content, tokens.into_iter(), parse_source_file);
+
+            if !result.errors.is_empty() {
+                has_parse_errors = true;
+                // Add parse errors to diagnostics
+                for error in &result.errors {
+                    let file_id = diagnostics.add_file(file_name.clone(), content.clone());
+                    let span = error.span.clone().unwrap_or(0..1);
+                    let diagnostic = kestrel_reporting::Diagnostic::error()
+                        .with_message(&error.message)
+                        .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)]);
+                    diagnostics.add_diagnostic(diagnostic);
+                }
+            }
+
+            let file_id = diagnostics.add_file(file_name.clone(), content.clone());
+            kestrel_semantic_tree_builder::add_file_to_tree(
+                &mut semantic_tree,
+                file_name,
+                &result.tree,
+                content,
+                &mut diagnostics,
+                file_id,
+            );
+        }
+
+        // Run binding phase
+        kestrel_semantic_tree_builder::bind_tree(&semantic_tree, &mut diagnostics, 0);
+
+        let has_errors = has_parse_errors || diagnostics.len() > 0;
+
+        self.context = Some(TestContext {
+            semantic_tree,
+            diagnostics,
+            has_errors,
+        });
+    }
+
+    /// Apply an expectation to this test
+    pub fn expect<E: Expectable>(mut self, expectation: E) -> Self {
+        self.compile();
+        let ctx = self.context.as_ref().unwrap();
+        if let Err(e) = expectation.check(ctx) {
+            // Emit diagnostics for context
+            if ctx.diagnostics.len() > 0 {
+                eprintln!("\n--- Compiler Diagnostics ---");
+                ctx.diagnostics.emit().ok();
+            }
+            panic!("Expectation failed: {}", e);
+        }
+        self
+    }
+}
+
+/// Trait for test expectations
+pub trait Expectable {
+    fn check(&self, ctx: &TestContext) -> Result<(), String>;
+}
+
+/// Expects compilation to succeed with no errors
+pub struct Compiles;
+
+impl Expectable for Compiles {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if ctx.has_errors {
+            Err(format!(
+                "Expected compilation to succeed, but got {} error(s)",
+                ctx.diagnostics.len()
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Symbol expectation with chainable behavior checks
+pub struct Symbol {
+    path: String,
+    kind: Option<SymbolKind>,
+    behaviors: Vec<Behavior>,
+}
+
+impl Symbol {
+    /// Create a new symbol expectation
+    pub fn new(path: &str) -> Self {
+        Symbol {
+            path: path.to_string(),
+            kind: None,
+            behaviors: Vec::new(),
+        }
+    }
+
+    /// Assert the symbol is of a specific kind
+    pub fn is(mut self, kind: SymbolKind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+
+    /// Assert the symbol has a specific behavior/property
+    pub fn has(mut self, behavior: Behavior) -> Self {
+        self.behaviors.push(behavior);
+        self
+    }
+
+    /// Find a symbol by name in the semantic tree
+    fn find_symbol<'a>(
+        &self,
+        root: &'a Arc<dyn SymbolTrait<KestrelLanguage>>,
+    ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
+        self.find_symbol_recursive(root, &self.path)
+    }
+
+    fn find_symbol_recursive(
+        &self,
+        symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+        name: &str,
+    ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
+        // Check if this symbol matches
+        if symbol.metadata().name().value == name {
+            return Some(symbol.clone());
+        }
+
+        // Search children
+        for child in symbol.metadata().children() {
+            if let Some(found) = self.find_symbol_recursive(&child, name) {
+                return Some(found);
+            }
+        }
+
+        None
+    }
+}
+
+impl Expectable for Symbol {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        let root = ctx.semantic_tree.root();
+        let symbol = self
+            .find_symbol(root)
+            .ok_or_else(|| format!("Symbol '{}' not found", self.path))?;
+
+        // Check kind if specified
+        if let Some(expected_kind) = &self.kind {
+            let actual_kind = symbol.metadata().kind();
+            if actual_kind != *expected_kind {
+                return Err(format!(
+                    "Symbol '{}' has kind {:?}, expected {:?}",
+                    self.path, actual_kind, expected_kind
+                ));
+            }
+        }
+
+        // Check behaviors
+        for behavior in &self.behaviors {
+            behavior.check_symbol(&self.path, &symbol)?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Behaviors are properties that symbols can have
+#[derive(Clone)]
+pub enum Behavior {
+    /// Expected visibility
+    Visibility(Visibility),
+}
+
+impl Behavior {
+    fn check_symbol(
+        &self,
+        path: &str,
+        symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    ) -> Result<(), String> {
+        match self {
+            Behavior::Visibility(expected) => {
+                use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
+
+                let behaviors = symbol.metadata().behaviors();
+                let vis_behavior = behaviors
+                    .iter()
+                    .find(|b| matches!(b.kind(), KestrelBehaviorKind::Visibility))
+                    .and_then(|b| b.as_ref().downcast_ref::<VisibilityBehavior>());
+
+                match vis_behavior {
+                    Some(vb) => {
+                        let actual = vb.visibility();
+                        let matches = match (actual, expected) {
+                            (Some(SemanticVisibility::Public), Visibility::Public) => true,
+                            (Some(SemanticVisibility::Private), Visibility::Private) => true,
+                            (Some(SemanticVisibility::Internal), Visibility::Internal) => true,
+                            (Some(SemanticVisibility::Fileprivate), Visibility::Fileprivate) => {
+                                true
+                            }
+                            (None, Visibility::Internal) => true, // Default is internal
+                            _ => false,
+                        };
+                        if !matches {
+                            return Err(format!(
+                                "Symbol '{}' has visibility {:?}, expected {:?}",
+                                path, actual, expected
+                            ));
+                        }
+                    }
+                    None => {
+                        // No visibility behavior means internal (default)
+                        if *expected != Visibility::Internal {
+                            return Err(format!(
+                                "Symbol '{}' has no visibility (defaults to internal), expected {:?}",
+                                path, expected
+                            ));
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}

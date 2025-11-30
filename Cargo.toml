@@ -26,5 +26,6 @@ members = [
     "lib/kestrel-semantic-tree",
     "lib/kestrel-semantic-tree-builder",
     "lib/kestrel-reporting",
-    "lib/kestrel-compiler"
+    "lib/kestrel-compiler",
+    "lib/kestrel-test-suite"
 ]

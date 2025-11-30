@@ -243,6 +243,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-test-suite"
+version = "0.1.0"
+dependencies = [
+ "kestrel-lexer",
+ "kestrel-parser",
+ "kestrel-reporting",
+ "kestrel-semantic-tree",
+ "kestrel-semantic-tree-builder",
+ "kestrel-span",
+ "kestrel-syntax-tree",
+ "semantic-tree",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
