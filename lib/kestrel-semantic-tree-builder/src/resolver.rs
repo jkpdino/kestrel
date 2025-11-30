@@ -7,7 +7,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::resolvers::{FieldResolver, FunctionResolver, ImportResolver, ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver};
+use crate::resolvers::{ExpressionResolver, FieldResolver, FunctionResolver, ImportResolver, ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver};
 
 /// Trait for resolving syntax nodes into semantic symbols
 pub trait Resolver {
@@ -104,6 +104,10 @@ impl ResolverRegistry {
         resolvers.insert(
             SyntaxKind::FunctionDeclaration,
             Box::new(FunctionResolver),
+        );
+        resolvers.insert(
+            SyntaxKind::Expression,
+            Box::new(ExpressionResolver),
         );
 
         // Register terminal resolvers (separate instances for each)

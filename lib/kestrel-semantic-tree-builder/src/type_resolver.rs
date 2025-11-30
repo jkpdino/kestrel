@@ -97,6 +97,12 @@ pub fn resolve_type(
             resolved_elements.map(|elements| Ty::tuple(elements, ty.span().clone()))
         }
 
+        // Array types: recursively resolve element type
+        TyKind::Array(element_type) => {
+            resolve_type(element_type, ctx, context_id)
+                .map(|resolved_elem| Ty::array(resolved_elem, ty.span().clone()))
+        }
+
         // Function types: recursively resolve parameter and return types
         TyKind::Function {
             params,
@@ -240,6 +246,12 @@ pub fn resolve_type_with_diagnostics(
             } else {
                 None
             }
+        }
+
+        // Array types: recursively resolve element type
+        TyKind::Array(element_type) => {
+            resolve_type_with_diagnostics(element_type, ctx, context_id, diagnostics, file_id)
+                .map(|resolved_elem| Ty::array(resolved_elem, ty.span().clone()))
         }
 
         // Function types: resolve params and return type, collecting all errors
@@ -403,6 +415,7 @@ fn apply_type_arguments(
         | TyKind::Bool
         | TyKind::String
         | TyKind::Tuple(_)
+        | TyKind::Array(_)
         | TyKind::Function { .. }
         | TyKind::Path(_, _) => Err(TypeArgumentError::NotAGenericType),
     }

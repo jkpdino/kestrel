@@ -104,6 +104,8 @@ pub enum SignatureType {
     String,
     /// Tuple of types
     Tuple(Vec<SignatureType>),
+    /// Array of a single element type
+    Array(Box<SignatureType>),
     /// Function type
     Function {
         params: Vec<SignatureType>,
@@ -129,6 +131,9 @@ impl SignatureType {
             TyKind::String => SignatureType::String,
             TyKind::Tuple(elements) => {
                 SignatureType::Tuple(elements.iter().map(SignatureType::from_ty).collect())
+            }
+            TyKind::Array(element_type) => {
+                SignatureType::Array(Box::new(SignatureType::from_ty(element_type)))
             }
             TyKind::Function {
                 params,

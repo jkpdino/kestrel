@@ -73,6 +73,11 @@ impl Ty {
         Self::new(TyKind::Tuple(elements), span)
     }
 
+    /// Create an array type: [T]
+    pub fn array(element_type: Ty, span: Span) -> Self {
+        Self::new(TyKind::Array(Box::new(element_type)), span)
+    }
+
     /// Create a function type: (P1, P2, ...) -> R
     pub fn function(params: Vec<Ty>, return_type: Ty, span: Span) -> Self {
         Self::new(
@@ -214,6 +219,11 @@ impl Ty {
         matches!(self.kind, TyKind::Tuple(_))
     }
 
+    /// Check if this is an array type
+    pub fn is_array(&self) -> bool {
+        matches!(self.kind, TyKind::Array(_))
+    }
+
     /// Check if this is a function type
     pub fn is_function(&self) -> bool {
         matches!(self.kind, TyKind::Function { .. })
@@ -266,6 +276,14 @@ impl Ty {
     pub fn as_tuple(&self) -> Option<&Vec<Ty>> {
         match &self.kind {
             TyKind::Tuple(elements) => Some(elements),
+            _ => None,
+        }
+    }
+
+    /// Get array element type if this is an array type
+    pub fn as_array(&self) -> Option<&Ty> {
+        match &self.kind {
+            TyKind::Array(element_type) => Some(element_type),
             _ => None,
         }
     }

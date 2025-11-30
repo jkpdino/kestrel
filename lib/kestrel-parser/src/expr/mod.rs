@@ -40,6 +40,41 @@ impl Expression {
     pub fn is_unit(&self) -> bool {
         self.kind() == SyntaxKind::ExprUnit
     }
+
+    /// Check if this is an integer literal
+    pub fn is_integer(&self) -> bool {
+        self.kind() == SyntaxKind::ExprInteger
+    }
+
+    /// Check if this is a float literal
+    pub fn is_float(&self) -> bool {
+        self.kind() == SyntaxKind::ExprFloat
+    }
+
+    /// Check if this is a string literal
+    pub fn is_string(&self) -> bool {
+        self.kind() == SyntaxKind::ExprString
+    }
+
+    /// Check if this is a boolean literal
+    pub fn is_bool(&self) -> bool {
+        self.kind() == SyntaxKind::ExprBool
+    }
+
+    /// Check if this is an array literal
+    pub fn is_array(&self) -> bool {
+        self.kind() == SyntaxKind::ExprArray
+    }
+
+    /// Check if this is a tuple literal
+    pub fn is_tuple(&self) -> bool {
+        self.kind() == SyntaxKind::ExprTuple
+    }
+
+    /// Check if this is a grouping expression
+    pub fn is_grouping(&self) -> bool {
+        self.kind() == SyntaxKind::ExprGrouping
+    }
 }
 
 /// Internal enum to distinguish between expression variants during parsing
@@ -47,23 +82,193 @@ impl Expression {
 pub enum ExprVariant {
     /// Unit expression: ()
     Unit(Span, Span), // (lparen, rparen)
+    /// Integer literal: 42, 0xFF, 0b1010, 0o17
+    Integer(Span),
+    /// Float literal: 3.14, 1.0e10
+    Float(Span),
+    /// String literal: "hello"
+    String(Span),
+    /// Boolean literal: true, false
+    Bool(Span),
+    /// Array literal: [1, 2, 3]
+    Array(Span, Vec<ExprVariant>, Vec<Span>, Span), // (lbracket, elements, commas, rbracket)
+    /// Tuple literal: (1, 2, 3)
+    Tuple(Span, Vec<ExprVariant>, Vec<Span>, Span), // (lparen, elements, commas, rparen)
+    /// Grouping expression: (expr)
+    Grouping(Span, Box<ExprVariant>, Span), // (lparen, inner, rparen)
 }
 
 /// Parser for expressions
 ///
-/// Currently supports:
+/// Supports:
 /// - Unit expression: ()
+/// - Integer literals: 42, 0xFF, 0b1010, 0o17
+/// - Float literals: 3.14, 1.0e10
+/// - String literals: "hello"
+/// - Boolean literals: true, false
+/// - Array literals: [1, 2, 3]
+/// - Tuple literals: (1, 2, 3)
+/// - Grouping: (expr)
 pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> + Clone {
-    // Unit expression: ()
-    let unit = skip_trivia()
-        .ignore_then(just(Token::LParen).map_with_span(|_, span| span))
-        .then(
-            skip_trivia()
-                .ignore_then(just(Token::RParen).map_with_span(|_, span| span))
-        )
-        .map(|(lparen, rparen)| ExprVariant::Unit(lparen, rparen));
+    recursive(|expr| {
+        // Integer literal
+        let integer = skip_trivia()
+            .ignore_then(filter_map(|span, token| match token {
+                Token::Integer => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .map(ExprVariant::Integer);
 
-    unit
+        // Float literal
+        let float = skip_trivia()
+            .ignore_then(filter_map(|span, token| match token {
+                Token::Float => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .map(ExprVariant::Float);
+
+        // String literal
+        let string = skip_trivia()
+            .ignore_then(filter_map(|span, token| match token {
+                Token::String => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .map(ExprVariant::String);
+
+        // Boolean literal
+        let boolean = skip_trivia()
+            .ignore_then(filter_map(|span, token| match token {
+                Token::Boolean => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .map(ExprVariant::Bool);
+
+        // Array literal: [elem, elem, ...]
+        let array = skip_trivia()
+            .ignore_then(just(Token::LBracket).map_with_span(|_, span| span))
+            .then(
+                expr.clone()
+                    .then(
+                        skip_trivia()
+                            .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                            .then(skip_trivia().ignore_then(expr.clone()))
+                            .repeated()
+                    )
+                    .then(
+                        skip_trivia()
+                            .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                            .or_not()
+                    )
+                    .map(|((first, rest), trailing)| {
+                        let mut elements = vec![first];
+                        let mut commas = Vec::new();
+                        for (comma, elem) in rest {
+                            commas.push(comma);
+                            elements.push(elem);
+                        }
+                        if let Some(tc) = trailing {
+                            commas.push(tc);
+                        }
+                        (elements, commas)
+                    })
+                    .or_not()
+            )
+            .then(skip_trivia().ignore_then(just(Token::RBracket).map_with_span(|_, span| span)))
+            .map(|((lbracket, contents), rbracket)| {
+                let (elements, commas) = contents.unwrap_or_else(|| (vec![], vec![]));
+                ExprVariant::Array(lbracket, elements, commas, rbracket)
+            });
+
+        // Parenthesized expressions: (), (expr), (expr,), (expr, expr, ...)
+        let paren_expr = skip_trivia()
+            .ignore_then(just(Token::LParen).map_with_span(|_, span| span))
+            .then(
+                // Empty parens: ()
+                skip_trivia()
+                    .ignore_then(just(Token::RParen).map_with_span(|_, span| span))
+                    .map(|rparen| ParenContent::Unit(rparen))
+                .or(
+                    // Non-empty: expr followed by optional comma and more
+                    expr.clone()
+                        .then(
+                            skip_trivia()
+                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                                .then(
+                                    skip_trivia()
+                                        .ignore_then(expr.clone())
+                                        .then(
+                                            skip_trivia()
+                                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                                                .then(skip_trivia().ignore_then(expr.clone()))
+                                                .repeated()
+                                        )
+                                        .then(
+                                            skip_trivia()
+                                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                                                .or_not()
+                                        )
+                                        .map(|((second, rest), trailing)| {
+                                            let mut elements = vec![second];
+                                            let mut commas = Vec::new();
+                                            for (comma, elem) in rest {
+                                                commas.push(comma);
+                                                elements.push(elem);
+                                            }
+                                            if let Some(tc) = trailing {
+                                                commas.push(tc);
+                                            }
+                                            (elements, commas)
+                                        })
+                                        .or_not()
+                                )
+                                .or_not()
+                        )
+                        .then(skip_trivia().ignore_then(just(Token::RParen).map_with_span(|_, span| span)))
+                        .map(|((first, comma_rest), rparen)| {
+                            match comma_rest {
+                                None => {
+                                    // (expr) - grouping
+                                    ParenContent::Grouping(first, rparen)
+                                }
+                                Some((first_comma, None)) => {
+                                    // (expr,) - single-element tuple
+                                    ParenContent::Tuple(vec![first], vec![first_comma], rparen)
+                                }
+                                Some((first_comma, Some((more_elems, more_commas)))) => {
+                                    // (expr, expr, ...) - multi-element tuple
+                                    let mut elements = vec![first];
+                                    elements.extend(more_elems);
+                                    let mut commas = vec![first_comma];
+                                    commas.extend(more_commas);
+                                    ParenContent::Tuple(elements, commas, rparen)
+                                }
+                            }
+                        })
+                )
+            )
+            .map(|(lparen, content)| match content {
+                ParenContent::Unit(rparen) => ExprVariant::Unit(lparen, rparen),
+                ParenContent::Grouping(inner, rparen) => ExprVariant::Grouping(lparen, Box::new(inner), rparen),
+                ParenContent::Tuple(elements, commas, rparen) => ExprVariant::Tuple(lparen, elements, commas, rparen),
+            });
+
+        // Combine all expression parsers
+        // Order matters: try more specific patterns first
+        float
+            .or(integer)
+            .or(string)
+            .or(boolean)
+            .or(array)
+            .or(paren_expr)
+    })
+}
+
+/// Helper enum for parsing parenthesized expressions
+#[derive(Debug, Clone)]
+enum ParenContent {
+    Unit(Span),
+    Grouping(ExprVariant, Span),
+    Tuple(Vec<ExprVariant>, Vec<Span>, Span),
 }
 
 /// Emit events for any expression variant
@@ -71,6 +276,27 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
     match variant {
         ExprVariant::Unit(lparen, rparen) => {
             emit_unit_expr(sink, lparen.clone(), rparen.clone());
+        }
+        ExprVariant::Integer(span) => {
+            emit_integer_expr(sink, span.clone());
+        }
+        ExprVariant::Float(span) => {
+            emit_float_expr(sink, span.clone());
+        }
+        ExprVariant::String(span) => {
+            emit_string_expr(sink, span.clone());
+        }
+        ExprVariant::Bool(span) => {
+            emit_bool_expr(sink, span.clone());
+        }
+        ExprVariant::Array(lbracket, elements, commas, rbracket) => {
+            emit_array_expr(sink, lbracket.clone(), elements, commas, rbracket.clone());
+        }
+        ExprVariant::Tuple(lparen, elements, commas, rparen) => {
+            emit_tuple_expr(sink, lparen.clone(), elements, commas, rparen.clone());
+        }
+        ExprVariant::Grouping(lparen, inner, rparen) => {
+            emit_grouping_expr(sink, lparen.clone(), inner, rparen.clone());
         }
     }
 }
@@ -83,6 +309,87 @@ pub fn emit_unit_expr(sink: &mut EventSink, lparen: Span, rparen: Span) {
     sink.add_token(SyntaxKind::RParen, rparen);
     sink.finish_node(); // Finish ExprUnit
     sink.finish_node(); // Finish Expression
+}
+
+/// Emit events for an integer literal expression
+fn emit_integer_expr(sink: &mut EventSink, span: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprInteger);
+    sink.add_token(SyntaxKind::Integer, span);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+/// Emit events for a float literal expression
+fn emit_float_expr(sink: &mut EventSink, span: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprFloat);
+    sink.add_token(SyntaxKind::Float, span);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+/// Emit events for a string literal expression
+fn emit_string_expr(sink: &mut EventSink, span: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprString);
+    sink.add_token(SyntaxKind::String, span);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+/// Emit events for a boolean literal expression
+fn emit_bool_expr(sink: &mut EventSink, span: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprBool);
+    sink.add_token(SyntaxKind::Boolean, span);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+/// Emit events for an array literal expression
+fn emit_array_expr(sink: &mut EventSink, lbracket: Span, elements: &[ExprVariant], commas: &[Span], rbracket: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprArray);
+    sink.add_token(SyntaxKind::LBracket, lbracket);
+    for (i, element) in elements.iter().enumerate() {
+        emit_expr_variant(sink, element);
+        // Add comma after element if there is one
+        if i < commas.len() {
+            sink.add_token(SyntaxKind::Comma, commas[i].clone());
+        }
+    }
+    sink.add_token(SyntaxKind::RBracket, rbracket);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+/// Emit events for a tuple literal expression
+fn emit_tuple_expr(sink: &mut EventSink, lparen: Span, elements: &[ExprVariant], commas: &[Span], rparen: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprTuple);
+    sink.add_token(SyntaxKind::LParen, lparen);
+    for (i, element) in elements.iter().enumerate() {
+        emit_expr_variant(sink, element);
+        // Add comma after element if there is one
+        if i < commas.len() {
+            sink.add_token(SyntaxKind::Comma, commas[i].clone());
+        }
+    }
+    sink.add_token(SyntaxKind::RParen, rparen);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+/// Emit events for a grouping expression
+fn emit_grouping_expr(sink: &mut EventSink, lparen: Span, inner: &ExprVariant, rparen: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprGrouping);
+    sink.add_token(SyntaxKind::LParen, lparen);
+    emit_expr_variant(sink, inner);
+    sink.add_token(SyntaxKind::RParen, rparen);
+    sink.finish_node();
+    sink.finish_node();
 }
 
 /// Parse an expression and emit events
@@ -127,6 +434,8 @@ mod tests {
         }
     }
 
+    // ===== Unit Expression Tests =====
+
     #[test]
     fn test_unit_expression() {
         let source = "()";
@@ -141,5 +450,233 @@ mod tests {
         let expr = parse_expr_from_source(source);
 
         assert!(expr.is_unit());
+    }
+
+    // ===== Integer Literal Tests =====
+
+    #[test]
+    fn test_integer_decimal() {
+        let source = "42";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_integer());
+    }
+
+    #[test]
+    fn test_integer_hex() {
+        let source = "0xFF";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_integer());
+    }
+
+    #[test]
+    fn test_integer_hex_uppercase() {
+        let source = "0XAB";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_integer());
+    }
+
+    #[test]
+    fn test_integer_binary() {
+        let source = "0b1010";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_integer());
+    }
+
+    #[test]
+    fn test_integer_octal() {
+        let source = "0o755";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_integer());
+    }
+
+    // ===== Float Literal Tests =====
+
+    #[test]
+    fn test_float_simple() {
+        let source = "3.14";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_float());
+    }
+
+    #[test]
+    fn test_float_scientific() {
+        let source = "1.0e10";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_float());
+    }
+
+    #[test]
+    fn test_float_scientific_negative() {
+        let source = "2.5E-3";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_float());
+    }
+
+    // ===== String Literal Tests =====
+
+    #[test]
+    fn test_string_simple() {
+        let source = r#""hello""#;
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_string());
+    }
+
+    #[test]
+    fn test_string_with_escapes() {
+        let source = r#""hello\nworld""#;
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_string());
+    }
+
+    #[test]
+    fn test_string_empty() {
+        let source = r#""""#;
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_string());
+    }
+
+    // ===== Boolean Literal Tests =====
+
+    #[test]
+    fn test_bool_true() {
+        let source = "true";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_bool());
+    }
+
+    #[test]
+    fn test_bool_false() {
+        let source = "false";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_bool());
+    }
+
+    // ===== Array Literal Tests =====
+
+    #[test]
+    fn test_array_empty() {
+        let source = "[]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
+    }
+
+    #[test]
+    fn test_array_single() {
+        let source = "[1]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
+    }
+
+    #[test]
+    fn test_array_multiple() {
+        let source = "[1, 2, 3]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
+    }
+
+    #[test]
+    fn test_array_trailing_comma() {
+        let source = "[1, 2, 3,]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
+    }
+
+    #[test]
+    fn test_array_nested() {
+        let source = "[[1, 2], [3, 4]]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
+    }
+
+    #[test]
+    fn test_array_mixed_types() {
+        let source = r#"[1, "hello", true]"#;
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
+    }
+
+    // ===== Tuple Literal Tests =====
+
+    #[test]
+    fn test_tuple_single_element() {
+        // Single element with trailing comma is a tuple
+        let source = "(1,)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_tuple());
+    }
+
+    #[test]
+    fn test_tuple_two_elements() {
+        let source = "(1, 2)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_tuple());
+    }
+
+    #[test]
+    fn test_tuple_multiple() {
+        let source = "(1, 2, 3)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_tuple());
+    }
+
+    #[test]
+    fn test_tuple_trailing_comma() {
+        let source = "(1, 2, 3,)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_tuple());
+    }
+
+    #[test]
+    fn test_tuple_nested() {
+        let source = "((1, 2), (3, 4))";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_tuple());
+    }
+
+    // ===== Grouping Expression Tests =====
+
+    #[test]
+    fn test_grouping_integer() {
+        // Single element without trailing comma is grouping
+        let source = "(42)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_grouping());
+    }
+
+    #[test]
+    fn test_grouping_nested() {
+        let source = "((42))";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_grouping());
+    }
+
+    #[test]
+    fn test_grouping_string() {
+        let source = r#"("hello")"#;
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_grouping());
+    }
+
+    // ===== Mixed/Complex Tests =====
+
+    #[test]
+    fn test_array_of_tuples() {
+        let source = "[(1, 2), (3, 4)]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
+    }
+
+    #[test]
+    fn test_tuple_of_arrays() {
+        let source = "([1, 2], [3, 4])";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_tuple());
+    }
+
+    #[test]
+    fn test_deeply_nested() {
+        let source = "[[(1,)]]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
     }
 }

@@ -47,6 +47,9 @@ pub enum TyKind {
     /// Tuple type: (T1, T2, ...)
     Tuple(Vec<Ty>),
 
+    /// Array type: [T]
+    Array(Box<Ty>),
+
     /// Function type: (P1, P2, ...) -> R
     Function {
         params: Vec<Ty>,

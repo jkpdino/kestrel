@@ -151,6 +151,9 @@ fn find_less_visible_type(ty: &Ty, required_level: VisibilityLevel) -> Option<(S
             }
             None
         }
+        TyKind::Array(element_type) => {
+            find_less_visible_type(element_type, required_level)
+        }
         TyKind::Function { params, return_type } => {
             for param in params {
                 if let Some(result) = find_less_visible_type(param, required_level) {

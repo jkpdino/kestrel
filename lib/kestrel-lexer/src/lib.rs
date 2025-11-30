@@ -76,7 +76,7 @@ pub enum Token {
     #[regex(r#""([^"\\]|\\.)*""#)]
     String,
 
-    #[regex(r"[0-9]+")]
+    #[regex(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|[0-9]+")]
     Integer,
 
     #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?")]
@@ -255,10 +255,29 @@ mod tests {
         let tokens = filter_trivia(lex(source).collect());
         assert_eq!(tokens[0].value, Token::String);
 
-        // Test integer literals
+        // Test integer literals - decimal
         let source = "42";
         let tokens = filter_trivia(lex(source).collect());
         assert_eq!(tokens[0].value, Token::Integer);
+
+        // Test integer literals - hexadecimal
+        let source = "0xFF 0XAB 0x1a2b";
+        let tokens = filter_trivia(lex(source).collect());
+        assert_eq!(tokens[0].value, Token::Integer);
+        assert_eq!(tokens[1].value, Token::Integer);
+        assert_eq!(tokens[2].value, Token::Integer);
+
+        // Test integer literals - binary
+        let source = "0b1010 0B1111";
+        let tokens = filter_trivia(lex(source).collect());
+        assert_eq!(tokens[0].value, Token::Integer);
+        assert_eq!(tokens[1].value, Token::Integer);
+
+        // Test integer literals - octal
+        let source = "0o17 0O755";
+        let tokens = filter_trivia(lex(source).collect());
+        assert_eq!(tokens[0].value, Token::Integer);
+        assert_eq!(tokens[1].value, Token::Integer);
 
         // Test float literals
         let source = "3.14 2.5e10 1.0E-5";

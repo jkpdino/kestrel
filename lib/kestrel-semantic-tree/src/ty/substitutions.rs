@@ -81,6 +81,11 @@ impl Substitutions {
                 Ty::tuple(new_elements, ty.span().clone())
             }
 
+            TyKind::Array(element_type) => {
+                let new_element = self.apply(element_type);
+                Ty::array(new_element, ty.span().clone())
+            }
+
             TyKind::Function { params, return_type } => {
                 let new_params: Vec<Ty> = params.iter().map(|p| self.apply(p)).collect();
                 let new_return = self.apply(return_type);

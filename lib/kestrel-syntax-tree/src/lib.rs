@@ -96,6 +96,13 @@ pub enum SyntaxKind {
     // Expression nodes
     Expression,          // Wrapper for expression variants
     ExprUnit,            // ()
+    ExprInteger,         // 42, 0xFF, 0b1010, 0o17
+    ExprFloat,           // 3.14, 1.0e10
+    ExprString,          // "hello"
+    ExprBool,            // true, false
+    ExprArray,           // [1, 2, 3]
+    ExprTuple,           // (1, 2, 3)
+    ExprGrouping,        // (expr)
 
     // ===== Tokens (Terminals) =====
     // Literals
@@ -275,6 +282,13 @@ impl Language for KestrelLanguage {
         const VARIABLE_DECLARATION: u16 = SyntaxKind::VariableDeclaration as u16;
         const EXPRESSION: u16 = SyntaxKind::Expression as u16;
         const EXPR_UNIT: u16 = SyntaxKind::ExprUnit as u16;
+        const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
+        const EXPR_FLOAT: u16 = SyntaxKind::ExprFloat as u16;
+        const EXPR_STRING: u16 = SyntaxKind::ExprString as u16;
+        const EXPR_BOOL: u16 = SyntaxKind::ExprBool as u16;
+        const EXPR_ARRAY: u16 = SyntaxKind::ExprArray as u16;
+        const EXPR_TUPLE: u16 = SyntaxKind::ExprTuple as u16;
+        const EXPR_GROUPING: u16 = SyntaxKind::ExprGrouping as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
@@ -367,6 +381,13 @@ impl Language for KestrelLanguage {
             VARIABLE_DECLARATION => SyntaxKind::VariableDeclaration,
             EXPRESSION => SyntaxKind::Expression,
             EXPR_UNIT => SyntaxKind::ExprUnit,
+            EXPR_INTEGER => SyntaxKind::ExprInteger,
+            EXPR_FLOAT => SyntaxKind::ExprFloat,
+            EXPR_STRING => SyntaxKind::ExprString,
+            EXPR_BOOL => SyntaxKind::ExprBool,
+            EXPR_ARRAY => SyntaxKind::ExprArray,
+            EXPR_TUPLE => SyntaxKind::ExprTuple,
+            EXPR_GROUPING => SyntaxKind::ExprGrouping,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
             INTEGER => SyntaxKind::Integer,

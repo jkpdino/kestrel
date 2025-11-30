@@ -585,6 +585,7 @@ fn bind_symbol(
 
     // Map symbol kind to syntax kind for resolver lookup
     let syntax_kind = match kind {
+        KestrelSymbolKind::Expression => Some(SyntaxKind::Expression),
         KestrelSymbolKind::Import => Some(SyntaxKind::ImportDeclaration),
         KestrelSymbolKind::Protocol => Some(SyntaxKind::ProtocolDeclaration),
         KestrelSymbolKind::Struct => Some(SyntaxKind::StructDeclaration),
@@ -668,6 +669,9 @@ fn format_type(ty: &Ty) -> String {
         TyKind::Tuple(elements) => {
             let elem_strs: Vec<String> = elements.iter().map(format_type).collect();
             format!("({})", elem_strs.join(", "))
+        }
+        TyKind::Array(element_type) => {
+            format!("[{}]", format_type(element_type))
         }
         TyKind::Function {
             params,

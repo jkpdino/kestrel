@@ -106,12 +106,12 @@
 
 ### Literals
 
-- [ ] Integer Literals - `42`, `0xFF`, `0b1010`
-- [ ] Float Literals - `3.14`, `1.0e10`
-- [ ] String Literals - `"hello"`, escape sequences
-- [ ] Bool Literals - `true`, `false`
-- [ ] Array Literals - `[1, 2, 3]`
-- [ ] Tuple Literals - `(1, 2, 3)`
+- [x] Integer Literals - `42`, `0xFF`, `0b1010`
+- [x] Float Literals - `3.14`, `1.0e10`
+- [x] String Literals - `"hello"`, escape sequences
+- [x] Bool Literals - `true`, `false`
+- [x] Array Literals - `[1, 2, 3]`
+- [x] Tuple Literals - `(1, 2, 3)`
 
 ### Paths
 
