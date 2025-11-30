@@ -70,6 +70,9 @@ pub mod type_param;
 pub mod declaration_item;
 pub mod parser;
 pub mod ty;
+pub mod expr;
+pub mod stmt;
+pub mod block;
 
 use kestrel_lexer::Token;
 use kestrel_span::Span;
@@ -85,6 +88,9 @@ pub use function::FunctionDeclaration;
 pub use type_alias::TypeAliasDeclaration;
 pub use declaration_item::DeclarationItem;
 pub use ty::TyExpression;
+pub use expr::Expression;
+pub use stmt::Statement;
+pub use block::CodeBlock;
 
 // Re-export event-driven parse functions
 pub use module::{parse_module_declaration, parse_module_path};
@@ -96,6 +102,9 @@ pub use function::parse_function_declaration;
 pub use type_alias::parse_type_alias_declaration;
 pub use declaration_item::{parse_declaration_item, parse_source_file};
 pub use ty::parse_ty;
+pub use expr::parse_expr;
+pub use stmt::parse_stmt;
+pub use block::parse_code_block;
 
 // Re-export Parser API
 pub use parser::{Parser, ParseResult, ParseError, ParseErrorKind};

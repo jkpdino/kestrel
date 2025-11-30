@@ -11,6 +11,7 @@ use kestrel_syntax_tree::SyntaxKind;
 use crate::event::EventSink;
 use crate::ty::emit_ty_variant;
 use crate::type_param::{emit_type_parameter_list, emit_where_clause};
+use crate::block::emit_code_block;
 use super::data::{
     ParameterData, FunctionDeclarationData, FieldDeclarationData,
     StructDeclarationData, StructBodyItem, ProtocolDeclarationData,
@@ -175,11 +176,10 @@ pub fn emit_return_type(sink: &mut EventSink, arrow_span: Span, return_ty: crate
     sink.finish_node();
 }
 
-/// Emit events for a function body
-pub fn emit_function_body(sink: &mut EventSink, lbrace: Span, rbrace: Span) {
+/// Emit events for a function body (wraps a code block)
+pub fn emit_function_body(sink: &mut EventSink, block: &crate::block::CodeBlockData) {
     sink.start_node(SyntaxKind::FunctionBody);
-    sink.add_token(SyntaxKind::LBrace, lbrace);
-    sink.add_token(SyntaxKind::RBrace, rbrace);
+    emit_code_block(sink, block);
     sink.finish_node();
 }
 
@@ -212,8 +212,8 @@ pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclaration
         emit_where_clause(sink, wc);
     }
 
-    if let Some((lbrace, rbrace)) = data.body {
-        emit_function_body(sink, lbrace, rbrace);
+    if let Some(ref block) = data.body {
+        emit_function_body(sink, block);
     }
 
     sink.finish_node();

@@ -10,6 +10,7 @@ use kestrel_span::Span;
 use super::data::{ParameterData, FunctionDeclarationData, FieldDeclarationData};
 use crate::ty::{ty_parser, TyVariant};
 use crate::type_param::{type_parameter_list_parser, where_clause_parser};
+use crate::block::{code_block_parser, CodeBlockData};
 
 /// Check if a token is trivia (whitespace or comment)
 pub fn is_trivia(token: &Token) -> bool {
@@ -279,19 +280,14 @@ pub(crate) fn return_type_parser() -> impl Parser<Token, Option<(Span, TyVariant
         .or_not()
 }
 
-/// Parser for optional function body: `{ }`
+/// Parser for optional function body (code block)
 ///
 /// # Returns
-/// - `Some((lbrace_span, rbrace_span))` if body is present
+/// - `Some(CodeBlockData)` if body is present
 /// - `None` if no body (e.g., protocol method declarations)
-pub fn function_body_parser() -> impl Parser<Token, Option<(Span, Span)>, Error = Simple<Token>> + Clone {
-    skip_trivia()
-        .ignore_then(just(Token::LBrace).map_with_span(|_, span| span))
-        .then(
-            skip_trivia()
-                .ignore_then(just(Token::RBrace).map_with_span(|_, span| span))
-        )
-        .map(|(lbrace, rbrace)| Some((lbrace, rbrace)))
+pub fn function_body_parser() -> impl Parser<Token, Option<CodeBlockData>, Error = Simple<Token>> + Clone {
+    code_block_parser()
+        .map(Some)
         .or(empty().map(|_| None))
 }
 
