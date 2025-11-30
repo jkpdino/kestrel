@@ -7,6 +7,7 @@
 //!
 //! The batched approach is more efficient for large codebases.
 
+mod conformance;
 mod duplicate_symbol;
 mod function_body;
 mod generics;
@@ -21,11 +22,11 @@ use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
 
+pub use conformance::ConformancePass;
 pub use duplicate_symbol::DuplicateSymbolPass;
 pub use function_body::FunctionBodyPass;
 pub use generics::GenericsPass;
@@ -108,6 +109,7 @@ impl ValidationRunner {
             Box::new(GenericsPass),
             Box::new(TypeAliasCyclePass),
             Box::new(ImportValidationPass),
+            Box::new(ConformancePass),
         ];
 
         Self { passes }

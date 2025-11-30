@@ -62,6 +62,13 @@ pub struct FieldDeclarationData {
     pub ty: TyVariant,
 }
 
+/// Raw parsed data for a conformance list (: Proto1, Proto2)
+#[derive(Debug, Clone)]
+pub struct ConformanceListData {
+    pub colon_span: Span,
+    pub conformances: Vec<TyVariant>,
+}
+
 /// Raw parsed data for struct declaration internals
 #[derive(Debug, Clone)]
 pub struct StructDeclarationData {
@@ -69,6 +76,7 @@ pub struct StructDeclarationData {
     pub struct_span: Span,
     pub name_span: Span,
     pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub conformances: Option<ConformanceListData>,
     pub where_clause: Option<WhereClauseData>,
     pub lbrace_span: Span,
     pub body: Vec<StructBodyItem>,
@@ -92,6 +100,7 @@ pub struct ProtocolDeclarationData {
     pub protocol_span: Span,
     pub name_span: Span,
     pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
+    pub inherited: Option<ConformanceListData>, // Inherited protocols (protocol A: B { })
     pub where_clause: Option<WhereClauseData>,
     pub lbrace_span: Span,
     pub body: Vec<FunctionDeclarationData>, // Protocol body only contains function declarations

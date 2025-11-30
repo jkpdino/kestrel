@@ -15,7 +15,8 @@ use crate::common::{
     emit_protocol_declaration,
     ProtocolDeclarationData,
 };
-use crate::type_param::{type_parameter_list_parser, where_clause_parser};
+use crate::type_param::{type_parameter_list_parser, where_clause_parser, conformance_list_parser};
+use crate::common::ConformanceListData;
 
 /// Represents a protocol declaration: (visibility)? protocol Name[T]? (where ...)? { ... }
 ///
@@ -94,16 +95,21 @@ pub fn protocol_declaration_parser_internal() -> impl Parser<Token, ProtocolDecl
         .then(token(Token::Protocol))
         .then(identifier())
         .then(type_parameter_list_parser().or_not())
+        .then(conformance_list_parser().or_not())
         .then(where_clause_parser().or_not())
         .then(token(Token::LBrace))
         .then(function_declaration_parser_internal().repeated())
         .then(token(Token::RBrace))
-        .map(|(((((((visibility, protocol_span), name_span), type_params), where_clause), lbrace_span), body), rbrace_span)| {
+        .map(|((((((((visibility, protocol_span), name_span), type_params), inherited), where_clause), lbrace_span), body), rbrace_span)| {
             ProtocolDeclarationData {
                 visibility,
                 protocol_span,
                 name_span,
                 type_params,
+                inherited: inherited.map(|(colon_span, types)| ConformanceListData {
+                    colon_span,
+                    conformances: types,
+                }),
                 where_clause,
                 lbrace_span,
                 body,
@@ -374,5 +380,58 @@ mod tests {
         let method = &methods[0];
         let has_body = method.children().any(|c| c.kind() == SyntaxKind::FunctionBody);
         assert!(has_body, "Protocol method with body should parse and include FunctionBody node");
+    }
+
+    #[test]
+    fn test_protocol_inheritance() {
+        let source = "protocol Shape: Drawable { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = ProtocolDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        assert_eq!(decl.name(), Some("Shape".to_string()));
+        let has_conformance = decl.syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::ConformanceList);
+        assert!(has_conformance, "Expected ConformanceList node for protocol inheritance");
+    }
+
+    #[test]
+    fn test_protocol_multiple_inheritance() {
+        let source = "protocol Widget: Drawable, Clickable { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = ProtocolDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        let conformance_list = decl.syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::ConformanceList)
+            .expect("Expected ConformanceList node");
+
+        let conformance_count = conformance_list
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::ConformanceItem)
+            .count();
+        assert_eq!(conformance_count, 2);
     }
 }

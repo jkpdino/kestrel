@@ -8,7 +8,7 @@ use crate::{
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::type_parameter::TypeParameterSymbol,
-    ty::WhereClause,
+    ty::{Ty, WhereClause},
 };
 
 #[derive(Debug)]
@@ -18,6 +18,8 @@ pub struct StructSymbol {
     type_parameters: Vec<Arc<TypeParameterSymbol>>,
     /// Where clause constraints for type parameters
     where_clause: WhereClause,
+    /// Protocols this struct conforms to, e.g., `struct Point: Drawable { }`
+    conformances: Vec<Ty>,
 }
 
 impl Symbol<KestrelLanguage> for StructSymbol {
@@ -34,16 +36,17 @@ impl StructSymbol {
         visibility: VisibilityBehavior,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
-        Self::with_generics(name, span, visibility, Vec::new(), WhereClause::new(), parent)
+        Self::with_generics(name, span, visibility, Vec::new(), WhereClause::new(), Vec::new(), parent)
     }
 
-    /// Create a new generic StructSymbol with type parameters and where clause
+    /// Create a new generic StructSymbol with type parameters, where clause, and conformances
     pub fn with_generics(
         name: Name,
         span: Span,
         visibility: VisibilityBehavior,
         type_parameters: Vec<Arc<TypeParameterSymbol>>,
         where_clause: WhereClause,
+        conformances: Vec<Ty>,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Struct)
@@ -60,6 +63,7 @@ impl StructSymbol {
             metadata: builder.build(),
             type_parameters,
             where_clause,
+            conformances,
         }
     }
 
@@ -81,5 +85,15 @@ impl StructSymbol {
     /// Get the where clause for this struct
     pub fn where_clause(&self) -> &WhereClause {
         &self.where_clause
+    }
+
+    /// Get the protocols this struct conforms to
+    pub fn conformances(&self) -> &[Ty] {
+        &self.conformances
+    }
+
+    /// Check if this struct has any conformances
+    pub fn has_conformances(&self) -> bool {
+        !self.conformances.is_empty()
     }
 }

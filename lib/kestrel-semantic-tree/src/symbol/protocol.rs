@@ -8,7 +8,7 @@ use crate::{
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::type_parameter::TypeParameterSymbol,
-    ty::WhereClause,
+    ty::{Ty, WhereClause},
 };
 
 #[derive(Debug)]
@@ -18,6 +18,8 @@ pub struct ProtocolSymbol {
     type_parameters: Vec<Arc<TypeParameterSymbol>>,
     /// Where clause constraints for type parameters
     where_clause: WhereClause,
+    /// Inherited protocols, e.g., `protocol Shape: Drawable { }`
+    inherited_protocols: Vec<Ty>,
 }
 
 impl Symbol<KestrelLanguage> for ProtocolSymbol {
@@ -34,16 +36,17 @@ impl ProtocolSymbol {
         visibility: VisibilityBehavior,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
-        Self::with_generics(name, span, visibility, Vec::new(), WhereClause::new(), parent)
+        Self::with_generics(name, span, visibility, Vec::new(), WhereClause::new(), Vec::new(), parent)
     }
 
-    /// Create a new generic ProtocolSymbol with type parameters and where clause
+    /// Create a new generic ProtocolSymbol with type parameters, where clause, and inherited protocols
     pub fn with_generics(
         name: Name,
         span: Span,
         visibility: VisibilityBehavior,
         type_parameters: Vec<Arc<TypeParameterSymbol>>,
         where_clause: WhereClause,
+        inherited_protocols: Vec<Ty>,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Protocol)
@@ -60,6 +63,7 @@ impl ProtocolSymbol {
             metadata: builder.build(),
             type_parameters,
             where_clause,
+            inherited_protocols,
         }
     }
 
@@ -81,5 +85,15 @@ impl ProtocolSymbol {
     /// Get the where clause for this protocol
     pub fn where_clause(&self) -> &WhereClause {
         &self.where_clause
+    }
+
+    /// Get the protocols this protocol inherits from
+    pub fn inherited_protocols(&self) -> &[Ty] {
+        &self.inherited_protocols
+    }
+
+    /// Check if this protocol inherits from any other protocols
+    pub fn has_inherited_protocols(&self) -> bool {
+        !self.inherited_protocols.is_empty()
     }
 }

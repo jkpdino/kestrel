@@ -22,7 +22,6 @@
   - [x] Scope-aware name lookup
   - [x] Cross-module type references
 - [x] Primitive Types - Int, Float, String, Bool (TyKind variants)
-- [ ] Type Checking Infrastructure - Core type validation logic
 
 ### Modules & Visibility (moved from Phase 5 - DONE)
 
@@ -49,10 +48,15 @@
   - [x] Static vs instance field tracking
   - [x] Mutability (let vs var)
   - [x] Works in struct bodies and at module level (globals)
-- [ ] Protocols - Define interfaces/contracts
-  - [ ] Parser support for protocol declarations
-  - [ ] Protocol type checking
-  - [ ] Protocol conformance validation
+- [x] Protocols - Define interfaces/contracts
+  - [x] Parser support for protocol declarations
+  - [x] Semantic tree representation (ProtocolSymbol)
+  - [x] Protocol type resolution (TyKind::Protocol)
+  - [x] Generic protocols with type parameters and where clauses
+  - [x] Validation: protocol methods cannot have bodies
+  - [x] Protocol inheritance (`protocol A: B { }`)
+  - [x] Protocol conformance syntax (`struct Point: Drawable { }`)
+  - [x] Conformance validation (check all methods implemented)
 
 ### Functions
 
@@ -99,7 +103,8 @@
 
 ### Struct Operations
 
-- [ ] Struct Initialization - `Point { x: 10, y: 20 }`
+- [ ] Struct Initialization - `Point(x: 10, y: 20)`
+- [ ] Struct Initializers - `init() {}`
 - [ ] Field Access - `point.x`, `point.y`
 - [ ] Struct Field Assignment - `point.x = 5`
 
@@ -108,6 +113,7 @@
 - [ ] Function Calls - `add(1, 2)`, `module.function(arg)`
 - [ ] Function References - Functions as values
 - [ ] Closures - Anonymous functions (stretch goal)
+- [ ] Type Checking Infrastructure - Core type validation logic
 
 ### Variables
 
@@ -153,12 +159,11 @@
 
 ## Current Status
 
-**Phase**: Phase 1 (Type System Foundation)
-**Progress**: ~90% of Phase 1 complete
+**Phase**: Phase 1 (Type System Foundation) - COMPLETE
+**Progress**: 100% of Phase 1 complete
 **Next Tasks**:
 
-1. Protocols (medium)
-2. Type Checking Infrastructure
+1. Begin Phase 2: Generics
 
 ## Notes
 

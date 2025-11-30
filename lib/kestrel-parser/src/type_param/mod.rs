@@ -5,6 +5,7 @@
 //! - Type parameters with defaults: `[T, U = Int]`
 //! - Where clauses: `where T: Proto and Proto2, U: Other`
 //! - Type argument lists: `[Int, String]` in type use positions
+//! - Conformance lists: `: Proto1, Proto2` for structs and protocols
 
 use chumsky::prelude::*;
 use kestrel_lexer::Token;
@@ -183,6 +184,19 @@ pub fn where_clause_parser() -> impl Parser<Token, WhereClauseData, Error = Simp
         .map(|(where_span, bounds)| WhereClauseData { where_span, bounds })
 }
 
+/// Parser for conformance list: : Proto1, Proto2[T]
+/// Used after struct/protocol names to declare conformance/inheritance
+pub fn conformance_list_parser() -> impl Parser<Token, (Span, Vec<crate::ty::TyVariant>), Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::Colon).map_with_span(|_, span| span))
+        .then(
+            crate::ty::ty_parser()
+                .separated_by(just(Token::Comma))
+                .at_least(1)
+        )
+        .map(|(colon_span, types)| (colon_span, types))
+}
+
 /// Emit events for a type parameter list
 pub fn emit_type_parameter_list(sink: &mut EventSink, lbracket: Span, params: Vec<TypeParameterData>, rbracket: Span) {
     sink.start_node(SyntaxKind::TypeParameterList);
@@ -227,6 +241,20 @@ pub fn emit_where_clause(sink: &mut EventSink, data: WhereClauseData) {
 
     for bound in data.bounds {
         emit_type_bound(sink, bound);
+    }
+
+    sink.finish_node();
+}
+
+/// Emit events for a conformance list: : Proto1, Proto2
+pub fn emit_conformance_list(sink: &mut EventSink, colon_span: Span, conformances: &[crate::ty::TyVariant]) {
+    sink.start_node(SyntaxKind::ConformanceList);
+    sink.add_token(SyntaxKind::Colon, colon_span);
+
+    for conformance in conformances {
+        sink.start_node(SyntaxKind::ConformanceItem);
+        crate::ty::emit_ty_variant(sink, conformance);
+        sink.finish_node();
     }
 
     sink.finish_node();
@@ -430,5 +458,47 @@ mod tests {
         assert_eq!(args.len(), 1);
         let nested = args[0].args.as_ref().unwrap();
         assert_eq!(nested.len(), 2); // String and List[Int]
+    }
+
+    fn parse_conformances(source: &str) -> Option<(Span, Vec<crate::ty::TyVariant>)> {
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
+        let end_pos = source.len();
+        let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens.into_iter());
+        conformance_list_parser().parse(stream).ok()
+    }
+
+    #[test]
+    fn test_conformance_single() {
+        let result = parse_conformances(": Drawable");
+        assert!(result.is_some());
+        let (_, conformances) = result.unwrap();
+        assert_eq!(conformances.len(), 1);
+    }
+
+    #[test]
+    fn test_conformance_multiple() {
+        let result = parse_conformances(": Drawable, Equatable");
+        assert!(result.is_some());
+        let (_, conformances) = result.unwrap();
+        assert_eq!(conformances.len(), 2);
+    }
+
+    #[test]
+    fn test_conformance_generic() {
+        let result = parse_conformances(": Iterator[Int]");
+        assert!(result.is_some());
+        let (_, conformances) = result.unwrap();
+        assert_eq!(conformances.len(), 1);
+    }
+
+    #[test]
+    fn test_conformance_path() {
+        let result = parse_conformances(": Std.Core.Equatable");
+        assert!(result.is_some());
+        let (_, conformances) = result.unwrap();
+        assert_eq!(conformances.len(), 1);
     }
 }

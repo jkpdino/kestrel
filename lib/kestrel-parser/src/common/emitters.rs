@@ -10,7 +10,7 @@ use kestrel_syntax_tree::SyntaxKind;
 
 use crate::event::EventSink;
 use crate::ty::emit_ty_variant;
-use crate::type_param::{emit_type_parameter_list, emit_where_clause};
+use crate::type_param::{emit_type_parameter_list, emit_where_clause, emit_conformance_list};
 use super::data::{
     ParameterData, FunctionDeclarationData, FieldDeclarationData,
     StructDeclarationData, StructBodyItem, ProtocolDeclarationData,
@@ -255,6 +255,10 @@ pub fn emit_struct_declaration(sink: &mut EventSink, data: StructDeclarationData
         emit_type_parameter_list(sink, lbracket, params, rbracket);
     }
 
+    if let Some(conf) = data.conformances {
+        emit_conformance_list(sink, conf.colon_span, &conf.conformances);
+    }
+
     if let Some(wc) = data.where_clause {
         emit_where_clause(sink, wc);
     }
@@ -299,6 +303,10 @@ pub fn emit_protocol_declaration(sink: &mut EventSink, data: ProtocolDeclaration
 
     if let Some((lbracket, params, rbracket)) = data.type_params {
         emit_type_parameter_list(sink, lbracket, params, rbracket);
+    }
+
+    if let Some(inherited) = data.inherited {
+        emit_conformance_list(sink, inherited.colon_span, &inherited.conformances);
     }
 
     if let Some(wc) = data.where_clause {

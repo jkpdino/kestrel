@@ -54,5 +54,327 @@ mod basic {
     }
 }
 
-// Note: Protocol inheritance (protocol A: B { }) is not yet implemented in the parser
-// These tests should be added once that feature is complete
+mod conformance {
+    use super::*;
+
+    #[test]
+    fn struct_with_single_conformance() {
+        Test::new(
+            r#"module Test
+            protocol Drawable { }
+            struct Point: Drawable { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Drawable").is(SymbolKind::Protocol))
+        .expect(Symbol::new("Point").is(SymbolKind::Struct));
+    }
+
+    #[test]
+    fn struct_with_multiple_conformances() {
+        Test::new(
+            r#"module Test
+            protocol Drawable { }
+            protocol Equatable { }
+            struct Point: Drawable, Equatable { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct));
+    }
+
+    #[test]
+    fn struct_with_conformance_and_type_params() {
+        Test::new(
+            r#"module Test
+            protocol Container[T] { }
+            struct Box[T]: Container[T] { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Box").is(SymbolKind::Struct));
+    }
+
+    #[test]
+    fn struct_with_conformance_and_where_clause() {
+        Test::new(
+            r#"module Test
+            protocol Equatable { }
+            protocol Container[T] { }
+            struct Set[T]: Container[T] where T: Equatable { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Set").is(SymbolKind::Struct));
+    }
+}
+
+mod inheritance {
+    use super::*;
+
+    #[test]
+    fn protocol_inherits_single_protocol() {
+        Test::new(
+            r#"module Test
+            protocol Drawable { }
+            protocol Shape: Drawable { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Drawable").is(SymbolKind::Protocol))
+        .expect(Symbol::new("Shape").is(SymbolKind::Protocol));
+    }
+
+    #[test]
+    fn protocol_inherits_multiple_protocols() {
+        Test::new(
+            r#"module Test
+            protocol Drawable { }
+            protocol Clickable { }
+            protocol Widget: Drawable, Clickable { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Widget").is(SymbolKind::Protocol));
+    }
+
+    #[test]
+    fn protocol_with_methods_and_inheritance() {
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            protocol Shape: Drawable {
+                func area() -> Int
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Shape").is(SymbolKind::Protocol))
+        .expect(Symbol::new("area").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn generic_protocol_with_inheritance() {
+        Test::new(
+            r#"module Test
+            protocol Comparable { }
+            protocol Sortable[T]: Comparable { }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Sortable").is(SymbolKind::Protocol));
+    }
+}
+
+mod validation {
+    use super::*;
+
+    #[test]
+    fn struct_implements_required_method() {
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            struct Circle: Drawable {
+                func draw() { }
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Circle").is(SymbolKind::Struct));
+    }
+
+    #[test]
+    fn struct_missing_required_method() {
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            struct Circle: Drawable { }
+        "#,
+        )
+        .expect(HasError("does not implement required method 'draw'"));
+    }
+
+    #[test]
+    fn struct_implements_multiple_methods() {
+        Test::new(
+            r#"module Test
+            protocol Comparable {
+                func lessThan(other: Int) -> Bool
+                func equals(other: Int) -> Bool
+            }
+            struct Number: Comparable {
+                func lessThan(other: Int) -> Bool { }
+                func equals(other: Int) -> Bool { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn struct_missing_one_of_multiple_methods() {
+        Test::new(
+            r#"module Test
+            protocol Comparable {
+                func lessThan(other: Int) -> Bool
+                func equals(other: Int) -> Bool
+            }
+            struct Number: Comparable {
+                func lessThan(other: Int) -> Bool { }
+            }
+        "#,
+        )
+        .expect(HasError("does not implement required method 'equals'"));
+    }
+
+    #[test]
+    fn struct_implements_inherited_protocol_methods() {
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            protocol Shape: Drawable {
+                func area() -> Int
+            }
+            struct Circle: Shape {
+                func draw() { }
+                func area() -> Int { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn struct_missing_inherited_protocol_method() {
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            protocol Shape: Drawable {
+                func area() -> Int
+            }
+            struct Circle: Shape {
+                func area() -> Int { }
+            }
+        "#,
+        )
+        .expect(HasError("does not implement required method 'draw'"));
+    }
+
+    #[test]
+    fn struct_with_method_wrong_return_type() {
+        Test::new(
+            r#"module Test
+            protocol Hashable {
+                func hash() -> Int
+            }
+            struct Point: Hashable {
+                func hash() -> String { }
+            }
+        "#,
+        )
+        .expect(HasError("does not implement required method 'hash'"));
+    }
+
+    #[test]
+    fn struct_with_method_wrong_parameter_count() {
+        Test::new(
+            r#"module Test
+            protocol Comparable {
+                func compare(other: Int) -> Bool
+            }
+            struct Number: Comparable {
+                func compare() -> Bool { }
+            }
+        "#,
+        )
+        .expect(HasError("does not implement required method 'compare'"));
+    }
+
+    #[test]
+    fn struct_implements_from_multiple_conformances() {
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            protocol Clickable {
+                func onClick()
+            }
+            struct Button: Drawable, Clickable {
+                func draw() { }
+                func onClick() { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn struct_missing_method_from_second_conformance() {
+        Test::new(
+            r#"module Test
+            protocol Drawable {
+                func draw()
+            }
+            protocol Clickable {
+                func onClick()
+            }
+            struct Button: Drawable, Clickable {
+                func draw() { }
+            }
+        "#,
+        )
+        .expect(HasError("does not implement required method 'onClick'"));
+    }
+
+    #[test]
+    fn empty_protocol_requires_no_methods() {
+        Test::new(
+            r#"module Test
+            protocol Marker { }
+            struct Point: Marker { }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn struct_with_labeled_parameter_method() {
+        Test::new(
+            r#"module Test
+            protocol Greetable {
+                func greet(with name: String)
+            }
+            struct Person: Greetable {
+                func greet(with name: String) { }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn struct_with_wrong_label_on_method() {
+        Test::new(
+            r#"module Test
+            protocol Greetable {
+                func greet(with name: String)
+            }
+            struct Person: Greetable {
+                func greet(using name: String) { }
+            }
+        "#,
+        )
+        .expect(HasError("does not implement required method 'greet'"));
+    }
+}

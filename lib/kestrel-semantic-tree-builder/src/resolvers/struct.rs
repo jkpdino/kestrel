@@ -10,7 +10,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::Resolver;
-use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
+use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause, extract_conformances};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -57,13 +57,17 @@ impl Resolver for StructResolver {
         // Extract where clause (uses type_parameters to look up SymbolIds)
         let where_clause = extract_where_clause(syntax, source, &type_parameters);
 
-        // Create the struct symbol with type parameters and where clause
+        // Extract conformances (protocols this struct conforms to)
+        let conformances = extract_conformances(syntax, source);
+
+        // Create the struct symbol with type parameters, where clause, and conformances
         let struct_symbol = StructSymbol::with_generics(
             name,
             full_span.clone(),
             visibility_behavior,
             type_parameters.clone(),
             where_clause,
+            conformances,
             parent.cloned(),
         );
         let struct_arc = Arc::new(struct_symbol);

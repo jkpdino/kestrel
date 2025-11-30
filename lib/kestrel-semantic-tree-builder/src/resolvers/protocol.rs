@@ -10,7 +10,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::Resolver;
-use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
+use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause, extract_conformances};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -57,13 +57,17 @@ impl Resolver for ProtocolResolver {
         // Extract where clause (uses type_parameters to look up SymbolIds)
         let where_clause = extract_where_clause(syntax, source, &type_parameters);
 
-        // Create the protocol symbol with type parameters and where clause
+        // Extract inherited protocols (protocol A: B, C { })
+        let inherited_protocols = extract_conformances(syntax, source);
+
+        // Create the protocol symbol with type parameters, where clause, and inherited protocols
         let protocol_symbol = ProtocolSymbol::with_generics(
             name,
             full_span.clone(),
             visibility_behavior,
             type_parameters.clone(),
             where_clause,
+            inherited_protocols,
             parent.cloned(),
         );
         let protocol_arc = Arc::new(protocol_symbol);

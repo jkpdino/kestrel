@@ -16,7 +16,8 @@ use crate::common::{
     emit_struct_declaration,
     StructDeclarationData, StructBodyItem,
 };
-use crate::type_param::{type_parameter_list_parser, where_clause_parser};
+use crate::type_param::{type_parameter_list_parser, where_clause_parser, conformance_list_parser};
+use crate::common::ConformanceListData;
 
 /// Represents a struct declaration: (visibility)? struct Name[T]? (where ...)? { ... }
 ///
@@ -135,16 +136,21 @@ pub fn struct_declaration_parser_internal() -> impl Parser<Token, StructDeclarat
             .then(token(Token::Struct))
             .then(identifier())
             .then(type_parameter_list_parser().or_not())
+            .then(conformance_list_parser().or_not())
             .then(where_clause_parser().or_not())
             .then(token(Token::LBrace))
             .then(struct_body_item_parser_internal(struct_parser).repeated())
             .then(token(Token::RBrace))
-            .map(|(((((((visibility, struct_span), name_span), type_params), where_clause), lbrace_span), body), rbrace_span)| {
+            .map(|((((((((visibility, struct_span), name_span), type_params), conformances), where_clause), lbrace_span), body), rbrace_span)| {
                 StructDeclarationData {
                     visibility,
                     struct_span,
                     name_span,
                     type_params,
+                    conformances: conformances.map(|(colon_span, types)| ConformanceListData {
+                        colon_span,
+                        conformances: types,
+                    }),
                     where_clause,
                     lbrace_span,
                     body,
@@ -362,5 +368,117 @@ mod tests {
         assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
         assert_eq!(children[1].kind(), SyntaxKind::FieldDeclaration);
         assert_eq!(children[2].kind(), SyntaxKind::FunctionDeclaration);
+    }
+
+    #[test]
+    fn test_struct_with_conformance() {
+        let source = "struct Point: Drawable { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_struct_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = StructDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        assert_eq!(decl.name(), Some("Point".to_string()));
+        let has_conformance = decl.syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::ConformanceList);
+        assert!(has_conformance, "Expected ConformanceList node");
+    }
+
+    #[test]
+    fn test_struct_with_multiple_conformances() {
+        let source = "struct Point: Drawable, Equatable { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_struct_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = StructDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        let conformance_list = decl.syntax
+            .children()
+            .find(|child| child.kind() == SyntaxKind::ConformanceList)
+            .expect("Expected ConformanceList node");
+
+        let conformance_count = conformance_list
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::ConformanceItem)
+            .count();
+        assert_eq!(conformance_count, 2);
+    }
+
+    #[test]
+    fn test_struct_with_generic_conformance() {
+        let source = "struct IntBox: Container[Int] { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_struct_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = StructDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        assert_eq!(decl.name(), Some("IntBox".to_string()));
+        let has_conformance = decl.syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::ConformanceList);
+        assert!(has_conformance, "Expected ConformanceList node");
+    }
+
+    #[test]
+    fn test_struct_full_syntax() {
+        let source = "struct Box[T]: Container[T] where T: Equatable { }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_struct_declaration(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        let decl = StructDeclaration {
+            syntax: tree,
+            span: 0..source.len(),
+        };
+
+        assert_eq!(decl.name(), Some("Box".to_string()));
+
+        let has_type_params = decl.syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::TypeParameterList);
+        assert!(has_type_params, "Expected TypeParameterList node");
+
+        let has_conformance = decl.syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::ConformanceList);
+        assert!(has_conformance, "Expected ConformanceList node");
+
+        let has_where_clause = decl.syntax
+            .children()
+            .any(|child| child.kind() == SyntaxKind::WhereClause);
+        assert!(has_where_clause, "Expected WhereClause node");
     }
 }

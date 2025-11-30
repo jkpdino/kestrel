@@ -70,6 +70,10 @@ pub enum SyntaxKind {
     TypeBound,           // T: Proto and Proto2
     TypeEquality,        // T.Item = U (future)
 
+    // Conformance nodes
+    ConformanceList,     // : Proto1, Proto2 (after struct/protocol name)
+    ConformanceItem,     // Each individual conformance (a type reference)
+
     // Type nodes
     Ty,
     TyUnit,
@@ -244,6 +248,8 @@ impl Language for KestrelLanguage {
         const WHERE_CLAUSE: u16 = SyntaxKind::WhereClause as u16;
         const TYPE_BOUND: u16 = SyntaxKind::TypeBound as u16;
         const TYPE_EQUALITY: u16 = SyntaxKind::TypeEquality as u16;
+        const CONFORMANCE_LIST: u16 = SyntaxKind::ConformanceList as u16;
+        const CONFORMANCE_ITEM: u16 = SyntaxKind::ConformanceItem as u16;
         const TY: u16 = SyntaxKind::Ty as u16;
         const TY_UNIT: u16 = SyntaxKind::TyUnit as u16;
         const TY_NEVER: u16 = SyntaxKind::TyNever as u16;
@@ -328,6 +334,8 @@ impl Language for KestrelLanguage {
             WHERE_CLAUSE => SyntaxKind::WhereClause,
             TYPE_BOUND => SyntaxKind::TypeBound,
             TYPE_EQUALITY => SyntaxKind::TypeEquality,
+            CONFORMANCE_LIST => SyntaxKind::ConformanceList,
+            CONFORMANCE_ITEM => SyntaxKind::ConformanceItem,
             TY => SyntaxKind::Ty,
             TY_UNIT => SyntaxKind::TyUnit,
             TY_NEVER => SyntaxKind::TyNever,
