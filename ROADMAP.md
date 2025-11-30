@@ -82,8 +82,8 @@
 
 ## Phase 2: Generics
 
-- [ ] Generic Type Parameters - `Struct<T>`, `Protocol<T>`
-- [ ] Generic Functions - `fn identity<T>(value: T) -> T`
+- [ ] Generic Type Parameters - `Struct[T]`, `Protocol<T>`
+- [ ] Generic Functions - `fn identity[T](value: T) -> T`
 - [ ] Generic Constraints - `where T: Protocol`
 - [ ] Generic Type Inference - Deduce type parameters from usage
 

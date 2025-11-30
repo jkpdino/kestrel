@@ -187,3 +187,101 @@ public import std.text.views.(
     CodePointIndex,
     CharIndex
 )
+
+// Serialization
+public import std.serde.serde.(
+    Serialize,
+    Deserialize,
+    Serializer,
+    Deserializer,
+    ObjectSerializer,
+    ArraySerializer,
+    ObjectVisitor,
+    ObjectAccess,
+    ArrayAccess,
+    SerializeError,
+    DeserializeError
+)
+
+// JSON
+public import std.json.json.(
+    Json,
+    JsonValue,
+    JsonError,
+    JsonSerializer,
+    JsonDeserializer,
+    JsonObjectSerializer,
+    JsonArraySerializer,
+    JsonObjectAccess
+)
+
+// I/O
+public import std.io.error.(IoError, IoResult, ErrorKind)
+public import std.io.fd.(
+    OpenFlags,
+    FileMode,
+    SeekFrom,
+    RawFd,
+    OwnedFd,
+    BorrowedFd
+)
+public import std.io.stream.(
+    Reader,
+    Writer,
+    Seek,
+    ReadSeek,
+    WriteSeek,
+    ReadWrite,
+    BytesReader,
+    ChainReader,
+    TakeReader,
+    EmptyReader,
+    RepeatReader,
+    SinkWriter,
+    Cursor,
+    copy
+)
+public import std.io.file.(
+    OpenOptions,
+    File,
+    Metadata,
+    readToString,
+    readBytes,
+    writeString,
+    writeBytes,
+    appendString,
+    metadata,
+    exists,
+    isFile,
+    isDir,
+    remove,
+    rename,
+    copyFile
+)
+public import std.io.buffered.(
+    BufferedReader,
+    BufferedWriter,
+    LineWriter,
+    LinesReader,
+    BufReader,
+    BufWriter
+)
+public import std.io.stdio.(
+    Stdin,
+    StdinLock,
+    Stdout,
+    StdoutLock,
+    Stderr,
+    StderrLock,
+    stdin,
+    stdout,
+    stderr,
+    print,
+    println,
+    eprint,
+    eprintln,
+    readLine,
+    readInt,
+    readFloat,
+    prompt
+)
