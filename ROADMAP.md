@@ -86,10 +86,21 @@
 
 ## Phase 2: Generics
 
-- [ ] Generic Type Parameters - `Struct[T]`, `Protocol<T>`
-- [ ] Generic Functions - `fn identity[T](value: T) -> T`
-- [ ] Generic Constraints - `where T: Protocol`
-- [ ] Generic Type Inference - Deduce type parameters from usage
+- [x] Generic Type Parameters - `Struct[T]`, `Protocol[T]`
+  - [x] Parser support for type parameter syntax
+  - [x] TypeParameterSymbol representation
+  - [x] Type parameter defaults `[T = Int]`
+  - [x] Type argument application and arity checking
+- [x] Generic Functions - `func identity[T](value: T) -> T`
+  - [x] Parser support
+  - [x] FunctionSymbol with type parameters
+- [x] Generic Constraints - `where T: Protocol`
+  - [x] Parser support for where clauses
+  - [x] WhereClause representation with bounds
+  - [x] Validation (bounds must be protocols, params must exist)
+- [x] Type Substitutions - Replace type parameters with concrete types
+  - [x] Substitutions system for generic instantiation
+  - [x] Recursive substitution through complex types
 
 ## Phase 3: Values & Expressions
 
@@ -147,6 +158,8 @@
 ## Phase 6: Polish & Optimization
 
 - [ ] Type Inference Improvements
+  - [ ] Generic Type Inference - Deduce type parameters from usage
+  - [ ] Generic Constraint Enforcement - Verify bounds at call sites
 - [x] Error Messages - Clear, actionable diagnostics
   - [x] Cross-file diagnostics
   - [x] Precise span reporting (name-level, not declaration-level)
@@ -159,11 +172,11 @@
 
 ## Current Status
 
-**Phase**: Phase 1 (Type System Foundation) - COMPLETE
-**Progress**: 100% of Phase 1 complete
+**Phase**: Phase 2 (Generics) - COMPLETE
+**Progress**: Phase 1 & 2 complete
 **Next Tasks**:
 
-1. Begin Phase 2: Generics
+1. Begin Phase 3: Values & Expressions
 
 ## Notes
 
