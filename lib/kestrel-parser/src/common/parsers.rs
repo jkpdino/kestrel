@@ -7,6 +7,10 @@ use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 
+use super::data::{ParameterData, FunctionDeclarationData, FieldDeclarationData};
+use crate::ty::{ty_parser, TyVariant};
+use crate::type_param::{type_parameter_list_parser, where_clause_parser};
+
 /// Check if a token is trivia (whitespace or comment)
 pub fn is_trivia(token: &Token) -> bool {
     matches!(token, Token::Whitespace | Token::LineComment | Token::BlockComment)
@@ -157,5 +161,199 @@ pub fn import_declaration_parser_internal() -> impl Parser<Token, (Span, Vec<Spa
                 None => (None, None),
             };
             (import_span, path_segments, alias, items)
+        })
+}
+
+// =============================================================================
+// Shared Modifier Parsers
+// =============================================================================
+
+/// Parser for optional static modifier
+///
+/// Parses an optional `static` keyword and returns its span if present.
+///
+/// # Examples
+/// - `static func foo()` → `Some(span(static))`
+/// - `func foo()` → `None`
+pub fn static_parser() -> impl Parser<Token, Option<Span>, Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::Static).map_with_span(|_, span| Some(span)))
+        .or(empty().map(|_| None))
+}
+
+/// Parser for let/var mutability keyword
+///
+/// Parses either `let` or `var` and returns the span and mutability flag.
+///
+/// # Returns
+/// - `(span, false)` for `let`
+/// - `(span, true)` for `var`
+pub fn let_var_parser() -> impl Parser<Token, (Span, bool), Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Let)
+                .map_with_span(|_, span| (span, false))
+                .or(just(Token::Var).map_with_span(|_, span| (span, true)))
+        )
+}
+
+// =============================================================================
+// Parameter Parsers
+// =============================================================================
+
+/// Parser for a single parameter: `(label)? bind_name: Type`
+///
+/// # Examples
+/// - `x: Int` → label=None, bind_name=x
+/// - `with x: Int` → label="with", bind_name=x
+pub(crate) fn parameter_parser() -> impl Parser<Token, ParameterData, Error = Simple<Token>> + Clone {
+    // Try to parse: identifier identifier : type (labeled parameter)
+    // Or: identifier : type (unlabeled parameter)
+    skip_trivia()
+        .ignore_then(
+            filter_map(|span, token| match token {
+                Token::Identifier => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            })
+        )
+        .then(
+            // Optional second identifier (if present, first was label)
+            skip_trivia()
+                .ignore_then(
+                    filter_map(|span, token| match token {
+                        Token::Identifier => Ok(span),
+                        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                    })
+                )
+                .or_not()
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Colon).map_with_span(|_, span| span))
+        )
+        .then(ty_parser())
+        .map(|(((first_ident, second_ident_opt), colon), ty)| {
+            match second_ident_opt {
+                Some(second_ident) => {
+                    // Two identifiers: first is label, second is bind_name
+                    ParameterData {
+                        label: Some(first_ident),
+                        bind_name: second_ident,
+                        colon,
+                        ty,
+                    }
+                }
+                None => {
+                    // One identifier: it's the bind_name, no label
+                    ParameterData {
+                        label: None,
+                        bind_name: first_ident,
+                        colon,
+                        ty,
+                    }
+                }
+            }
+        })
+}
+
+/// Parser for parameter list (zero or more parameters separated by commas)
+pub(crate) fn parameter_list_parser() -> impl Parser<Token, Vec<ParameterData>, Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(
+            parameter_parser()
+                .separated_by(just(Token::Comma).map_with_span(|_, span| span))
+                .allow_trailing()
+        )
+}
+
+/// Parser for optional return type: `-> Type`
+///
+/// # Returns
+/// - `Some((arrow_span, type))` if return type is present
+/// - `None` if no return type
+pub(crate) fn return_type_parser() -> impl Parser<Token, Option<(Span, TyVariant)>, Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::Arrow).map_with_span(|_, span| span))
+        .then(ty_parser())
+        .map(|(arrow, ty)| (arrow, ty))
+        .or_not()
+}
+
+/// Parser for optional function body: `{ }`
+///
+/// # Returns
+/// - `Some((lbrace_span, rbrace_span))` if body is present
+/// - `None` if no body (e.g., protocol method declarations)
+pub fn function_body_parser() -> impl Parser<Token, Option<(Span, Span)>, Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::LBrace).map_with_span(|_, span| span))
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::RBrace).map_with_span(|_, span| span))
+        )
+        .map(|(lbrace, rbrace)| Some((lbrace, rbrace)))
+        .or(empty().map(|_| None))
+}
+
+// =============================================================================
+// Declaration Parsers - Single Source of Truth
+// =============================================================================
+
+/// Parser for a function declaration
+///
+/// Syntax: `(visibility)? (static)? fn name[T, U]?(params) (-> Type)? (where ...)? ({ })?`
+///
+/// This is the single source of truth for function declaration parsing.
+pub fn function_declaration_parser_internal() -> impl Parser<Token, FunctionDeclarationData, Error = Simple<Token>> + Clone {
+    visibility_parser_internal()
+        .then(static_parser())
+        .then(token(Token::Func))
+        .then(identifier())
+        .then(type_parameter_list_parser().or_not())
+        .then(token(Token::LParen))
+        .then(parameter_list_parser())
+        .then(token(Token::RParen))
+        .then(return_type_parser())
+        .then(where_clause_parser().or_not())
+        .then(function_body_parser())
+        .map(|((((((((((visibility, is_static), fn_span), name_span), type_params), lparen), parameters), rparen), return_type), where_clause), body)| {
+            FunctionDeclarationData {
+                visibility,
+                is_static,
+                fn_span,
+                name_span,
+                type_params,
+                lparen,
+                parameters,
+                rparen,
+                return_type,
+                where_clause,
+                body,
+            }
+        })
+}
+
+/// Parser for a field declaration
+///
+/// Syntax: `(visibility)? (static)? let/var name: Type`
+///
+/// This is the single source of truth for field declaration parsing.
+pub fn field_declaration_parser_internal() -> impl Parser<Token, FieldDeclarationData, Error = Simple<Token>> + Clone {
+    visibility_parser_internal()
+        .then(static_parser())
+        .then(let_var_parser())
+        .then(identifier())
+        .then(token(Token::Colon))
+        .then(ty_parser())
+        .map(|(((((visibility, is_static), (mutability_span, is_mutable)), name_span), colon_span), ty)| {
+            FieldDeclarationData {
+                visibility,
+                is_static,
+                mutability_span,
+                is_mutable,
+                name_span,
+                colon_span,
+                ty,
+            }
         })
 }

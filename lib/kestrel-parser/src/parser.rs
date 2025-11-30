@@ -30,17 +30,121 @@
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxNode;
+use std::fmt;
 
 use crate::event::{Event, EventSink, TreeBuilder};
 
-/// A parse error with a message and optional span
+/// The kind of parse error
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseErrorKind {
+    /// An unexpected token was encountered
+    UnexpectedToken,
+    /// A required token is missing
+    MissingToken,
+    /// End of input was reached unexpectedly
+    UnexpectedEof,
+    /// Generic syntax error
+    SyntaxError,
+}
+
+impl fmt::Display for ParseErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseErrorKind::UnexpectedToken => write!(f, "unexpected token"),
+            ParseErrorKind::MissingToken => write!(f, "missing token"),
+            ParseErrorKind::UnexpectedEof => write!(f, "unexpected end of input"),
+            ParseErrorKind::SyntaxError => write!(f, "syntax error"),
+        }
+    }
+}
+
+/// A parse error with detailed information
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
-    /// The error message
+    /// The kind of error
+    pub kind: ParseErrorKind,
+    /// A human-readable error message
     pub message: String,
     /// The span where the error occurred (if available)
     pub span: Option<Span>,
+    /// Tokens that were expected (if applicable)
+    pub expected: Vec<String>,
+    /// The token that was found (if applicable)
+    pub found: Option<String>,
 }
+
+impl ParseError {
+    /// Create a new parse error with basic information
+    pub fn new(kind: ParseErrorKind, message: impl Into<String>, span: Option<Span>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            span,
+            expected: Vec::new(),
+            found: None,
+        }
+    }
+
+    /// Create a parse error from a Chumsky error
+    pub fn from_chumsky_error<T: fmt::Debug + std::hash::Hash + Eq>(error: chumsky::error::Simple<T>) -> Self {
+        let span = Some(error.span());
+
+        // Determine error kind
+        let kind = if error.found().is_none() {
+            ParseErrorKind::UnexpectedEof
+        } else {
+            ParseErrorKind::UnexpectedToken
+        };
+
+        // Format expected tokens
+        let expected: Vec<String> = error
+            .expected()
+            .filter_map(|opt| opt.as_ref().map(|t| format!("{:?}", t)))
+            .collect();
+
+        // Format found token
+        let found = error.found().map(|t| format!("{:?}", t));
+
+        // Build user-friendly message
+        let message = if expected.is_empty() {
+            match &found {
+                Some(f) => format!("unexpected {}", f),
+                None => "unexpected end of input".to_string(),
+            }
+        } else if expected.len() == 1 {
+            match &found {
+                Some(f) => format!("expected {}, found {}", expected[0], f),
+                None => format!("expected {}", expected[0]),
+            }
+        } else {
+            let expected_str = expected.join(", ");
+            match &found {
+                Some(f) => format!("expected one of [{}], found {}", expected_str, f),
+                None => format!("expected one of [{}]", expected_str),
+            }
+        };
+
+        Self {
+            kind,
+            message,
+            span,
+            expected,
+            found,
+        }
+    }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)?;
+        if let Some(span) = &self.span {
+            write!(f, " at {}..{}", span.start, span.end)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ParseError {}
 
 /// The result of parsing, containing both the syntax tree and any errors
 #[derive(Debug, Clone)]
@@ -99,10 +203,11 @@ impl Parser {
         let errors: Vec<ParseError> = events
             .iter()
             .filter_map(|e| match e {
-                Event::Error { message, span } => Some(ParseError {
-                    message: message.clone(),
-                    span: span.clone(),
-                }),
+                Event::Error { message, span } => Some(ParseError::new(
+                    ParseErrorKind::SyntaxError,
+                    message.clone(),
+                    span.clone(),
+                )),
                 _ => None,
             })
             .collect();

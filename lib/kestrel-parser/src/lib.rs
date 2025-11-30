@@ -98,7 +98,7 @@ pub use declaration_item::{parse_declaration_item, parse_source_file};
 pub use ty::parse_ty;
 
 // Re-export Parser API
-pub use parser::{Parser, ParseResult, ParseError};
+pub use parser::{Parser, ParseResult, ParseError, ParseErrorKind};
 
 /// Convenience function to parse a module declaration from source and tokens
 /// Returns a fully built ModuleDeclaration with its syntax tree

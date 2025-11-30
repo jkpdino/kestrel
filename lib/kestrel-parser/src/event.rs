@@ -142,20 +142,25 @@ impl<'src> TreeBuilder<'src> {
     /// Process all events and build the tree
     fn process_events(&mut self, builder: &mut GreenNodeBuilder) {
         while self.pos < self.events.len() {
-            // Clone the event to avoid borrow issues
-            let event = self.events[self.pos].clone();
-            match event {
+            // Use match on reference to avoid cloning events
+            match &self.events[self.pos] {
                 Event::StartNode(kind) => {
-                    builder.start_node(kind.into());
+                    builder.start_node((*kind).into());
                     self.pos += 1;
                 }
                 Event::AddToken(kind, span) => {
-                    // Emit any trivia before this token
-                    self.emit_trivia_until(span.start, builder);
+                    // Extract values before modifying self
+                    let kind = *kind;
+                    let span_start = span.start;
+                    let span_end = span.end;
+                    let span_clone = span.clone();
 
-                    let text = &self.source[span.clone()];
+                    // Emit any trivia before this token
+                    self.emit_trivia_until(span_start, builder);
+
+                    let text = &self.source[span_clone];
                     builder.token(kind.into(), text);
-                    self.source_pos = span.end;
+                    self.source_pos = span_end;
                     self.pos += 1;
                 }
                 Event::FinishNode => {

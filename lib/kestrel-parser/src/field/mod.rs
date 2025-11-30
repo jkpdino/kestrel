@@ -1,11 +1,16 @@
-use chumsky::prelude::*;
+//! Field declaration parsing
+//!
+//! This module is the single source of truth for field declaration parsing.
+
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::event::{EventSink, TreeBuilder};
-use crate::common::visibility_parser_internal;
-use crate::ty::{ty_parser, TyVariant};
+use crate::common::{
+    field_declaration_parser_internal,
+    emit_field_declaration,
+};
 
 /// Represents a field declaration: (visibility)? (static)? let/var name: Type
 ///
@@ -80,72 +85,15 @@ impl FieldDeclaration {
     }
 }
 
-/// Raw parsed data for field declaration internals
-#[derive(Debug, Clone)]
-struct FieldDeclarationData {
-    visibility: Option<(Token, Span)>,
-    is_static: Option<Span>,
-    mutability_span: Span,
-    is_mutable: bool,
-    name_span: Span,
-    colon_span: Span,
-    ty: TyVariant,
-}
-
-/// Static modifier parser
-fn static_parser_internal() -> impl Parser<Token, Option<Span>, Error = Simple<Token>> + Clone {
-    use crate::common::skip_trivia;
-
-    skip_trivia()
-        .ignore_then(just(Token::Static).map_with_span(|_, span| Some(span)))
-        .or(empty().map(|_| None))
-}
-
-/// Let/var parser - returns (span, is_mutable)
-fn let_var_parser_internal() -> impl Parser<Token, (Span, bool), Error = Simple<Token>> + Clone {
-    use crate::common::skip_trivia;
-
-    skip_trivia()
-        .ignore_then(
-            just(Token::Let)
-                .map_with_span(|_, span| (span, false))
-                .or(just(Token::Var).map_with_span(|_, span| (span, true)))
-        )
-}
-
-/// Internal Chumsky parser for field declaration
-/// Returns: FieldDeclarationData
-fn field_declaration_parser_internal() -> impl Parser<Token, FieldDeclarationData, Error = Simple<Token>> + Clone {
-    use crate::common::skip_trivia;
-
-    visibility_parser_internal()
-        .then(static_parser_internal())
-        .then(let_var_parser_internal())
-        .then(skip_trivia().ignore_then(filter_map(|span, token| match token {
-            Token::Identifier => Ok(span),
-            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-        })))
-        .then(skip_trivia().ignore_then(just(Token::Colon).map_with_span(|_, span| span)))
-        .then(ty_parser())
-        .map(|(((((visibility, is_static), (mutability_span, is_mutable)), name_span), colon_span), ty)| {
-            FieldDeclarationData {
-                visibility,
-                is_static,
-                mutability_span,
-                is_mutable,
-                name_span,
-                colon_span,
-                ty,
-            }
-        })
-}
-
 /// Parse a field declaration and emit events
-/// This is the primary event-driven parser function
+///
+/// This is the primary event-driven parser function for field declarations.
 pub fn parse_field_declaration<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
 {
+    use chumsky::Parser;
+
     let end_pos = source.len();
     let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
 
@@ -154,58 +102,12 @@ where
             emit_field_declaration(sink, data);
         }
         Err(errors) => {
-            // Emit error events for each parse error
             for error in errors {
                 let span = error.span();
                 sink.error_at(format!("Parse error: {:?}", error), span);
             }
         }
     }
-}
-
-/// Emit events for a field declaration
-fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) {
-    sink.start_node(SyntaxKind::FieldDeclaration);
-
-    // Always emit Visibility node (may be empty)
-    sink.start_node(SyntaxKind::Visibility);
-    if let Some((vis_token, vis_span)) = data.visibility {
-        let vis_kind = match vis_token {
-            Token::Public => SyntaxKind::Public,
-            Token::Private => SyntaxKind::Private,
-            Token::Internal => SyntaxKind::Internal,
-            Token::Fileprivate => SyntaxKind::Fileprivate,
-            _ => unreachable!("visibility_parser_internal only returns visibility tokens"),
-        };
-        sink.add_token(vis_kind, vis_span);
-    }
-    sink.finish_node(); // Finish Visibility
-
-    // Emit StaticModifier node if present
-    if let Some(static_span) = data.is_static {
-        sink.start_node(SyntaxKind::StaticModifier);
-        sink.add_token(SyntaxKind::Static, static_span);
-        sink.finish_node();
-    }
-
-    // Emit let or var keyword
-    if data.is_mutable {
-        sink.add_token(SyntaxKind::Var, data.mutability_span);
-    } else {
-        sink.add_token(SyntaxKind::Let, data.mutability_span);
-    }
-
-    // Emit Name node wrapping the identifier
-    sink.start_node(SyntaxKind::Name);
-    sink.add_token(SyntaxKind::Identifier, data.name_span);
-    sink.finish_node(); // Finish Name
-
-    sink.add_token(SyntaxKind::Colon, data.colon_span);
-
-    // Emit the type
-    crate::ty::emit_ty_variant(sink, &data.ty);
-
-    sink.finish_node(); // Finish FieldDeclaration
 }
 
 #[cfg(test)]
