@@ -43,7 +43,7 @@ WHY: Files must be organized into modules for proper scoping and imports
 **Example (invalid):**
 ```kestrel
 // ERROR: no module declaration found in file
-class MyClass { }
+struct MyStruct { }
 ```
 
 ### Rule 2: Module Declaration Must Be First
@@ -104,7 +104,7 @@ Each segment creates a nested scope. The path `A.B.C` means:
 
 Modules create scopes that contain:
 - Imports (names from other modules)
-- Declarations (classes, structs, protocols, functions, type aliases, nested modules)
+- Declarations (structs, protocols, functions, type aliases, nested modules)
 
 Declarations within a module are visible to:
 - Other declarations in the same module (subject to visibility)

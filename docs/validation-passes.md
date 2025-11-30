@@ -19,7 +19,7 @@ Before creating a new pass, check if the validation already exists:
 1. **Existing passes** - Review the passes in `validation/mod.rs`:
    - `FunctionBodyPass` - Functions must have bodies (except in protocols)
    - `ProtocolMethodPass` - Protocol methods cannot have bodies
-   - `StaticContextPass` - `static` only allowed in struct/class/protocol
+   - `StaticContextPass` - `static` only allowed in struct/protocol
    - `DuplicateSymbolPass` - No duplicate types or members
    - `VisibilityConsistencyPass` - Public APIs can't expose private types
 
@@ -42,7 +42,7 @@ Before writing code, define exactly what errors the pass will detect. Create a t
 
 | Condition | Error Message |
 |-----------|---------------|
-| Static function at module level | "static modifier is only allowed inside struct, class, or protocol" |
+| Static function at module level | "static modifier is only allowed inside struct or protocol" |
 
 **Example for `DuplicateSymbolPass`:**
 

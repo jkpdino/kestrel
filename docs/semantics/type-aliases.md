@@ -98,7 +98,7 @@ WHY: Would allow external code to use types they can't directly access
 
 **Example (invalid):**
 ```kestrel
-private class Secret { }
+private struct Secret { }
 public type Exposed = Secret;    // ERROR: public type alias 'Exposed' exposes private type 'Secret'
 ```
 
@@ -253,7 +253,7 @@ type Z = X;                        // ERROR: circular X -> Y -> Z -> X
 type Missing = NoSuchType;         // ERROR: not found
 
 // Visibility violation
-private class Secret { }
+private struct Secret { }
 public type Exposed = Secret;      // ERROR: exposes private type
 ```
 

@@ -96,7 +96,7 @@ Types defined by declarations, identified by name.
 
 | Category | Created By | Example |
 |----------|-----------|---------|
-| Class | `class` declaration | `class MyClass { }` |
+| Struct | `struct` declaration | `struct MyStruct { }` |
 | Struct | `struct` declaration | `struct Point { }` |
 | Protocol | `protocol` declaration | `protocol Drawable { }` |
 | TypeAlias | `type` declaration | `type ID = Int` |
@@ -185,8 +185,8 @@ Tuple and function types use structural equality:
 Nominal types use identity equality (same declaration):
 
 ```
-class A { }
-class B { }
+struct A { }
+struct B { }
 type C = A
 
 A = A          // Equal: same declaration
@@ -259,7 +259,7 @@ let producer: () -> Int
 
 ```kestrel
 // Class type
-class User { }
+struct User { }
 let user: User
 
 // Struct type

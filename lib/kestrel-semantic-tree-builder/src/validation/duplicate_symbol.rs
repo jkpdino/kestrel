@@ -1,7 +1,7 @@
 //! Validation pass for duplicate symbols
 //!
 //! Ensures no duplicate symbols exist within a scope:
-//! - No duplicate type names (struct, class, protocol, type alias)
+//! - No duplicate type names (struct, protocol, type alias)
 //! - No duplicate member names (field, function) within a type
 //!
 //! Note: Function overloading (same name, different signature) is allowed
@@ -50,10 +50,10 @@ fn validate_symbol(
     let kind = symbol.metadata().kind();
 
     // Check for duplicate types in scopes that can contain types
-    // (Module, SourceFile, and potentially nested in Class)
+    // (Module, SourceFile)
     if matches!(
         kind,
-        KestrelSymbolKind::Module | KestrelSymbolKind::SourceFile | KestrelSymbolKind::Class
+        KestrelSymbolKind::Module | KestrelSymbolKind::SourceFile
     ) {
         check_duplicate_types(symbol, diagnostics, config);
     }
@@ -61,7 +61,7 @@ fn validate_symbol(
     // Check for duplicate members in types
     if matches!(
         kind,
-        KestrelSymbolKind::Struct | KestrelSymbolKind::Class | KestrelSymbolKind::Protocol
+        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol
     ) {
         check_duplicate_members(symbol, diagnostics, config);
     }
@@ -88,7 +88,6 @@ fn check_duplicate_types(
         // Only check type-like symbols
         let kind_desc = match child_kind {
             KestrelSymbolKind::Struct => "struct",
-            KestrelSymbolKind::Class => "class",
             KestrelSymbolKind::Protocol => "protocol",
             KestrelSymbolKind::TypeAlias => "type alias",
             _ => continue,
@@ -134,7 +133,7 @@ fn check_duplicate_types(
     }
 }
 
-/// Check for duplicate member names within a type (struct, class, protocol)
+/// Check for duplicate member names within a type (struct, protocol)
 fn check_duplicate_members(
     type_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     diagnostics: &mut DiagnosticContext,
@@ -143,7 +142,6 @@ fn check_duplicate_members(
     let type_name = &type_symbol.metadata().name().value;
     let type_kind = match type_symbol.metadata().kind() {
         KestrelSymbolKind::Struct => "struct",
-        KestrelSymbolKind::Class => "class",
         KestrelSymbolKind::Protocol => "protocol",
         _ => return,
     };

@@ -1,6 +1,6 @@
 # Structs
 
-Structs are value types that can contain fields, methods, and nested type declarations. Unlike classes, structs are typically copied when assigned or passed.
+Structs are value types that can contain fields, methods, and nested type declarations. Unlike structs are typically copied when assigned or passed.
 
 ## Syntax
 
@@ -85,7 +85,7 @@ struct Container {
         let data: String
     }
 
-    class Reference {
+    struct Reference {
         let target: Item
     }
 
@@ -122,7 +122,7 @@ WHY: Ambiguous type reference
 ```kestrel
 struct Container {
     struct Inner { }
-    class Inner { }    // ERROR: duplicate type 'Inner'
+    struct Inner { }    // ERROR: duplicate type 'Inner'
 }
 ```
 
@@ -193,7 +193,7 @@ struct Constants {
 
 ## Struct vs Class
 
-| Aspect | Struct | Class |
+| Aspect | Struct | Struct |
 |--------|--------|-------|
 | Semantics | Value type | Reference type |
 | Copy behavior | Copied on assignment | Reference shared |
@@ -219,14 +219,14 @@ The struct type is created during the build phase and attached via `TypedBehavio
 Structs create a scope containing:
 - Fields (instance and static)
 - Methods (instance and static)
-- Nested types (classes, structs, protocols)
+- Nested types (structs, protocols)
 
 ### Scope Hierarchy
 
 ```
 Module scope
 └── Struct scope
-    ├── Nested class scope
+    ├── Nested struct scope
     ├── Nested struct scope
     └── Nested protocol scope
 ```

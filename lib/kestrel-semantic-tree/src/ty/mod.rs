@@ -2,7 +2,6 @@ mod kind;
 
 pub use kind::{FloatBits, IntBits, TyKind};
 
-use crate::symbol::class::ClassSymbol;
 use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
@@ -85,11 +84,6 @@ impl Ty {
         Self::new(TyKind::Path(segments), span)
     }
 
-    /// Create a class type (resolved)
-    pub fn class(class_symbol: Arc<ClassSymbol>, span: Span) -> Self {
-        Self::new(TyKind::Class(class_symbol), span)
-    }
-
     /// Create a protocol type (resolved)
     pub fn protocol(protocol_symbol: Arc<ProtocolSymbol>, span: Span) -> Self {
         Self::new(TyKind::Protocol(protocol_symbol), span)
@@ -152,11 +146,6 @@ impl Ty {
         matches!(self.kind, TyKind::Path(_))
     }
 
-    /// Check if this is a class type (resolved)
-    pub fn is_class(&self) -> bool {
-        matches!(self.kind, TyKind::Class(_))
-    }
-
     /// Check if this is a protocol type (resolved)
     pub fn is_protocol(&self) -> bool {
         matches!(self.kind, TyKind::Protocol(_))
@@ -214,14 +203,6 @@ impl Ty {
         }
     }
 
-    /// Get class symbol if this is a class type
-    pub fn as_class(&self) -> Option<&Arc<ClassSymbol>> {
-        match &self.kind {
-            TyKind::Class(symbol) => Some(symbol),
-            _ => None,
-        }
-    }
-
     /// Get protocol symbol if this is a protocol type
     pub fn as_protocol(&self) -> Option<&Arc<ProtocolSymbol>> {
         match &self.kind {
@@ -259,7 +240,6 @@ mod tests {
         assert!(!ty.is_tuple());
         assert!(!ty.is_function());
         assert!(!ty.is_path());
-        assert!(!ty.is_class());
         assert!(!ty.is_type_alias());
     }
 
@@ -271,7 +251,6 @@ mod tests {
         assert!(!ty.is_tuple());
         assert!(!ty.is_function());
         assert!(!ty.is_path());
-        assert!(!ty.is_class());
         assert!(!ty.is_type_alias());
     }
 
@@ -320,25 +299,6 @@ mod tests {
         assert_eq!(segments[0], "A");
         assert_eq!(segments[1], "B");
         assert_eq!(segments[2], "C");
-    }
-
-    #[test]
-    fn test_class_type() {
-        // For this test, we just verify the type checking works
-        // We'll create a minimal path type and verify class type methods
-        let ty = Ty::path(vec!["MyClass".to_string()], 0..7);
-
-        // Verify it's a path type (unresolved)
-        assert!(ty.is_path());
-        assert!(!ty.is_class());
-
-        let segments = ty.as_path().unwrap();
-        assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0], "MyClass");
-
-        // Note: Testing actual class type creation would require
-        // creating a ClassSymbol with all dependencies, which is
-        // better tested in integration tests
     }
 
     #[test]

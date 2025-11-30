@@ -139,14 +139,14 @@ The resolved path must point to a module, not a type or other declaration.
 
 ```
 ERROR: CannotImportFromNonModuleError
-WHEN: Import path resolves to a class, struct, protocol, or type alias
+WHEN: Import path resolves to a struct, protocol, or type alias
 WHY: Only modules can contain importable declarations
 ```
 
 **Example:**
 ```kestrel
 module Other
-public class MyClass { }
+public struct MyStruct { }
 
 // In another file:
 import Other.MyClass         // ERROR: cannot import from 'Other.MyClass': not a module
@@ -187,8 +187,8 @@ WHY: Private/fileprivate symbols cannot be imported from outside their scope
 **Example:**
 ```kestrel
 // In module A:
-private class Secret { }
-public class Public { }
+private struct Secret { }
+public struct Public { }
 
 // In module B:
 import A.(Public)    // OK
@@ -213,7 +213,7 @@ WHY: Ambiguous names lead to confusion and errors
 ```kestrel
 module MyApp
 
-class Logger { }           // Local declaration
+struct Logger { }           // Local declaration
 
 import Utils               // Utils contains Logger
 // ERROR: 'Logger' is already declared

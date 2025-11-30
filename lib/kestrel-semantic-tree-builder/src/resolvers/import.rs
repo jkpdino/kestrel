@@ -299,7 +299,7 @@ fn check_whole_module_import_conflicts(
                     // and local declarations for now
                 }
             }
-            KestrelSymbolKind::Class | KestrelSymbolKind::TypeAlias => {
+            KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol | KestrelSymbolKind::TypeAlias => {
                 // Local declaration - use the name span for more precise error reporting
                 let name = sibling.metadata().name().value.clone();
                 let name_span = sibling.metadata().name().span.clone();

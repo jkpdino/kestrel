@@ -138,10 +138,6 @@ impl SignatureType {
                 return_type: Box::new(SignatureType::from_ty(return_type)),
             },
             TyKind::Path(segments) => SignatureType::Named(segments.clone()),
-            TyKind::Class(class) => {
-                // Use the class name as the type name
-                SignatureType::Named(vec![class.metadata().name().value.clone()])
-            }
             TyKind::Struct(s) => {
                 SignatureType::Named(vec![s.metadata().name().value.clone()])
             }

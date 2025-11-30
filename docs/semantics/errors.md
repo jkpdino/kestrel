@@ -31,7 +31,7 @@ Source:   lib/kestrel-semantic-tree-builder/src/diagnostics.rs
 **Example:**
 ```kestrel
 // file.kes - missing module declaration
-class MyClass { }    // ERROR
+struct MyStruct { }    // ERROR
 ```
 
 ---
@@ -122,21 +122,21 @@ import Utils.(Logger, Missing)    // ERROR: 'Missing' not found
 ### CannotImportFromNonModuleError
 
 ```
-When:     Import path resolves to non-module (class, struct, etc.)
+When:     Import path resolves to non-module (struct, etc.)
 Why:      Only modules can contain importable declarations
 Message:  "cannot import from '{path}': not a module"
 Source:   lib/kestrel-semantic-tree/src/error.rs
 ```
 
 **Fields:**
-- `symbol_kind`: Kind of symbol found (e.g., "class")
+- `symbol_kind`: Kind of symbol found (e.g., "struct")
 - `path`: The import path
 - `path_span`: Span of the path
 
 **Example:**
 ```kestrel
-// Other.MyClass is a class, not a module
-import Other.MyClass    // ERROR: cannot import from class
+// Other.MyClass is a struct, not a module
+import Other.MyClass    // ERROR: cannot import from struct
 ```
 
 ---
@@ -161,7 +161,7 @@ Source:   lib/kestrel-semantic-tree/src/error.rs
 **Example:**
 ```kestrel
 // In module A:
-private class Secret { }
+private struct Secret { }
 
 // In module B:
 import A.(Secret)    // ERROR: 'Secret' is not accessible (private)
@@ -186,7 +186,7 @@ Source:   lib/kestrel-semantic-tree/src/error.rs
 
 **Example:**
 ```kestrel
-class Logger { }
+struct Logger { }
 import Utils    // Utils has Logger -> ERROR: 'Logger' already declared
 ```
 
@@ -231,7 +231,7 @@ Source:   lib/kestrel-semantic-tree-builder/src/validation/function_body.rs
 ```kestrel
 func compute() -> Int    // ERROR: requires body
 
-class Service {
+struct Service {
     func process()       // ERROR: requires body
 }
 ```
@@ -276,9 +276,9 @@ func process(x: Int) { }    // ERROR: duplicate signature
 ### Static Modifier Invalid Context
 
 ```
-When:     static used outside struct/class/protocol
+When:     static used outside struct/protocol
 Why:      static only meaningful inside types
-Message:  "static modifier is only allowed inside struct, class, or protocol"
+Message:  "static modifier is only allowed inside struct or protocol"
 Source:   lib/kestrel-semantic-tree-builder/src/validation/static_context.rs
 ```
 
@@ -304,7 +304,7 @@ Source:   lib/kestrel-semantic-tree-builder/src/validation/duplicate_symbol.rs
 
 **Example:**
 ```kestrel
-class Item { }
+struct Item { }
 struct Item { }    // ERROR: duplicate type 'Item'
 ```
 
@@ -326,7 +326,7 @@ struct Bad {
     let x: String    // ERROR: duplicate member 'x'
 }
 
-class AlsoBad {
+struct AlsoBad {
     let value: Int
     func value() { }  // ERROR: duplicate member 'value'
 }
@@ -347,7 +347,7 @@ Source:   lib/kestrel-semantic-tree-builder/src/validation/visibility_consistenc
 
 **Example:**
 ```kestrel
-private class Secret { }
+private struct Secret { }
 public func getSecret() -> Secret { }    // ERROR
 ```
 
@@ -364,7 +364,7 @@ Source:   lib/kestrel-semantic-tree-builder/src/validation/visibility_consistenc
 
 **Example:**
 ```kestrel
-private class Config { }
+private struct Config { }
 public func configure(c: Config) { }    // ERROR
 ```
 
@@ -381,7 +381,7 @@ Source:   lib/kestrel-semantic-tree-builder/src/validation/visibility_consistenc
 
 **Example:**
 ```kestrel
-private class Impl { }
+private struct Impl { }
 public type API = Impl;    // ERROR
 ```
 
@@ -398,8 +398,8 @@ Source:   lib/kestrel-semantic-tree-builder/src/validation/visibility_consistenc
 
 **Example:**
 ```kestrel
-private class Data { }
-public class Container {
+private struct Data { }
+public struct Container {
     public let data: Data    // ERROR
 }
 ```
@@ -515,7 +515,7 @@ Some errors reference multiple files:
 ```kestrel
 // file_a.kes
 module A
-private class Secret { }
+private struct Secret { }
 
 // file_b.kes
 module B

@@ -98,7 +98,7 @@ func copy(from source: String, to target: String) { }
 ### Static Functions
 
 ```kestrel
-class Math {
+struct Math {
     static func square(x: Int) -> Int { }
     static func max(a: Int, b: Int) -> Int { }
 }
@@ -127,7 +127,7 @@ func connect(with options: Options) { }
 
 ### Rule 1: Functions Outside Protocols Must Have Bodies
 
-Functions declared at module level, in classes, or in structs must include a body.
+Functions declared at module level, in structs, or in structs must include a body.
 
 ```
 ERROR: FunctionBodyPass error
@@ -139,7 +139,7 @@ WHY: Implementation is required for non-protocol functions
 ```kestrel
 func compute() -> Int    // ERROR: function 'compute' requires a body
 
-class Calculator {
+struct Calculator {
     func add(a: Int, b: Int) -> Int    // ERROR: requires a body
 }
 ```
@@ -148,7 +148,7 @@ class Calculator {
 ```kestrel
 func compute() -> Int { }    // OK: has body
 
-class Calculator {
+struct Calculator {
     func add(a: Int, b: Int) -> Int { }    // OK: has body
 }
 ```
@@ -216,7 +216,7 @@ func send(using x: String) { }           // OK: different labels
 
 ### Rule 4: Static Modifier Only in Types
 
-The `static` keyword can only be used inside struct, class, or protocol declarations.
+The `static` keyword can only be used inside struct or protocol declarations.
 
 ```
 ERROR: StaticContextPass error
@@ -228,13 +228,13 @@ WHY: static only makes sense relative to an enclosing type
 ```kestrel
 module MyApp
 
-static func utility() { }    // ERROR: static modifier only allowed inside struct, class, or protocol
+static func utility() { }    // ERROR: static modifier only allowed inside struct or protocol
 ```
 
 **Example (valid):**
 ```kestrel
-class Helper {
-    static func utility() { }    // OK: inside class
+struct Helper {
+    static func utility() { }    // OK: inside struct
 }
 
 struct Math {
@@ -254,7 +254,7 @@ WHY: External code couldn't use the function due to inaccessible types
 
 **Example (invalid):**
 ```kestrel
-private class Secret { }
+private struct Secret { }
 
 public func getSecret() -> Secret { }              // ERROR: exposes private type
 public func processSecret(s: Secret) { }           // ERROR: exposes private type in parameter
@@ -353,7 +353,7 @@ Preconditions:
     - No duplicate signature in same scope
     - Has body unless in protocol
     - No body if in protocol
-    - static only if inside class/struct/protocol
+    - static only if inside struct/protocol
 
 Effect:
     - Creates FunctionSymbol with name f

@@ -92,7 +92,7 @@ impl FunctionDeclaration {
 /// - bind_name is the internal parameter name (used in function body)
 /// - If only one name is provided, it's used as both label and bind_name
 #[derive(Debug, Clone)]
-pub struct ParameterData {
+pub(crate) struct ParameterData {
     /// Optional label (external name for callers)
     /// If None, bind_name is used as the label
     pub label: Option<Span>,
@@ -409,33 +409,6 @@ fn emit_return_type(sink: &mut EventSink, arrow_span: Span, return_ty: TyVariant
     sink.finish_node(); // Finish ReturnType
 }
 
-/// Emit events for a function declaration from DeclarationItemData
-/// This is used by the declaration_item parser
-pub(crate) fn emit_function_declaration_from_data(
-    sink: &mut EventSink,
-    visibility: Option<(Token, Span)>,
-    is_static: Option<Span>,
-    fn_span: Span,
-    name_span: Span,
-    lparen: Span,
-    parameters: Vec<ParameterData>,
-    rparen: Span,
-    return_type: Option<(Span, TyVariant)>,
-    body: Option<(Span, Span)>,
-) {
-    let data = FunctionDeclarationData {
-        visibility,
-        is_static,
-        fn_span,
-        name_span,
-        lparen,
-        parameters,
-        rparen,
-        return_type,
-        body,
-    };
-    emit_function_declaration(sink, data);
-}
 
 #[cfg(test)]
 mod tests {

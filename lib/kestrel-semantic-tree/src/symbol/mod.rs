@@ -1,4 +1,3 @@
-pub mod class;
 pub mod field;
 pub mod function;
 pub mod import;

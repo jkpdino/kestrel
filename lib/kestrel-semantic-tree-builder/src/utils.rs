@@ -49,15 +49,6 @@ pub fn extract_visibility(syntax: &SyntaxNode) -> Option<String> {
     Some(vis_text.to_string())
 }
 
-/// Check if a SyntaxKind is a declaration type
-pub fn is_declaration(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::ClassDeclaration
-            | SyntaxKind::ImportDeclaration
-            | SyntaxKind::ModuleDeclaration
-    )
-}
 
 /// Check if a SyntaxKind is trivia (whitespace or comment)
 fn is_trivia_kind(kind: SyntaxKind) -> bool {

@@ -6,12 +6,12 @@ mod basic {
     #[test]
     fn import_module() {
         Test::with_files(&[
-            ("library.ks", "module Library\npublic class PublicClass {}"),
-            ("consumer.ks", "module Consumer\nimport Library\nclass UsesPublic {}"),
+            ("library.ks", "module Library\npublic struct PublicClass {}"),
+            ("consumer.ks", "module Consumer\nimport Library\nstruct UsesPublic {}"),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Class))
-        .expect(Symbol::new("UsesPublic").is(SymbolKind::Class));
+        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct))
+        .expect(Symbol::new("UsesPublic").is(SymbolKind::Struct));
     }
 
     #[test]
@@ -19,41 +19,41 @@ mod basic {
         Test::with_files(&[
             (
                 "library.ks",
-                "module Library\npublic class PublicClass {}\npublic type PublicAlias = PublicClass;",
+                "module Library\npublic struct PublicClass {}\npublic type PublicAlias = PublicClass;",
             ),
             (
                 "consumer.ks",
-                "module SpecificImport\nimport Library.(PublicClass, PublicAlias)\nclass MyClass {}",
+                "module SpecificImport\nimport Library.(PublicClass, PublicAlias)\nstruct MyClass {}",
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("MyClass").is(SymbolKind::Class));
+        .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 
     #[test]
     fn import_with_module_alias() {
         Test::with_files(&[
-            ("library.ks", "module Library\npublic class PublicClass {}"),
+            ("library.ks", "module Library\npublic struct PublicClass {}"),
             (
                 "consumer.ks",
-                "module AliasedImport\nimport Library as Lib\nclass MyClass {}",
+                "module AliasedImport\nimport Library as Lib\nstruct MyClass {}",
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("MyClass").is(SymbolKind::Class));
+        .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 
     #[test]
     fn import_with_item_alias() {
         Test::with_files(&[
-            ("library.ks", "module Library\npublic class PublicClass {}"),
+            ("library.ks", "module Library\npublic struct PublicClass {}"),
             (
                 "consumer.ks",
-                "module AliasedImport\nimport Library.(PublicClass as PC)\nclass MyClass {}",
+                "module AliasedImport\nimport Library.(PublicClass as PC)\nstruct MyClass {}",
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("MyClass").is(SymbolKind::Class));
+        .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 }
 
@@ -63,12 +63,12 @@ mod nested_modules {
     #[test]
     fn import_top_level_module() {
         Test::with_files(&[
-            ("math.ks", "module Math\npublic class Vector {}\npublic class Matrix {}"),
-            ("consumer.ks", "module NestedConsumer\nimport Math\nclass MyApp {}"),
+            ("math.ks", "module Math\npublic struct Vector {}\npublic struct Matrix {}"),
+            ("consumer.ks", "module NestedConsumer\nimport Math\nstruct MyApp {}"),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("Vector").is(SymbolKind::Class))
-        .expect(Symbol::new("MyApp").is(SymbolKind::Class));
+        .expect(Symbol::new("Vector").is(SymbolKind::Struct))
+        .expect(Symbol::new("MyApp").is(SymbolKind::Struct));
     }
 
     #[test]
@@ -76,16 +76,16 @@ mod nested_modules {
         Test::with_files(&[
             (
                 "math_geometry.ks",
-                "module Math.Geometry\npublic class Point {}\npublic class Circle {}",
+                "module Math.Geometry\npublic struct Point {}\npublic struct Circle {}",
             ),
             (
                 "consumer.ks",
-                "module NestedConsumer\nimport Math.Geometry\nclass MyApp {}",
+                "module NestedConsumer\nimport Math.Geometry\nstruct MyApp {}",
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Class))
-        .expect(Symbol::new("Circle").is(SymbolKind::Class));
+        .expect(Symbol::new("Point").is(SymbolKind::Struct))
+        .expect(Symbol::new("Circle").is(SymbolKind::Struct));
     }
 
     #[test]
@@ -93,15 +93,15 @@ mod nested_modules {
         Test::with_files(&[
             (
                 "math_geometry.ks",
-                "module Math.Geometry\npublic class Point {}\npublic class Line {}\npublic class Circle {}",
+                "module Math.Geometry\npublic struct Point {}\npublic struct Line {}\npublic struct Circle {}",
             ),
             (
                 "consumer.ks",
-                "module NestedConsumer\nimport Math.Geometry.(Point, Circle)\nclass MyApp {}",
+                "module NestedConsumer\nimport Math.Geometry.(Point, Circle)\nstruct MyApp {}",
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("MyApp").is(SymbolKind::Class));
+        .expect(Symbol::new("MyApp").is(SymbolKind::Struct));
     }
 
     #[test]
@@ -109,15 +109,15 @@ mod nested_modules {
         Test::with_files(&[
             (
                 "math_algebra.ks",
-                "module Math.Algebra\npublic class Polynomial {}\npublic class Equation {}",
+                "module Math.Algebra\npublic struct Polynomial {}\npublic struct Equation {}",
             ),
             (
                 "consumer.ks",
-                "module NestedConsumer\nimport Math.Algebra as Alg\nclass MyApp {}",
+                "module NestedConsumer\nimport Math.Algebra as Alg\nstruct MyApp {}",
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("MyApp").is(SymbolKind::Class));
+        .expect(Symbol::new("MyApp").is(SymbolKind::Struct));
     }
 }
 
@@ -127,11 +127,11 @@ mod visibility {
     #[test]
     fn import_public_class() {
         Test::with_files(&[
-            ("library.ks", "module Library\npublic class PublicClass {}"),
-            ("consumer.ks", "module Consumer\nimport Library\nclass UsesPublic {}"),
+            ("library.ks", "module Library\npublic struct PublicClass {}"),
+            ("consumer.ks", "module Consumer\nimport Library\nstruct UsesPublic {}"),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Class));
+        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct));
     }
 
     #[test]
@@ -139,11 +139,11 @@ mod visibility {
         Test::with_files(&[
             (
                 "library.ks",
-                "module Library\npublic class PublicClass {}\npublic type PublicAlias = PublicClass;",
+                "module Library\npublic struct PublicClass {}\npublic type PublicAlias = PublicClass;",
             ),
             (
                 "consumer.ks",
-                "module Consumer\nimport Library.(PublicAlias)\nclass MyClass {}",
+                "module Consumer\nimport Library.(PublicAlias)\nstruct MyClass {}",
             ),
         ])
         .expect(Compiles)
@@ -155,12 +155,12 @@ mod visibility {
         Test::with_files(&[
             (
                 "internal_lib.ks",
-                "module InternalLib\ninternal class InternalClass {}\npublic class PublicClass {}",
+                "module InternalLib\ninternal struct InternalClass {}\npublic struct PublicClass {}",
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("InternalClass").is(SymbolKind::Class))
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Class));
+        .expect(Symbol::new("InternalClass").is(SymbolKind::Struct))
+        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct));
     }
 }
 
@@ -171,15 +171,15 @@ mod conflicts {
     #[test]
     fn resolve_conflict_with_aliases() {
         Test::with_files(&[
-            ("module_a.ks", "module ModuleA\npublic class Widget {}\npublic class Helper {}"),
-            ("module_b.ks", "module ModuleB\npublic class Widget {}\npublic class Utility {}"),
+            ("module_a.ks", "module ModuleA\npublic struct Widget {}\npublic struct Helper {}"),
+            ("module_b.ks", "module ModuleB\npublic struct Widget {}\npublic struct Utility {}"),
             (
                 "consumer.ks",
-                "module AliasedConsumer\nimport ModuleA.(Widget as WidgetA)\nimport ModuleB.(Widget as WidgetB)\nclass MyClass {}",
+                "module AliasedConsumer\nimport ModuleA.(Widget as WidgetA)\nimport ModuleB.(Widget as WidgetB)\nstruct MyClass {}",
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("MyClass").is(SymbolKind::Class));
+        .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 }
 

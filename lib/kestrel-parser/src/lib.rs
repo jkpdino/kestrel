@@ -61,7 +61,6 @@ pub mod event;
 pub mod common;
 pub mod module;
 pub mod import;
-pub mod class;
 pub mod protocol;
 pub mod r#struct;
 pub mod field;
@@ -78,7 +77,6 @@ use event::{EventSink, TreeBuilder};
 // Re-export commonly used types
 pub use module::{ModuleDeclaration, ModulePath};
 pub use import::ImportDeclaration;
-pub use class::ClassDeclaration;
 pub use protocol::ProtocolDeclaration;
 pub use r#struct::StructDeclaration;
 pub use field::FieldDeclaration;
@@ -90,7 +88,6 @@ pub use ty::TyExpression;
 // Re-export event-driven parse functions
 pub use module::{parse_module_declaration, parse_module_path};
 pub use import::parse_import_declaration;
-pub use class::parse_class_declaration;
 pub use protocol::parse_protocol_declaration;
 pub use r#struct::parse_struct_declaration;
 pub use field::parse_field_declaration;
@@ -139,21 +136,6 @@ where
     import::parse_import_declaration(source, tokens, &mut sink);
     let tree = TreeBuilder::new(source, sink.into_events()).build();
     ImportDeclaration {
-        syntax: tree,
-        span: 0..source.len(),
-    }
-}
-
-/// Convenience function to parse a class declaration from source and tokens
-/// Returns a fully built ClassDeclaration with its syntax tree
-pub fn parse_class_declaration_from_source<I>(source: &str, tokens: I) -> ClassDeclaration
-where
-    I: Iterator<Item = (Token, Span)> + Clone,
-{
-    let mut sink = EventSink::new();
-    class::parse_class_declaration(source, tokens, &mut sink);
-    let tree = TreeBuilder::new(source, sink.into_events()).build();
-    ClassDeclaration {
         syntax: tree,
         span: 0..source.len(),
     }

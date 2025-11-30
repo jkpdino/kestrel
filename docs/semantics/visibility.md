@@ -19,7 +19,7 @@ Visibility → PUBLIC | PRIVATE | INTERNAL | FILEPRIVATE
 ### Public
 
 ```kestrel
-public class API { }
+public struct API { }
 public func process() { }
 ```
 
@@ -30,8 +30,8 @@ public func process() { }
 ### Internal (Default)
 
 ```kestrel
-internal class Helper { }
-class Helper { }           // Same as above (default)
+internal struct Helper { }
+struct Helper { }           // Same as above (default)
 func utility() { }         // Default is internal
 ```
 
@@ -43,7 +43,7 @@ func utility() { }         // Default is internal
 ### Fileprivate
 
 ```kestrel
-fileprivate class FileHelper { }
+fileprivate struct FileHelper { }
 fileprivate func fileUtility() { }
 ```
 
@@ -54,7 +54,7 @@ fileprivate func fileUtility() { }
 ### Private
 
 ```kestrel
-private class Secret { }
+private struct Secret { }
 private func internalImpl() { }
 ```
 
@@ -79,17 +79,17 @@ Private (1)     Least visible - accessible within declaring scope
 Each symbol has a **visibility scope** that determines where private access is allowed:
 
 ```kestrel
-class Outer {
+struct Outer {
     private let secret: Int    // visibility_scope = Outer
 
-    class Inner {
+    struct Inner {
         func useSecret() {
             // Can access Outer.secret because Inner is inside Outer
         }
     }
 }
 
-class Other {
+struct Other {
     func tryAccess(o: Outer) {
         // Cannot access o.secret - Other is not inside Outer
     }
@@ -101,7 +101,7 @@ class Other {
 | Declaration Context | Visibility Scope |
 |--------------------|------------------|
 | Module-level | The module |
-| Inside class | The class |
+| Inside struct | The struct |
 | Inside struct | The struct |
 | Inside protocol | The protocol |
 | Nested type | The enclosing type |
@@ -155,7 +155,7 @@ WHY: Callers couldn't use the return value's type
 
 **Example (invalid):**
 ```kestrel
-private class Secret { }
+private struct Secret { }
 
 public func getSecret() -> Secret { }    // ERROR: exposes private type
 ```
@@ -170,7 +170,7 @@ WHY: Callers couldn't provide arguments of the required type
 
 **Example (invalid):**
 ```kestrel
-private class Config { }
+private struct Config { }
 
 public func configure(c: Config) { }    // ERROR: exposes private type in parameter
 ```
@@ -185,7 +185,7 @@ WHY: Users of the alias couldn't access the underlying type
 
 **Example (invalid):**
 ```kestrel
-private class Impl { }
+private struct Impl { }
 
 public type API = Impl;    // ERROR: exposes private type
 ```
@@ -200,9 +200,9 @@ WHY: Users couldn't work with the field's value
 
 **Example (invalid):**
 ```kestrel
-private class Data { }
+private struct Data { }
 
-public class Container {
+public struct Container {
     public let data: Data    // ERROR: exposes private type
 }
 ```
@@ -221,8 +221,8 @@ WHEN: Trying to import a symbol with insufficient visibility
 **Example:**
 ```kestrel
 // In module A:
-private class Secret { }
-public class Public { }
+private struct Secret { }
+public struct Public { }
 
 // In module B:
 import A.(Public)    // OK
@@ -235,8 +235,8 @@ When doing `import M`, only visible symbols are imported:
 
 ```kestrel
 // In module Lib:
-public class PublicClass { }
-private class PrivateClass { }
+public struct PublicClass { }
+private struct PrivateStruct { }
 
 // In module App:
 import Lib    // Only PublicClass is imported, not PrivateClass
@@ -250,7 +250,7 @@ import Lib    // Only PublicClass is imported, not PrivateClass
 module MyLib
 
 // Public API
-public class Client {
+public struct Client {
     public func connect() { }
     public func disconnect() { }
 
@@ -260,7 +260,7 @@ public class Client {
 }
 
 // Internal helper, not part of public API
-internal class Socket {
+internal struct Socket {
     func open() { }
     func close() { }
 }
@@ -272,7 +272,7 @@ fileprivate func log(message: String) { }
 ### Encapsulation
 
 ```kestrel
-public class Account {
+public struct Account {
     // Public read-only identifier
     public let id: Int
 
@@ -294,14 +294,14 @@ public class Account {
 ### Nested Types
 
 ```kestrel
-public class Outer {
+public struct Outer {
     // Private nested type
-    private class PrivateInner {
+    private struct PrivateInner {
         let value: Int
     }
 
     // Public nested type
-    public class PublicInner {
+    public struct PublicInner {
         let data: String
     }
 
@@ -374,7 +374,7 @@ struct VisibilityBehavior {
 If no visibility modifier is specified, the default is `Internal`:
 
 ```kestrel
-class MyClass { }          // internal
+struct MyStruct { }          // internal
 func myFunc() { }          // internal
 struct MyStruct { }        // internal
 let myField: Int           // internal (inside a type)

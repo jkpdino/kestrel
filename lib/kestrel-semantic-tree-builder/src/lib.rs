@@ -84,7 +84,7 @@ impl Symbol<KestrelLanguage> for RootSymbol {
 impl RootSymbol {
     fn new(source_span: std::ops::Range<usize>) -> Self {
         let name = Spanned::new("<root>".to_string(), 0..0);
-        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Class) // TODO: Add RootSymbolKind
+        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module) // TODO: Add RootSymbolKind
             .with_name(name)
             .with_declaration_span(0..0)
             .with_span(source_span)
@@ -106,7 +106,7 @@ impl RootSymbol {
 /// Returns: Option<(ModuleDeclaration node, path segments)>
 fn validate_and_extract_module_declaration(
     syntax: &SyntaxNode,
-    source: &str,
+    _source: &str,
     diagnostics: &mut DiagnosticContext,
     file_id: usize,
 ) -> Option<(SyntaxNode, Vec<String>)> {
@@ -574,7 +574,7 @@ fn follow_type_alias_chain(
 
 /// Check for duplicate function signatures within each scope.
 ///
-/// This walks the symbol tree and for each scope (module, struct, class),
+/// This walks the symbol tree and for each scope (module, struct),
 /// checks if there are multiple functions with the same signature.
 fn check_duplicate_signatures(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
@@ -585,12 +585,11 @@ fn check_duplicate_signatures(
 
     let kind = symbol.metadata().kind();
 
-    // Scopes that can contain functions: Module, Struct, Class, SourceFile
+    // Scopes that can contain functions: Module, Struct, SourceFile
     let is_scope = matches!(
         kind,
         KestrelSymbolKind::Module
             | KestrelSymbolKind::Struct
-            | KestrelSymbolKind::Class
             | KestrelSymbolKind::SourceFile
     );
 
@@ -703,7 +702,6 @@ fn bind_symbol(
     // Map symbol kind to syntax kind for resolver lookup
     let syntax_kind = match kind {
         KestrelSymbolKind::Import => Some(SyntaxKind::ImportDeclaration),
-        KestrelSymbolKind::Class => Some(SyntaxKind::ClassDeclaration),
         KestrelSymbolKind::Protocol => Some(SyntaxKind::ProtocolDeclaration),
         KestrelSymbolKind::Struct => Some(SyntaxKind::StructDeclaration),
         KestrelSymbolKind::Field => Some(SyntaxKind::FieldDeclaration),
@@ -798,7 +796,6 @@ fn format_type(ty: &Ty) -> String {
             )
         }
         TyKind::Path(segments) => segments.join("."),
-        TyKind::Class(class_symbol) => class_symbol.metadata().name().value.clone(),
         TyKind::Protocol(protocol_symbol) => protocol_symbol.metadata().name().value.clone(),
         TyKind::Struct(struct_symbol) => struct_symbol.metadata().name().value.clone(),
         TyKind::TypeAlias(type_alias_symbol) => type_alias_symbol.metadata().name().value.clone(),

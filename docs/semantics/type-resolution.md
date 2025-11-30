@@ -136,7 +136,7 @@ Types are resolved in the context of the symbol that contains them:
 ### Function Parameter Types
 
 ```kestrel
-class Container {
+struct Container {
     func process(x: Item) { }
     //              ^^^^ resolved in context of Container
 }
@@ -356,7 +356,7 @@ EXAMPLE: type A = B; type B = A
 ```kestrel
 module App
 
-class User { }
+struct User { }
 
 func process(u: User) { }
 //              ^^^^ Path(["User"])
@@ -382,8 +382,8 @@ func process(u: Models.User) { }
 ```kestrel
 module App
 
-class Request { }
-class Response { }
+struct Request { }
+struct Response { }
 
 type Handler = (Request) -> Response
 //             ^^^^^^^^^ resolve_type recursively:
@@ -397,14 +397,14 @@ type Handler = (Request) -> Response
 ```kestrel
 module App
 
-class Container {
-    class Item { }
+struct Container {
+    struct Item { }
 }
 
 func get() -> Container.Item { }
 //            ^^^^^^^^^^^^^^ Path(["Container", "Item"])
 //            Phase 1: "Container" found in module scope
-//            Phase 2: "Item" found as nested class in Container
+//            Phase 2: "Item" found as nested struct in Container
 ```
 
 ## Formal Semantics

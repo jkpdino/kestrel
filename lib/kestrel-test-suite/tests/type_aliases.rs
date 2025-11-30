@@ -231,7 +231,7 @@ mod mixed_features {
     #[test]
     fn type_alias_with_imports() {
         Test::with_files(&[
-            ("collections.ks", "module System.Collections\npublic class Array {}"),
+            ("collections.ks", "module System.Collections\npublic struct Array {}"),
             (
                 "graphics.ks",
                 "module Graphics\nimport System.Collections\npublic type Color = RGB;\ntype Position = Point2D;",
@@ -248,14 +248,14 @@ mod mixed_features {
             r#"module Graphics
             public type Color = RGB;
             type Position = Point2D;
-            class Shape {}
+            struct Shape {}
             type Point = Coordinate;
         "#,
         )
         .expect(Compiles)
         .expect(Symbol::new("Color").is(SymbolKind::TypeAlias))
         .expect(Symbol::new("Position").is(SymbolKind::TypeAlias))
-        .expect(Symbol::new("Shape").is(SymbolKind::Class))
+        .expect(Symbol::new("Shape").is(SymbolKind::Struct))
         .expect(Symbol::new("Point").is(SymbolKind::TypeAlias));
     }
 
@@ -264,13 +264,13 @@ mod mixed_features {
         Test::new(
             r#"module Graphics
             type Point = Coordinate;
-            class Triangle {}
+            struct Triangle {}
             type Angle = Degree;
         "#,
         )
         .expect(Compiles)
         .expect(Symbol::new("Point").is(SymbolKind::TypeAlias))
-        .expect(Symbol::new("Triangle").is(SymbolKind::Class))
+        .expect(Symbol::new("Triangle").is(SymbolKind::Struct))
         .expect(Symbol::new("Angle").is(SymbolKind::TypeAlias));
     }
 }

@@ -10,7 +10,7 @@ Kestrel is a statically-typed language with:
 - Swift-style labeled function parameters
 - Function overloading
 - Protocols for interface definitions
-- Classes and structs for data types
+- Structs for data types
 - Type aliases
 
 ## Compilation Phases
@@ -23,7 +23,7 @@ Converts tokens into a syntax tree. The parser uses error recovery to continue a
 
 ### Phase 3: Semantic Analysis (Build)
 Creates semantic symbols from syntax nodes:
-- Extracts declarations (classes, structs, functions, etc.)
+- Extracts declarations (structs, functions, etc.)
 - Creates symbol table entries
 - Stores unresolved type paths
 
@@ -52,7 +52,6 @@ Runs validation passes:
 
 ### Declarations
 - [Functions](functions.md) - Function declarations and overloading
-- [Classes](classes.md) - Class declarations
 - [Structs](structs.md) - Struct declarations
 - [Protocols](protocols.md) - Protocol declarations
 - [Fields](fields.md) - Field declarations

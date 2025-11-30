@@ -32,7 +32,7 @@ struct Scope {
 Root (implicit)
 └── Module scope
     ├── Class scope
-    │   ├── Nested class scope
+    │   ├── Nested struct scope
     │   └── Method scope (future)
     ├── Struct scope
     │   └── Method scope (future)
@@ -44,7 +44,7 @@ Root (implicit)
 | Symbol Kind | Creates Scope |
 |-------------|---------------|
 | Module | Yes |
-| Class | Yes |
+| Struct | Yes |
 | Struct | Yes |
 | Protocol | Yes |
 | SourceFile | Yes (transparent) |
@@ -61,7 +61,7 @@ Root (implicit)
 // file.kes
 module MyApp
 
-class MyClass { }    // MyClass is in SourceFile, but visible as MyApp.MyClass
+struct MyStruct { }    // MyClass is in SourceFile, but visible as MyApp.MyClass
 ```
 
 ## Resolution Algorithm
@@ -116,7 +116,7 @@ module MyApp
 
 import Utils.(Logger)    // Logger added to imports
 
-class MyClass {
+struct MyStruct {
     func log() {
         Logger.info()    // Found via imports
     }
@@ -134,10 +134,10 @@ Names in inner scopes shadow names in outer scopes:
 ```kestrel
 module MyApp
 
-class Logger { }    // Module-level Logger
+struct Logger { }    // Module-level Logger
 
-class Service {
-    class Logger { }    // Nested Logger shadows module-level
+struct Service {
+    struct Logger { }    // Nested Logger shadows module-level
 
     func process() {
         // Logger refers to Service.Logger, not MyApp.Logger
@@ -152,11 +152,11 @@ Imports shadow names from parent scopes:
 ```kestrel
 module MyApp
 
-class Helper { }
+struct Helper { }
 
-class Service {
+struct Service {
     // This import would shadow MyApp.Helper in this scope
-    // (if imports inside classes were supported)
+    // (if imports inside structs were supported)
 }
 ```
 
@@ -167,7 +167,7 @@ Whole-module imports cannot shadow local declarations—this is an error:
 ```kestrel
 module MyApp
 
-class Logger { }
+struct Logger { }
 
 import Utils    // If Utils has Logger, this is an ImportConflictError
 ```
@@ -217,8 +217,8 @@ module App
 
 import Lib
 
-class Container {
-    class Item { }
+struct Container {
+    struct Item { }
 }
 
 // Path resolution:
@@ -317,9 +317,9 @@ For functions, overload resolution (future) will select based on arguments.
 ```kestrel
 module App
 
-class Helper { }
+struct Helper { }
 
-class Service {
+struct Service {
     func process() {
         // "Helper" resolved:
         // 1. Check Service scope imports: not found
@@ -338,7 +338,7 @@ module App
 
 import Utils.(Logger)
 
-class Service {
+struct Service {
     func process() {
         // "Logger" resolved:
         // 1. Check Service scope imports: not found
@@ -356,7 +356,7 @@ module App
 
 import Lib
 
-class Service {
+struct Service {
     func process() {
         // "Lib.Helper" resolved:
         // Phase 1: "Lib" found via import
@@ -371,10 +371,10 @@ class Service {
 ```kestrel
 module App
 
-class Config { }
+struct Config { }
 
-class Service {
-    class Config { }    // Shadows App.Config
+struct Service {
+    struct Config { }    // Shadows App.Config
 
     func process() {
         // "Config" refers to Service.Config (inner scope wins)

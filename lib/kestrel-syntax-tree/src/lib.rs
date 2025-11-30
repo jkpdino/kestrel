@@ -39,8 +39,6 @@ pub enum SyntaxKind {
     Root,
     SourceFile,
     DeclarationItem,
-    ClassDeclaration,
-    ClassBody,
     ProtocolDeclaration,
     ProtocolBody,
     StructDeclaration,
@@ -85,7 +83,6 @@ pub enum SyntaxKind {
 
     // Keywords
     As,
-    Class,
     Else,
     Fileprivate,
     Func,
@@ -156,7 +153,6 @@ impl From<Token> for SyntaxKind {
             Token::Null => SyntaxKind::Null,
             // Keywords
             Token::As => SyntaxKind::As,
-            Token::Class => SyntaxKind::Class,
             Token::Else => SyntaxKind::Else,
             Token::Fileprivate => SyntaxKind::Fileprivate,
             Token::Func => SyntaxKind::Func,
@@ -207,8 +203,6 @@ impl Language for KestrelLanguage {
         const ROOT: u16 = SyntaxKind::Root as u16;
         const SOURCE_FILE: u16 = SyntaxKind::SourceFile as u16;
         const DECLARATION_ITEM: u16 = SyntaxKind::DeclarationItem as u16;
-        const CLASS_DECLARATION: u16 = SyntaxKind::ClassDeclaration as u16;
-        const CLASS_BODY: u16 = SyntaxKind::ClassBody as u16;
         const PROTOCOL_DECLARATION: u16 = SyntaxKind::ProtocolDeclaration as u16;
         const PROTOCOL_BODY: u16 = SyntaxKind::ProtocolBody as u16;
         const STRUCT_DECLARATION: u16 = SyntaxKind::StructDeclaration as u16;
@@ -244,7 +238,6 @@ impl Language for KestrelLanguage {
         const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
         const NULL: u16 = SyntaxKind::Null as u16;
         const AS: u16 = SyntaxKind::As as u16;
-        const CLASS: u16 = SyntaxKind::Class as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
         const FUNC: u16 = SyntaxKind::Func as u16;
@@ -285,8 +278,6 @@ impl Language for KestrelLanguage {
             ROOT => SyntaxKind::Root,
             SOURCE_FILE => SyntaxKind::SourceFile,
             DECLARATION_ITEM => SyntaxKind::DeclarationItem,
-            CLASS_DECLARATION => SyntaxKind::ClassDeclaration,
-            CLASS_BODY => SyntaxKind::ClassBody,
             PROTOCOL_DECLARATION => SyntaxKind::ProtocolDeclaration,
             PROTOCOL_BODY => SyntaxKind::ProtocolBody,
             STRUCT_DECLARATION => SyntaxKind::StructDeclaration,
@@ -322,7 +313,6 @@ impl Language for KestrelLanguage {
             BOOLEAN => SyntaxKind::Boolean,
             NULL => SyntaxKind::Null,
             AS => SyntaxKind::As,
-            CLASS => SyntaxKind::Class,
             ELSE => SyntaxKind::Else,
             FILEPRIVATE => SyntaxKind::Fileprivate,
             FUNC => SyntaxKind::Func,

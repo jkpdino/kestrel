@@ -1,6 +1,6 @@
 # Fields
 
-Fields are typed storage locations within classes and structs. They can be immutable (`let`) or mutable (`var`).
+Fields are typed storage locations within structs. They can be immutable (`let`) or mutable (`var`).
 
 ## Syntax
 
@@ -61,7 +61,7 @@ struct Person {
 ### Fields with Visibility
 
 ```kestrel
-class Account {
+struct Account {
     public let id: Int
     internal var balance: Int
     private var pin: String
@@ -71,7 +71,7 @@ class Account {
 ### Static Fields
 
 ```kestrel
-class Counter {
+struct Counter {
     static let MAX: Int
     static var count: Int
 
@@ -97,7 +97,7 @@ struct Container {
 ### Mixed Members
 
 ```kestrel
-class Entity {
+struct Entity {
     // Instance fields
     let id: Int
     var name: String
@@ -128,7 +128,7 @@ let x = 42    // ERROR: type inference not supported
 
 ### Rule 2: No Duplicate Field Names
 
-Within a class or struct, field names must be unique.
+Within a struct, field names must be unique.
 
 ```
 ERROR: DuplicateSymbolPass error
@@ -156,7 +156,7 @@ WHY: Ambiguous member reference
 
 **Example (invalid):**
 ```kestrel
-class Bad {
+struct Bad {
     let process: Int
     func process() { }    // ERROR: duplicate member 'process'
 }
@@ -174,16 +174,16 @@ WHY: External code couldn't use the field's type
 
 **Example (invalid):**
 ```kestrel
-private class Secret { }
+private struct Secret { }
 
-public class Container {
+public struct Container {
     public let data: Secret    // ERROR: public field exposes private type
 }
 ```
 
 ### Rule 5: Static Fields Only in Types
 
-The `static` modifier is only valid inside class, struct, or protocol.
+The `static` modifier is only valid inside struct, or protocol.
 
 ```
 ERROR: StaticContextPass error
@@ -195,7 +195,7 @@ WHY: static only makes sense relative to an enclosing type
 ```kestrel
 module MyApp
 
-static let GLOBAL: Int    // ERROR: static only allowed inside struct, class, or protocol
+static let GLOBAL: Int    // ERROR: static only allowed inside struct or protocol
 ```
 
 ### Rule 6: Fields Not Allowed in Protocols
@@ -226,7 +226,7 @@ let xValue = p.x    // Access instance field
 ### Static Fields
 
 ```kestrel
-class Config {
+struct Config {
     static let VERSION: String
     static var debug: Bool
 }
@@ -287,7 +287,7 @@ Preconditions:
     - name must be unique among fields in enclosing type
     - name must not conflict with function names
     - visibility(field) ≤ visibility(T) if field is public
-    - static only valid inside class/struct
+    - static only valid inside struct
 
 Effect:
     - Creates FieldSymbol with name
@@ -345,7 +345,7 @@ struct ImmutableRecord {
 ### Mutable State
 
 ```kestrel
-class StatefulService {
+struct StatefulService {
     private var state: String
     private var lastUpdate: Int
 
@@ -368,7 +368,7 @@ struct AppConfig {
 ### Mixed Visibility
 
 ```kestrel
-class Entity {
+struct Entity {
     public let id: Int           // Readable by all
     internal var name: String    // Readable/writable within module
     private var cache: Data      // Internal use only

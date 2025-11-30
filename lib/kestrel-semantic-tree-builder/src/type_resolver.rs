@@ -48,9 +48,6 @@ pub fn resolve_type(
             }
         }
 
-        // Class types are already resolved
-        TyKind::Class(_) => Some(ty.clone()),
-
         // Struct types are already resolved
         TyKind::Struct(_) => Some(ty.clone()),
 

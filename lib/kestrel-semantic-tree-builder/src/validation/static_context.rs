@@ -1,6 +1,6 @@
 //! Validation pass for static modifier context
 //!
-//! Ensures that the `static` keyword is only used inside structs, classes, or protocols.
+//! Ensures that the `static` keyword is only used inside structs or protocols.
 
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ impl ValidationPass for StaticContextPass {
 
 /// Recursively validate symbols
 ///
-/// `in_valid_context` tracks whether we're inside a struct, class, or protocol
+/// `in_valid_context` tracks whether we're inside a struct or protocol
 fn validate_symbol(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     diagnostics: &mut DiagnosticContext,
@@ -50,10 +50,10 @@ fn validate_symbol(
     let name = &symbol.metadata().name().value;
 
     // Check if we're entering a valid context for static
-    // Skip the root symbol (which is a placeholder Class with name "<root>")
+    // Skip the root symbol (which is a placeholder Module with name "<root>")
     let is_valid_context = matches!(
         kind,
-        KestrelSymbolKind::Struct | KestrelSymbolKind::Class | KestrelSymbolKind::Protocol
+        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol
     ) && name != "<root>";
     let new_context = in_valid_context || is_valid_context;
 
@@ -77,11 +77,11 @@ fn validate_symbol(
 
                 let message = if config.debug_mode {
                     format!(
-                        "[{}] static modifier is only allowed inside struct, class, or protocol",
+                        "[{}] static modifier is only allowed inside struct or protocol",
                         StaticContextPass::NAME
                     )
                 } else {
-                    "static modifier is only allowed inside struct, class, or protocol".to_string()
+                    "static modifier is only allowed inside struct or protocol".to_string()
                 };
 
                 let diagnostic = kestrel_reporting::Diagnostic::error()

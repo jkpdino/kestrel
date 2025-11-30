@@ -99,14 +99,6 @@ fn get_visibility_level_from_symbol<S: Symbol<KestrelLanguage>>(symbol: &Arc<S>)
 /// Check if a type exposes a less-visible symbol, returns the offending type name and visibility
 fn find_less_visible_type(ty: &Ty, required_level: VisibilityLevel) -> Option<(String, VisibilityLevel)> {
     match ty.kind() {
-        TyKind::Class(class_symbol) => {
-            let level = get_visibility_level_from_symbol(class_symbol);
-            if level < required_level {
-                Some((class_symbol.metadata().name().value.clone(), level))
-            } else {
-                None
-            }
-        }
         TyKind::Struct(struct_symbol) => {
             let level = get_visibility_level_from_symbol(struct_symbol);
             if level < required_level {

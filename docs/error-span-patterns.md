@@ -29,7 +29,7 @@ import Library.(PrivateClass)
 Use for: The full extent of a declaration
 
 ```
-private class PrivateClass {}
+private struct PrivateStruct {}
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^  ← declaration span
 ```
 
@@ -134,7 +134,7 @@ error: 'PrivateClass' is not accessible
    │
    ┌─ library.ks:11:15
    │
-11 │ private class PrivateClass {}
+11 │ private struct PrivateStruct {}
    │               ------------ 'PrivateClass' declared as private here
 ```
 
@@ -191,10 +191,10 @@ error: type mismatch
 error: duplicate declaration of 'Foo'
    ┌─ file.ks:5:7
    │
- 5 │ class Foo {}
+ 5 │ struct Foo {}
    │       ^^^ 'Foo' redeclared here
    ·
- 2 │ class Foo {}
+ 2 │ struct Foo {}
    │       --- first declared here
 ```
 

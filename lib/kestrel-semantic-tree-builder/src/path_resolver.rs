@@ -22,9 +22,13 @@ use semantic_tree::symbol::{Symbol, SymbolTable};
 /// Used to track information for future error reporting
 #[derive(Debug)]
 struct ResolutionStep {
+    #[allow(dead_code)]
     segment: String,
+    #[allow(dead_code)]
     segment_index: usize,
+    #[allow(dead_code)]
     candidates: Vec<Arc<dyn Symbol<KestrelLanguage>>>,
+    #[allow(dead_code)]
     filtered: Vec<Arc<dyn Symbol<KestrelLanguage>>>,
     selected: Option<Arc<dyn Symbol<KestrelLanguage>>>,
 }
@@ -233,7 +237,7 @@ pub fn resolve_type_path(
 #[allow(deprecated)]
 mod tests {
     use super::*;
-    use kestrel_semantic_tree::symbol::class::ClassSymbol;
+    use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
     use kestrel_span::Name;
 
     #[test]
@@ -242,25 +246,25 @@ mod tests {
         let root = create_test_root();
         let mut symbol_table = SymbolTable::new();
 
-        let class_name = Name::new("MyClass".to_string(), 0..7);
+        let struct_name = Name::new("MyStruct".to_string(), 0..8);
         let visibility = VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
 
-        let class_symbol = ClassSymbol::new(class_name, 0..20, visibility, None);
-        let class_arc = Arc::new(class_symbol);
+        let struct_symbol = StructSymbol::new(struct_name, 0..20, visibility, None);
+        let struct_arc = Arc::new(struct_symbol);
 
-        // Add TypedBehavior after creation (following the pattern in resolvers/class.rs)
-        let class_type = Ty::path(vec!["MyClass".to_string()], 0..7);
-        let typed_behavior = TypedBehavior::new(class_type, 0..7);
-        class_arc.metadata().add_behavior(typed_behavior);
+        // Add TypedBehavior after creation (following the pattern in resolvers/struct.rs)
+        let struct_type = Ty::path(vec!["MyStruct".to_string()], 0..8);
+        let typed_behavior = TypedBehavior::new(struct_type, 0..8);
+        struct_arc.metadata().add_behavior(typed_behavior);
 
-        let class_arc_dyn: Arc<dyn Symbol<KestrelLanguage>> = class_arc;
+        let struct_arc_dyn: Arc<dyn Symbol<KestrelLanguage>> = struct_arc;
 
         // Add to symbol table
-        symbol_table.insert(class_arc_dyn.clone());
-        root.metadata().add_child(&class_arc_dyn);
+        symbol_table.insert(struct_arc_dyn.clone());
+        root.metadata().add_child(&struct_arc_dyn);
 
-        // Resolve the path "MyClass"
-        let path = vec!["MyClass".to_string()];
+        // Resolve the path "MyStruct"
+        let path = vec!["MyStruct".to_string()];
         let result = resolve_type_path(&path, &symbol_table, &root);
 
         assert!(result.is_some());
@@ -269,7 +273,7 @@ mod tests {
 
         if let Some(segments) = ty.as_path() {
             assert_eq!(segments.len(), 1);
-            assert_eq!(segments[0], "MyClass");
+            assert_eq!(segments[0], "MyStruct");
         }
     }
 
@@ -295,7 +299,7 @@ mod tests {
         let outer_name = Name::new("Outer".to_string(), 0..5);
         let outer_visibility =
             VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
-        let outer_symbol = ClassSymbol::new(outer_name, 0..50, outer_visibility, None);
+        let outer_symbol = StructSymbol::new(outer_name, 0..50, outer_visibility, None);
         let outer_arc = Arc::new(outer_symbol);
 
         // Add TypedBehavior to outer class
@@ -305,14 +309,14 @@ mod tests {
 
         let outer_arc_dyn: Arc<dyn Symbol<KestrelLanguage>> = outer_arc.clone();
 
-        // Create inner class (child of outer)
+        // Create inner struct (child of outer)
         let inner_name = Name::new("Inner".to_string(), 10..15);
         let inner_visibility =
             VisibilityBehavior::new(Some(Visibility::Public), 10..16, root.clone());
-        let inner_symbol = ClassSymbol::new(inner_name, 10..40, inner_visibility, None);
+        let inner_symbol = StructSymbol::new(inner_name, 10..40, inner_visibility, None);
         let inner_arc = Arc::new(inner_symbol);
 
-        // Add TypedBehavior to inner class
+        // Add TypedBehavior to inner struct
         let inner_type = Ty::path(vec!["Outer".to_string(), "Inner".to_string()], 10..15);
         let inner_typed = TypedBehavior::new(inner_type, 10..15);
         inner_arc.metadata().add_behavior(inner_typed);
@@ -346,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_nested_class_private_inner() {
-        // Test that private inner classes are not accessible from outside
+        // Test that private inner structes are not accessible from outside
         let root = create_test_root();
         let mut symbol_table = SymbolTable::new();
 
@@ -354,7 +358,7 @@ mod tests {
         let outer_name = Name::new("Outer".to_string(), 0..5);
         let outer_visibility =
             VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
-        let outer_symbol = ClassSymbol::new(outer_name, 0..50, outer_visibility, None);
+        let outer_symbol = StructSymbol::new(outer_name, 0..50, outer_visibility, None);
         let outer_arc = Arc::new(outer_symbol);
 
         // Add TypedBehavior to outer class
@@ -364,14 +368,14 @@ mod tests {
 
         let outer_arc_dyn: Arc<dyn Symbol<KestrelLanguage>> = outer_arc.clone();
 
-        // Create PRIVATE inner class
+        // Create PRIVATE inner struct
         let inner_name = Name::new("Inner".to_string(), 10..15);
         let inner_visibility =
             VisibilityBehavior::new(Some(Visibility::Private), 10..17, outer_arc_dyn.clone());
-        let inner_symbol = ClassSymbol::new(inner_name, 10..40, inner_visibility, None);
+        let inner_symbol = StructSymbol::new(inner_name, 10..40, inner_visibility, None);
         let inner_arc = Arc::new(inner_symbol);
 
-        // Add TypedBehavior to inner class
+        // Add TypedBehavior to inner struct
         let inner_type = Ty::path(vec!["Outer".to_string(), "Inner".to_string()], 10..15);
         let inner_typed = TypedBehavior::new(inner_type, 10..15);
         inner_arc.metadata().add_behavior(inner_typed);
@@ -391,7 +395,7 @@ mod tests {
 
         assert!(
             result.is_none(),
-            "Private inner class should not be accessible from root context"
+            "Private inner struct should not be accessible from root context"
         );
     }
 
@@ -401,30 +405,30 @@ mod tests {
         let root = create_test_root();
         let mut symbol_table = SymbolTable::new();
 
-        // Create class A
+        // Create struct A
         let a_name = Name::new("A".to_string(), 0..1);
         let a_visibility = VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
-        let a_symbol = ClassSymbol::new(a_name, 0..100, a_visibility, None);
+        let a_symbol = StructSymbol::new(a_name, 0..100, a_visibility, None);
         let a_arc = Arc::new(a_symbol);
         let a_type = Ty::path(vec!["A".to_string()], 0..1);
         let a_typed = TypedBehavior::new(a_type, 0..1);
         a_arc.metadata().add_behavior(a_typed);
         let a_arc_dyn: Arc<dyn Symbol<KestrelLanguage>> = a_arc;
 
-        // Create class B (child of A)
+        // Create struct B (child of A)
         let b_name = Name::new("B".to_string(), 10..11);
         let b_visibility = VisibilityBehavior::new(Some(Visibility::Public), 10..16, root.clone());
-        let b_symbol = ClassSymbol::new(b_name, 10..80, b_visibility, None);
+        let b_symbol = StructSymbol::new(b_name, 10..80, b_visibility, None);
         let b_arc = Arc::new(b_symbol);
         let b_type = Ty::path(vec!["A".to_string(), "B".to_string()], 10..11);
         let b_typed = TypedBehavior::new(b_type, 10..11);
         b_arc.metadata().add_behavior(b_typed);
         let b_arc_dyn: Arc<dyn Symbol<KestrelLanguage>> = b_arc;
 
-        // Create class C (child of B)
+        // Create struct C (child of B)
         let c_name = Name::new("C".to_string(), 20..21);
         let c_visibility = VisibilityBehavior::new(Some(Visibility::Public), 20..26, root.clone());
-        let c_symbol = ClassSymbol::new(c_name, 20..50, c_visibility, None);
+        let c_symbol = StructSymbol::new(c_name, 20..50, c_visibility, None);
         let c_arc = Arc::new(c_symbol);
         let c_type = Ty::path(
             vec!["A".to_string(), "B".to_string(), "C".to_string()],
@@ -467,8 +471,7 @@ mod tests {
         use semantic_tree::symbol::SymbolMetadataBuilder;
 
         let root_name = Name::new("Root".to_string(), 0..4);
-        // Use Class as the symbol kind since it's the only one available
-        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Class)
+        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
             .with_name(root_name)
             .with_declaration_span(0..4)
             .with_span(0..100)

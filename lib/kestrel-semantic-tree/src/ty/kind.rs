@@ -1,5 +1,4 @@
 use crate::ty::Ty;
-use crate::symbol::class::ClassSymbol;
 use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
@@ -56,10 +55,6 @@ pub enum TyKind {
     /// This represents a path like A.B.C that hasn't been resolved yet
     /// During semantic analysis, this should be resolved to a concrete type
     Path(Vec<String>),
-
-    /// Class type (resolved)
-    /// This is a reference to a class symbol
-    Class(Arc<ClassSymbol>),
 
     /// Protocol type (resolved)
     /// This is a reference to a protocol symbol

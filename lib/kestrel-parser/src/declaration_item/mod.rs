@@ -5,7 +5,6 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::module::{ModuleDeclaration, parse_module_declaration};
 use crate::import::{ImportDeclaration, parse_import_declaration};
-use crate::class::{ClassDeclaration, parse_class_declaration};
 use crate::protocol::{ProtocolDeclaration, parse_protocol_declaration};
 use crate::r#struct::{StructDeclaration, parse_struct_declaration};
 use crate::field::{FieldDeclaration, parse_field_declaration};
@@ -24,7 +23,6 @@ use crate::function::ParameterData;
 pub enum DeclarationItem {
     Module(ModuleDeclaration),
     Import(ImportDeclaration),
-    Class(ClassDeclaration),
     Protocol(ProtocolDeclaration),
     Struct(StructDeclaration),
     Field(FieldDeclaration),
@@ -38,7 +36,6 @@ impl DeclarationItem {
         match self {
             DeclarationItem::Module(decl) => &decl.span,
             DeclarationItem::Import(decl) => &decl.span,
-            DeclarationItem::Class(decl) => &decl.span,
             DeclarationItem::Protocol(decl) => &decl.span,
             DeclarationItem::Struct(decl) => &decl.span,
             DeclarationItem::Field(decl) => &decl.span,
@@ -52,7 +49,6 @@ impl DeclarationItem {
         match self {
             DeclarationItem::Module(decl) => &decl.syntax,
             DeclarationItem::Import(decl) => &decl.syntax,
-            DeclarationItem::Class(decl) => &decl.syntax,
             DeclarationItem::Protocol(decl) => &decl.syntax,
             DeclarationItem::Struct(decl) => &decl.syntax,
             DeclarationItem::Field(decl) => &decl.syntax,
@@ -67,7 +63,6 @@ impl DeclarationItem {
 enum DeclarationItemData {
     Module(Span, Vec<Span>),
     Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>),
-    Class(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
     /// Protocol: visibility, protocol_span, name_span, lbrace_span, body (functions), rbrace_span
     Protocol(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
     Struct(Option<(Token, Span)>, Span, Span, Span, Vec<DeclarationItemData>, Span),
@@ -168,16 +163,6 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
         let import_parser = import_declaration_parser_internal()
             .map(|(import_span, path, alias, items)| DeclarationItemData::Import(import_span, path, alias, items));
 
-        let class_parser = visibility_parser_internal()
-            .then(token(Token::Class))
-            .then(identifier())
-            .then(token(Token::LBrace))
-            .then(declaration_item.clone().repeated())
-            .then(token(Token::RBrace))
-            .map(|(((((visibility, class_span), name_span), lbrace_span), body), rbrace_span)| {
-                DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span)
-            });
-
         let struct_parser = visibility_parser_internal()
             .then(token(Token::Struct))
             .then(identifier())
@@ -241,7 +226,7 @@ fn declaration_item_parser_internal() -> impl Parser<Token, DeclarationItemData,
                 DeclarationItemData::TypeAlias(visibility, type_span, name_span, equals_span, aliased_type_span, semicolon_span)
             });
 
-        module_parser.or(import_parser).or(class_parser).or(protocol_parser).or(struct_parser).or(function_parser).or(field_parser).or(type_alias_parser)
+        module_parser.or(import_parser).or(protocol_parser).or(struct_parser).or(function_parser).or(field_parser).or(type_alias_parser)
     })
 }
 
@@ -262,7 +247,7 @@ fn declaration_items_parser_internal() -> impl Parser<Token, Vec<DeclarationItem
 
 /// Parse a declaration item and emit events
 /// This is the primary event-driven parser function
-/// Tries to parse as a module declaration first, then import, then class
+/// Tries to parse as a module declaration first, then import, then protocol, etc.
 pub fn parse_declaration_item<I>(source: &str, tokens: I, sink: &mut EventSink)
 where
     I: Iterator<Item = (Token, Span)> + Clone,
@@ -274,7 +259,6 @@ where
     let tokens_clone4 = tokens.clone();
     let tokens_clone5 = tokens.clone();
     let tokens_clone6 = tokens.clone();
-    let tokens_clone7 = tokens.clone();
 
     // Try parsing as module declaration
     let module_result = {
@@ -319,29 +303,10 @@ where
         }
     }
 
-    // If import parsing failed, try class declaration
-    let mut temp_sink = EventSink::new();
-    parse_class_declaration(source, tokens_clone2, &mut temp_sink);
-
-    // Check if there were errors
-    let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
-    if !has_errors {
-        // Success! Copy events to the main sink
-        for event in temp_sink.into_events() {
-            match event {
-                crate::event::Event::StartNode(kind) => sink.start_node(kind),
-                crate::event::Event::AddToken(kind, span) => sink.add_token(kind, span),
-                crate::event::Event::FinishNode => sink.finish_node(),
-                crate::event::Event::Error { message, span } => sink.error(message, span),
-            }
-        }
-        return;
-    }
-
-    // If class parsing failed, try protocol declaration
+    // If import parsing failed, try protocol declaration
     {
         let mut temp_sink = EventSink::new();
-        parse_protocol_declaration(source, tokens_clone3, &mut temp_sink);
+        parse_protocol_declaration(source, tokens_clone2, &mut temp_sink);
 
         // Check if there were errors
         let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
@@ -362,7 +327,7 @@ where
     // If protocol parsing failed, try struct declaration
     {
         let mut temp_sink = EventSink::new();
-        parse_struct_declaration(source, tokens_clone4, &mut temp_sink);
+        parse_struct_declaration(source, tokens_clone3, &mut temp_sink);
 
         // Check if there were errors
         let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
@@ -383,7 +348,7 @@ where
     // If struct parsing failed, try function declaration
     {
         let mut temp_sink = EventSink::new();
-        parse_function_declaration(source, tokens_clone5, &mut temp_sink);
+        parse_function_declaration(source, tokens_clone4, &mut temp_sink);
 
         // Check if there were errors
         let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
@@ -404,7 +369,7 @@ where
     // If function parsing failed, try field declaration
     {
         let mut temp_sink = EventSink::new();
-        parse_field_declaration(source, tokens_clone6, &mut temp_sink);
+        parse_field_declaration(source, tokens_clone5, &mut temp_sink);
 
         // Check if there were errors
         let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
@@ -424,7 +389,7 @@ where
 
     // If field parsing failed, try type alias declaration
     let mut temp_sink = EventSink::new();
-    parse_type_alias_declaration(source, tokens_clone7, &mut temp_sink);
+    parse_type_alias_declaration(source, tokens_clone6, &mut temp_sink);
 
     // Check if there were errors
     let has_errors = temp_sink.events().iter().any(|e| matches!(e, crate::event::Event::Error { .. }));
@@ -442,7 +407,7 @@ where
     }
 
     // All failed - emit error (no specific span available since all parsers failed)
-    sink.error_no_span("Expected module, import, class, protocol, struct, function, field, or type alias declaration".to_string());
+    sink.error_no_span("Expected module, import, protocol, struct, function, field, or type alias declaration".to_string());
 }
 
 /// Parse a source file (multiple declaration items) and emit events
@@ -471,10 +436,6 @@ where
                     DeclarationItemData::Import(import_span, path_segments, alias, items) => {
                         // Emit import declaration events
                         crate::common::emit_import_declaration(sink, import_span, &path_segments, alias, items);
-                    }
-                    DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span) => {
-                        // Emit class declaration events
-                        emit_class_declaration(sink, visibility, class_span, name_span, lbrace_span, body, rbrace_span);
                     }
                     DeclarationItemData::Protocol(visibility, protocol_span, name_span, lbrace_span, body, rbrace_span) => {
                         // Emit protocol declaration events
@@ -510,55 +471,6 @@ where
     }
 
     sink.finish_node();
-}
-
-/// Emit events for a class declaration
-/// Helper function used by parse_source_file
-fn emit_class_declaration(
-    sink: &mut EventSink,
-    visibility: Option<(Token, Span)>,
-    class_span: Span,
-    name_span: Span,
-    lbrace_span: Span,
-    body: Vec<DeclarationItemData>,
-    rbrace_span: Span,
-) {
-    sink.start_node(SyntaxKind::ClassDeclaration);
-
-    // Always emit Visibility node (may be empty)
-    sink.start_node(SyntaxKind::Visibility);
-    if let Some((vis_token, vis_span)) = visibility {
-        let vis_kind = match vis_token {
-            Token::Public => SyntaxKind::Public,
-            Token::Private => SyntaxKind::Private,
-            Token::Internal => SyntaxKind::Internal,
-            Token::Fileprivate => SyntaxKind::Fileprivate,
-            _ => unreachable!("visibility_parser_internal only returns visibility tokens"),
-        };
-        sink.add_token(vis_kind, vis_span);
-    }
-    sink.finish_node(); // Finish Visibility
-
-    sink.add_token(SyntaxKind::Class, class_span);
-
-    // Emit Name node wrapping the identifier
-    sink.start_node(SyntaxKind::Name);
-    sink.add_token(SyntaxKind::Identifier, name_span);
-    sink.finish_node(); // Finish Name
-
-    // Emit ClassBody node wrapping the body content
-    sink.start_node(SyntaxKind::ClassBody);
-    sink.add_token(SyntaxKind::LBrace, lbrace_span);
-
-    // Emit nested declaration items
-    for item_data in body {
-        emit_declaration_item_internal(sink, item_data);
-    }
-
-    sink.add_token(SyntaxKind::RBrace, rbrace_span);
-    sink.finish_node(); // Finish ClassBody
-
-    sink.finish_node(); // Finish ClassDeclaration
 }
 
 /// Emit events for a protocol declaration
@@ -887,7 +799,7 @@ fn emit_type_alias_declaration(
 }
 
 /// Emit events for a declaration item (internal recursive helper)
-/// Helper function used by emit_class_declaration
+/// Helper function used by emit_struct_declaration
 fn emit_declaration_item_internal(sink: &mut EventSink, item_data: DeclarationItemData) {
     match item_data {
         DeclarationItemData::Module(module_span, path_segments) => {
@@ -898,9 +810,6 @@ fn emit_declaration_item_internal(sink: &mut EventSink, item_data: DeclarationIt
         }
         DeclarationItemData::Import(import_span, path_segments, alias, items) => {
             crate::common::emit_import_declaration(sink, import_span, &path_segments, alias, items);
-        }
-        DeclarationItemData::Class(visibility, class_span, name_span, lbrace_span, body, rbrace_span) => {
-            emit_class_declaration(sink, visibility, class_span, name_span, lbrace_span, body, rbrace_span);
         }
         DeclarationItemData::Protocol(visibility, protocol_span, name_span, lbrace_span, body, rbrace_span) => {
             emit_protocol_declaration(sink, visibility, protocol_span, name_span, lbrace_span, body, rbrace_span);

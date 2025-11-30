@@ -147,20 +147,6 @@ pub trait Db {
     fn resolve_type_path(&self, path: Vec<String>, context: SymbolId) -> TypePathResolution;
 }
 
-/// Get the scope for a symbol
-pub fn scope_for(db: &dyn Db, symbol_id: SymbolId) -> Arc<Scope> {
-    db.scope_for(symbol_id)
-}
-
-/// Resolve a name in a given scope context
-pub fn resolve_name(db: &dyn Db, name: String, context: SymbolId) -> SymbolResolution {
-    db.resolve_name(name, context)
-}
-
-/// Get all imports declared in a symbol's scope
-pub fn imports_in_scope(db: &dyn Db, symbol_id: SymbolId) -> Vec<Arc<Import>> {
-    db.imports_in_scope(symbol_id)
-}
 
 /// Check if target is visible from context
 pub fn is_visible_from(db: &dyn Db, target: SymbolId, context: SymbolId) -> bool {

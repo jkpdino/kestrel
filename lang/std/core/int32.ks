@@ -1,0 +1,63 @@
+// Int32 - 32-bit signed integer
+// Generated from templates/integer.ks.template
+
+public struct Int32:
+    SignedInteger,
+    Numeric,
+    Hashable,
+    Addable,
+    Subtractable,
+    Multipliable,
+    Divisible,
+    Modulo,
+    Negatable,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    LeftShift,
+    RightShift,
+    ExpressibleByIntLiteral
+{
+    private var value: lang.i32
+
+    public static var zero: Int32 { Int32(value: 0) }
+    public static var one: Int32 { Int32(value: 1) }
+    public static var minValue: Int32 { Int32(value: -2147483648) }
+    public static var maxValue: Int32 { Int32(value: 2147483647) }
+    public static var bitWidth: Int { 32 }
+
+    public init(intLiteral value: Int) {
+        self.value = value as lang.i32
+    }
+
+    public func equals(other: Int32) -> Bool {
+        lang.i32_eq(self.value, other.value)
+    }
+
+    public func compare(other: Int32) -> Ordering {
+        if lang.i32_lt(self.value, other.value) { .Less }
+        else if lang.i32_gt(self.value, other.value) { .Greater }
+        else { .Equal }
+    }
+
+    public func hash[H: Hasher](into hasher: ref H) {
+        hasher.write(bytes: self.value.toBytes())
+    }
+
+    type Output = Int32
+
+    public func add(other: Int32) -> Int32 { Int32(value: lang.i32_add(self.value, other.value)) }
+    public func subtract(other: Int32) -> Int32 { Int32(value: lang.i32_sub(self.value, other.value)) }
+    public func multiply(other: Int32) -> Int32 { Int32(value: lang.i32_mul(self.value, other.value)) }
+    public func divide(other: Int32) -> Int32 { Int32(value: lang.i32_div(self.value, other.value)) }
+    public func mod(other: Int32) -> Int32 { Int32(value: lang.i32_rem(self.value, other.value)) }
+    public func negate() -> Int32 { Int32(value: lang.i32_neg(self.value)) }
+    public func abs() -> Int32 { if lang.i32_lt(self.value, 0) { self.negate() } else { self } }
+    public func bitwiseAnd(other: Int32) -> Int32 { Int32(value: lang.i32_and(self.value, other.value)) }
+    public func bitwiseOr(other: Int32) -> Int32 { Int32(value: lang.i32_or(self.value, other.value)) }
+    public func bitwiseXor(other: Int32) -> Int32 { Int32(value: lang.i32_xor(self.value, other.value)) }
+    public func bitwiseNot() -> Int32 { Int32(value: lang.i32_not(self.value)) }
+    public func shiftLeft(by count: Int) -> Int32 { Int32(value: lang.i32_shl(self.value, count as lang.i32)) }
+    public func shiftRight(by count: Int) -> Int32 { Int32(value: lang.i32_shr(self.value, count as lang.i32)) }
+}

@@ -188,7 +188,7 @@ The protocol type is created during the build phase and attached via `TypedBehav
 
 ## Protocol Conformance
 
-**Note:** Protocol conformance (implementing a protocol in a class/struct) is not yet implemented. This section describes the intended design.
+**Note:** Protocol conformance (implementing a protocol in a struct) is not yet implemented. This section describes the intended design.
 
 ### Declaring Conformance
 

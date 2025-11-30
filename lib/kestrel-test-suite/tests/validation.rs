@@ -127,7 +127,7 @@ mod static_context {
     #[test]
     fn static_function_at_module_level_errors() {
         Test::new("module Test\nstatic func topLevel() { }")
-            .expect(HasError("static modifier is only allowed inside struct, class, or protocol"));
+            .expect(HasError("static modifier is only allowed inside struct or protocol"));
     }
 }
 

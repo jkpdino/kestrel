@@ -28,6 +28,7 @@ impl fmt::Display for Visibility {
 #[derive(Debug)]
 pub struct VisibilityBehavior {
     visibility: Option<Visibility>,
+    #[allow(dead_code)]
     visibility_span: Span,
     visibility_scope: Arc<dyn Symbol<KestrelLanguage>>,
 }

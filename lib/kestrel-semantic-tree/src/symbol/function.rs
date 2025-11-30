@@ -4,7 +4,7 @@ use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
-    behavior::callable::{CallableBehavior, CallableParameter, CallableSignature},
+    behavior::callable::{CallableBehavior, CallableSignature},
     behavior::function_data::FunctionDataBehavior,
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
