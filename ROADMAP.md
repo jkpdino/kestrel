@@ -111,20 +111,13 @@
 - [ ] String Literals - `"hello"`, escape sequences
 - [ ] Bool Literals - `true`, `false`
 - [ ] Array Literals - `[1, 2, 3]`
+- [ ] Tuple Literals - `(1, 2, 3)`
 
-### Struct Operations
+### Paths
 
-- [ ] Struct Initialization - `Point(x: 10, y: 20)`
-- [ ] Struct Initializers - `init() {}`
-- [ ] Field Access - `point.x`, `point.y`
-- [ ] Struct Field Assignment - `point.x = 5`
-
-### Function Operations
-
-- [ ] Function Calls - `add(1, 2)`, `module.function(arg)`
-- [ ] Function References - Functions as values
-- [ ] Closures - Anonymous functions (stretch goal)
-- [ ] Type Checking Infrastructure - Core type validation logic
+- [ ] Paths - `a.b.c`
+- [ ] Resolving paths - resolve to a value, dont't worry about member access yet
+- [ ] Symbols can have a value associated with them
 
 ### Variables
 
@@ -133,12 +126,25 @@
 - [ ] Type Inference - `let x = 42` (infer Int)
 - [ ] Variable Reassignment - `x = 43`
 
+### Function Operations
+
+- [ ] Function Calls - `add(1, 2)`, `module.function(arg)`
+- [ ] Calling overloaded functions
+- [ ] Function References - Functions as values
+
 ### Expressions
 
 - [ ] Arithmetic Operations - `+`, `-`, `*`, `/`, `%`
 - [ ] Comparison Operations - `==`, `!=`, `<`, `>`, `<=`, `>=`
 - [ ] Logical Operations - `&&`, `||`, `!`
 - [ ] Member Access - `struct.field`, `module.function`
+
+### Struct Operations
+
+- [ ] Struct Initialization - `Point(x: 10, y: 20)`
+- [ ] Struct Initializers - `init() {}`
+- [ ] Field Access - `point.x`, `point.y`
+- [ ] Struct Field Assignment - `point.x = 5`
 
 ## Phase 4: Control Flow
 

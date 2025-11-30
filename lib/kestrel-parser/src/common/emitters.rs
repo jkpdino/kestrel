@@ -8,14 +8,14 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
+use super::data::{
+    FieldDeclarationData, FunctionDeclarationData, ParameterData, ProtocolDeclarationData,
+    StructBodyItem, StructDeclarationData, TypeAliasDeclarationData,
+};
+use crate::block::emit_code_block;
 use crate::event::EventSink;
 use crate::ty::emit_ty_variant;
-use crate::type_param::{emit_type_parameter_list, emit_where_clause, emit_conformance_list};
-use super::data::{
-    ParameterData, FunctionDeclarationData, FieldDeclarationData,
-    StructDeclarationData, StructBodyItem, ProtocolDeclarationData,
-    TypeAliasDeclarationData,
-};
+use crate::type_param::{emit_conformance_list, emit_type_parameter_list, emit_where_clause};
 
 // =============================================================================
 // Module and Import Emitters
@@ -60,11 +60,16 @@ pub fn emit_import_declaration(
     if let Some(items_list) = &items {
         let last_segment_end = path_segments.last().unwrap().end;
         sink.add_token(SyntaxKind::Dot, last_segment_end..last_segment_end + 1);
-        sink.add_token(SyntaxKind::LParen, last_segment_end + 1..last_segment_end + 2);
+        sink.add_token(
+            SyntaxKind::LParen,
+            last_segment_end + 1..last_segment_end + 2,
+        );
 
         for (i, (name_span, alias_span)) in items_list.iter().enumerate() {
             if i > 0 {
-                let prev_end = if let Some(alias_s) = items_list.get(i - 1).and_then(|(_, alias)| alias.as_ref()) {
+                let prev_end = if let Some(alias_s) =
+                    items_list.get(i - 1).and_then(|(_, alias)| alias.as_ref())
+                {
                     alias_s.end
                 } else {
                     items_list.get(i - 1).unwrap().0.end
@@ -140,7 +145,12 @@ pub fn emit_name(sink: &mut EventSink, name_span: Span) {
 // =============================================================================
 
 /// Emit events for a parameter list
-pub fn emit_parameter_list(sink: &mut EventSink, lparen: Span, parameters: Vec<ParameterData>, rparen: Span) {
+pub fn emit_parameter_list(
+    sink: &mut EventSink,
+    lparen: Span,
+    parameters: Vec<ParameterData>,
+    rparen: Span,
+) {
     sink.start_node(SyntaxKind::ParameterList);
     sink.add_token(SyntaxKind::LParen, lparen);
 
@@ -175,11 +185,10 @@ pub fn emit_return_type(sink: &mut EventSink, arrow_span: Span, return_ty: crate
     sink.finish_node();
 }
 
-/// Emit events for a function body
-pub fn emit_function_body(sink: &mut EventSink, lbrace: Span, rbrace: Span) {
+/// Emit events for a function body (wraps a code block)
+pub fn emit_function_body(sink: &mut EventSink, block: &crate::block::CodeBlockData) {
     sink.start_node(SyntaxKind::FunctionBody);
-    sink.add_token(SyntaxKind::LBrace, lbrace);
-    sink.add_token(SyntaxKind::RBrace, rbrace);
+    emit_code_block(sink, block);
     sink.finish_node();
 }
 
@@ -212,8 +221,8 @@ pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclaration
         emit_where_clause(sink, wc);
     }
 
-    if let Some((lbrace, rbrace)) = data.body {
-        emit_function_body(sink, lbrace, rbrace);
+    if let Some(ref block) = data.body {
+        emit_function_body(sink, block);
     }
 
     sink.finish_node();

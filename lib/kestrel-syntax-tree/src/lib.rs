@@ -87,6 +87,16 @@ pub enum SyntaxKind {
     Path,
     PathElement,
 
+    // Code block and statement nodes
+    CodeBlock,           // { statement; statement; expression }
+    Statement,           // Wrapper for statement variants
+    ExpressionStatement, // expression;
+    VariableDeclaration, // let/var name: Type = expr;
+
+    // Expression nodes
+    Expression,          // Wrapper for expression variants
+    ExprUnit,            // ()
+
     // ===== Tokens (Terminals) =====
     // Literals
     Identifier,
@@ -259,6 +269,12 @@ impl Language for KestrelLanguage {
         const TY_LIST: u16 = SyntaxKind::TyList as u16;
         const PATH: u16 = SyntaxKind::Path as u16;
         const PATH_ELEMENT: u16 = SyntaxKind::PathElement as u16;
+        const CODE_BLOCK: u16 = SyntaxKind::CodeBlock as u16;
+        const STATEMENT: u16 = SyntaxKind::Statement as u16;
+        const EXPRESSION_STATEMENT: u16 = SyntaxKind::ExpressionStatement as u16;
+        const VARIABLE_DECLARATION: u16 = SyntaxKind::VariableDeclaration as u16;
+        const EXPRESSION: u16 = SyntaxKind::Expression as u16;
+        const EXPR_UNIT: u16 = SyntaxKind::ExprUnit as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
@@ -345,6 +361,12 @@ impl Language for KestrelLanguage {
             TY_LIST => SyntaxKind::TyList,
             PATH => SyntaxKind::Path,
             PATH_ELEMENT => SyntaxKind::PathElement,
+            CODE_BLOCK => SyntaxKind::CodeBlock,
+            STATEMENT => SyntaxKind::Statement,
+            EXPRESSION_STATEMENT => SyntaxKind::ExpressionStatement,
+            VARIABLE_DECLARATION => SyntaxKind::VariableDeclaration,
+            EXPRESSION => SyntaxKind::Expression,
+            EXPR_UNIT => SyntaxKind::ExprUnit,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
             INTEGER => SyntaxKind::Integer,

@@ -1,0 +1,282 @@
+//! Statement parsing
+//!
+//! This module provides parsing for Kestrel statements.
+//! Currently supports:
+//! - Variable declarations: let/var name: Type = expr;
+//! - Expression statements: expr;
+
+use chumsky::prelude::*;
+use kestrel_lexer::Token;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+
+use crate::event::{EventSink, TreeBuilder};
+use crate::common::skip_trivia;
+use crate::ty::{ty_parser, TyVariant, emit_ty_variant};
+use crate::expr::{expr_parser, ExprVariant, emit_expr_variant};
+
+/// Represents a statement
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Statement {
+    pub syntax: SyntaxNode,
+    pub span: Span,
+}
+
+impl Statement {
+    /// Create a new Statement from events and source text
+    pub fn from_events(source: &str, events: Vec<crate::event::Event>, span: Span) -> Self {
+        let builder = TreeBuilder::new(source, events);
+        let syntax = builder.build();
+        Self { syntax, span }
+    }
+
+    /// Get the kind of this statement
+    pub fn kind(&self) -> SyntaxKind {
+        self.syntax
+            .children()
+            .next()
+            .map(|child| child.kind())
+            .unwrap_or(SyntaxKind::Error)
+    }
+
+    /// Check if this is a variable declaration
+    pub fn is_variable_declaration(&self) -> bool {
+        self.kind() == SyntaxKind::VariableDeclaration
+    }
+
+    /// Check if this is an expression statement
+    pub fn is_expression_statement(&self) -> bool {
+        self.kind() == SyntaxKind::ExpressionStatement
+    }
+}
+
+/// Raw parsed data for a variable declaration
+#[derive(Debug, Clone)]
+pub struct VariableDeclarationData {
+    /// Span of let/var keyword
+    pub mutability_span: Span,
+    /// Whether this is mutable (var) or not (let)
+    pub is_mutable: bool,
+    /// Name span
+    pub name_span: Span,
+    /// Optional type annotation: (colon_span, type)
+    pub type_annotation: Option<(Span, TyVariant)>,
+    /// Optional initializer: (equals_span, expression)
+    pub initializer: Option<(Span, ExprVariant)>,
+    /// Semicolon span
+    pub semicolon: Span,
+}
+
+/// Internal enum to distinguish between statement variants during parsing
+#[derive(Debug, Clone)]
+pub enum StmtVariant {
+    /// Variable declaration: let/var name: Type = expr;
+    VariableDeclaration(VariableDeclarationData),
+    /// Expression statement: expr;
+    Expression(ExprVariant, Span), // (expression, semicolon_span)
+}
+
+/// Parser for variable declaration
+///
+/// Syntax: let/var name (: Type)? (= expr)? ;
+fn variable_declaration_parser() -> impl Parser<Token, VariableDeclarationData, Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Let)
+                .map_with_span(|_, span| (span, false))
+                .or(just(Token::Var).map_with_span(|_, span| (span, true)))
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(filter_map(|span, token| match token {
+                    Token::Identifier => Ok(span),
+                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                }))
+        )
+        .then(
+            // Optional type annotation: : Type
+            skip_trivia()
+                .ignore_then(just(Token::Colon).map_with_span(|_, span| span))
+                .then(ty_parser())
+                .map(|(colon, ty)| (colon, ty))
+                .or_not()
+        )
+        .then(
+            // Optional initializer: = expr
+            skip_trivia()
+                .ignore_then(just(Token::Equals).map_with_span(|_, span| span))
+                .then(expr_parser())
+                .map(|(eq, expr)| (eq, expr))
+                .or_not()
+        )
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| span))
+        )
+        .map(|(((((mutability_span, is_mutable), name_span), type_annotation), initializer), semicolon)| {
+            VariableDeclarationData {
+                mutability_span,
+                is_mutable,
+                name_span,
+                type_annotation,
+                initializer,
+                semicolon,
+            }
+        })
+}
+
+/// Parser for expression statement
+///
+/// Syntax: expr ;
+fn expression_statement_parser() -> impl Parser<Token, (ExprVariant, Span), Error = Simple<Token>> + Clone {
+    expr_parser()
+        .then(
+            skip_trivia()
+                .ignore_then(just(Token::Semicolon).map_with_span(|_, span| span))
+        )
+}
+
+/// Parser for statements
+///
+/// Currently supports:
+/// - Variable declarations: let/var name: Type = expr;
+/// - Expression statements: expr;
+pub fn stmt_parser() -> impl Parser<Token, StmtVariant, Error = Simple<Token>> + Clone {
+    // Variable declaration starts with let or var
+    let var_decl = variable_declaration_parser()
+        .map(StmtVariant::VariableDeclaration);
+
+    // Expression statement is any expression followed by semicolon
+    let expr_stmt = expression_statement_parser()
+        .map(|(expr, semi)| StmtVariant::Expression(expr, semi));
+
+    // Try variable declaration first, then expression statement
+    var_decl.or(expr_stmt)
+}
+
+/// Emit events for any statement variant
+pub fn emit_stmt_variant(sink: &mut EventSink, variant: &StmtVariant) {
+    match variant {
+        StmtVariant::VariableDeclaration(data) => {
+            emit_variable_declaration(sink, data);
+        }
+        StmtVariant::Expression(expr, semicolon) => {
+            emit_expression_statement(sink, expr, semicolon.clone());
+        }
+    }
+}
+
+/// Emit events for a variable declaration
+fn emit_variable_declaration(sink: &mut EventSink, data: &VariableDeclarationData) {
+    sink.start_node(SyntaxKind::Statement);
+    sink.start_node(SyntaxKind::VariableDeclaration);
+
+    // let/var keyword
+    if data.is_mutable {
+        sink.add_token(SyntaxKind::Var, data.mutability_span.clone());
+    } else {
+        sink.add_token(SyntaxKind::Let, data.mutability_span.clone());
+    }
+
+    // Name
+    sink.start_node(SyntaxKind::Name);
+    sink.add_token(SyntaxKind::Identifier, data.name_span.clone());
+    sink.finish_node();
+
+    // Optional type annotation
+    if let Some((colon_span, ty)) = &data.type_annotation {
+        sink.add_token(SyntaxKind::Colon, colon_span.clone());
+        emit_ty_variant(sink, ty);
+    }
+
+    // Optional initializer
+    if let Some((eq_span, expr)) = &data.initializer {
+        sink.add_token(SyntaxKind::Equals, eq_span.clone());
+        emit_expr_variant(sink, expr);
+    }
+
+    // Semicolon
+    sink.add_token(SyntaxKind::Semicolon, data.semicolon.clone());
+
+    sink.finish_node(); // Finish VariableDeclaration
+    sink.finish_node(); // Finish Statement
+}
+
+/// Emit events for an expression statement
+fn emit_expression_statement(sink: &mut EventSink, expr: &ExprVariant, semicolon: Span) {
+    sink.start_node(SyntaxKind::Statement);
+    sink.start_node(SyntaxKind::ExpressionStatement);
+
+    emit_expr_variant(sink, expr);
+    sink.add_token(SyntaxKind::Semicolon, semicolon);
+
+    sink.finish_node(); // Finish ExpressionStatement
+    sink.finish_node(); // Finish Statement
+}
+
+/// Parse a statement and emit events
+pub fn parse_stmt<I>(source: &str, tokens: I, sink: &mut EventSink)
+where
+    I: Iterator<Item = (Token, Span)> + Clone,
+{
+    let end_pos = source.len();
+    let stream = chumsky::Stream::from_iter(end_pos..end_pos, tokens);
+
+    match stmt_parser().parse(stream) {
+        Ok(variant) => {
+            emit_stmt_variant(sink, &variant);
+        }
+        Err(errors) => {
+            for error in errors {
+                let span = error.span();
+                sink.error_at(format!("Parse error: {:?}", error), span);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kestrel_lexer::lex;
+
+    fn parse_stmt_from_source(source: &str) -> Statement {
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
+
+        let mut sink = EventSink::new();
+        parse_stmt(source, tokens.into_iter(), &mut sink);
+
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        Statement {
+            syntax: tree,
+            span: 0..source.len(),
+        }
+    }
+
+    #[test]
+    fn test_let_declaration_simple() {
+        let source = "let x: Int = ();";
+        let stmt = parse_stmt_from_source(source);
+
+        assert!(stmt.is_variable_declaration());
+    }
+
+    #[test]
+    fn test_var_declaration_simple() {
+        let source = "var y: Bool = ();";
+        let stmt = parse_stmt_from_source(source);
+
+        assert!(stmt.is_variable_declaration());
+    }
+
+    #[test]
+    fn test_expression_statement() {
+        let source = "();";
+        let stmt = parse_stmt_from_source(source);
+
+        assert!(stmt.is_expression_statement());
+    }
+}

@@ -8,6 +8,7 @@ use kestrel_span::Span;
 
 use crate::ty::TyVariant;
 use crate::type_param::{TypeParameterData, WhereClauseData};
+use crate::block::CodeBlockData;
 
 /// Raw parsed data for a single parameter
 ///
@@ -47,7 +48,7 @@ pub struct FunctionDeclarationData {
     pub rparen: Span,
     pub return_type: Option<(Span, TyVariant)>, // (arrow_span, return_ty)
     pub where_clause: Option<WhereClauseData>,
-    pub body: Option<(Span, Span)>, // Optional (lbrace, rbrace) - None for protocol methods
+    pub body: Option<CodeBlockData>, // Optional code block - None for protocol methods
 }
 
 /// Raw parsed data for field declaration internals
