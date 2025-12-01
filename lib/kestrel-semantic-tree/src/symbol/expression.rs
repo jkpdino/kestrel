@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use kestrel_span::{Name, Span};
-use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
+use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::language::KestrelLanguage;
 use crate::symbol::kind::KestrelSymbolKind;
+use crate::symbol::local::LocalId;
 use crate::ty::Ty;
 
 /// Represents a literal value in an expression
@@ -33,6 +34,15 @@ pub enum ExprKind {
     Tuple(Vec<Arc<ExpressionSymbol>>),
     /// Grouping expression: (expr)
     Grouping(Arc<ExpressionSymbol>),
+    /// Path expression: a.b.c (unresolved)
+    /// Stores the path segments with their spans
+    Path(Vec<(String, Span)>),
+    /// Reference to a local variable (resolved from a path)
+    /// Stores the function's SymbolId and the LocalId within that function
+    LocalRef(SymbolId, LocalId),
+    /// Reference to a symbol with ValueBehavior (resolved from a path)
+    /// Used for module-level functions, fields, globals, etc.
+    SymbolRef(SymbolId),
 }
 
 /// A symbol representing an expression in the semantic tree
@@ -176,6 +186,43 @@ impl ExpressionSymbol {
         Self::new(name, span, ExprKind::Grouping(inner), ty, parent)
     }
 
+    /// Create a path expression
+    /// Type will be filled in during resolution
+    pub fn path(
+        segments: Vec<(String, Span)>,
+        span: Span,
+        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
+    ) -> Self {
+        let name_str = segments.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join(".");
+        let name = Name::new(name_str, span.clone());
+        Self::new(name, span, ExprKind::Path(segments), None, parent)
+    }
+
+    /// Create a local variable reference expression
+    pub fn local_ref(
+        local_name: String,
+        function_id: SymbolId,
+        local_id: LocalId,
+        ty: Ty,
+        span: Span,
+        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
+    ) -> Self {
+        let name = Name::new(local_name, span.clone());
+        Self::new(name, span, ExprKind::LocalRef(function_id, local_id), Some(ty), parent)
+    }
+
+    /// Create a symbol reference expression
+    pub fn symbol_ref(
+        symbol_name: String,
+        symbol_id: SymbolId,
+        ty: Ty,
+        span: Span,
+        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
+    ) -> Self {
+        let name = Name::new(symbol_name, span.clone());
+        Self::new(name, span, ExprKind::SymbolRef(symbol_id), Some(ty), parent)
+    }
+
     /// Get the expression kind
     pub fn expr_kind(&self) -> &ExprKind {
         &self.expr_kind
@@ -206,6 +253,21 @@ impl ExpressionSymbol {
         matches!(self.expr_kind, ExprKind::Grouping(_))
     }
 
+    /// Check if this is a path expression
+    pub fn is_path(&self) -> bool {
+        matches!(self.expr_kind, ExprKind::Path(_))
+    }
+
+    /// Check if this is a local variable reference
+    pub fn is_local_ref(&self) -> bool {
+        matches!(self.expr_kind, ExprKind::LocalRef(_, _))
+    }
+
+    /// Check if this is a symbol reference
+    pub fn is_symbol_ref(&self) -> bool {
+        matches!(self.expr_kind, ExprKind::SymbolRef(_))
+    }
+
     /// Get the literal value if this is a literal expression
     pub fn as_literal(&self) -> Option<&LiteralValue> {
         match &self.expr_kind {
@@ -234,6 +296,30 @@ impl ExpressionSymbol {
     pub fn as_grouping(&self) -> Option<&Arc<ExpressionSymbol>> {
         match &self.expr_kind {
             ExprKind::Grouping(inner) => Some(inner),
+            _ => None,
+        }
+    }
+
+    /// Get path segments if this is a path expression
+    pub fn as_path(&self) -> Option<&Vec<(String, Span)>> {
+        match &self.expr_kind {
+            ExprKind::Path(segments) => Some(segments),
+            _ => None,
+        }
+    }
+
+    /// Get the local reference info (function_id, local_id) if this is a LocalRef
+    pub fn as_local_ref(&self) -> Option<(SymbolId, LocalId)> {
+        match &self.expr_kind {
+            ExprKind::LocalRef(fn_id, local_id) => Some((*fn_id, *local_id)),
+            _ => None,
+        }
+    }
+
+    /// Get the symbol ID if this is a SymbolRef
+    pub fn as_symbol_ref(&self) -> Option<SymbolId> {
+        match &self.expr_kind {
+            ExprKind::SymbolRef(id) => Some(*id),
             _ => None,
         }
     }

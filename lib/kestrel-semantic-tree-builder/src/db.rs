@@ -10,8 +10,10 @@ use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::error::ModuleNotFoundError;
 use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::{Symbol, SymbolId};
-use crate::queries::{self, Scope, Import, ImportItem, SymbolResolution, TypePathResolution};
+use crate::queries::{self, Scope, Import, ImportItem, SymbolResolution, TypePathResolution, ValuePathResolution};
 use crate::path_resolver;
+use kestrel_semantic_tree::behavior::valued::ValueBehavior;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 
 /// Thread-safe registry of all symbols in the tree
 #[derive(Debug, Clone)]
@@ -563,6 +565,194 @@ impl queries::Db for SemanticDatabase {
             None => TypePathResolution::NotAType {
                 symbol_id: current_symbol.metadata().id(),
             },
+        }
+    }
+
+    fn resolve_value_path(&self, path: Vec<String>, context: SymbolId) -> ValuePathResolution {
+        if path.is_empty() {
+            return ValuePathResolution::NotFound {
+                segment: String::new(),
+                index: 0,
+            };
+        }
+
+        let context_symbol = match self.symbol_by_id(context) {
+            Some(s) => s,
+            None => {
+                return ValuePathResolution::NotFound {
+                    segment: path[0].clone(),
+                    index: 0,
+                };
+            }
+        };
+
+        // First segment: use scope-aware name resolution
+        let first = &path[0];
+        let first_resolution = self.resolve_name(first.clone(), context);
+
+        // Handle multiple candidates for first segment (overloads)
+        let first_symbols: Vec<_> = match first_resolution {
+            SymbolResolution::Found(ids) => {
+                ids.iter()
+                    .filter_map(|id| self.symbol_by_id(*id))
+                    .collect()
+            }
+            SymbolResolution::Ambiguous(ids) => {
+                // Check if all candidates are functions (overloads)
+                let symbols: Vec<_> = ids.iter()
+                    .filter_map(|id| self.symbol_by_id(*id))
+                    .collect();
+
+                let all_functions = symbols.iter().all(|s| {
+                    s.metadata().kind() == KestrelSymbolKind::Function
+                });
+
+                if !all_functions {
+                    return ValuePathResolution::Ambiguous {
+                        segment: first.clone(),
+                        index: 0,
+                        candidates: ids,
+                    };
+                }
+                symbols
+            }
+            SymbolResolution::NotFound => {
+                return ValuePathResolution::NotFound {
+                    segment: first.clone(),
+                    index: 0,
+                };
+            }
+        };
+
+        if first_symbols.is_empty() {
+            return ValuePathResolution::NotFound {
+                segment: first.clone(),
+                index: 0,
+            };
+        }
+
+        // For single-segment paths, we can resolve now
+        if path.len() == 1 {
+            return self.extract_value_from_symbols(&first_symbols, first, 0);
+        }
+
+        // For multi-segment paths, the first segment must resolve to a single symbol
+        // (can't have overloaded modules)
+        if first_symbols.len() > 1 {
+            return ValuePathResolution::Ambiguous {
+                segment: first.clone(),
+                index: 0,
+                candidates: first_symbols.iter().map(|s| s.metadata().id()).collect(),
+            };
+        }
+
+        let mut current_symbol = first_symbols.into_iter().next().unwrap();
+
+        // Subsequent segments: search visible children of the resolved symbol
+        for (index, segment) in path.iter().enumerate().skip(1) {
+            let children = current_symbol.metadata().visible_children();
+
+            // Find children matching the name and visible from context
+            let matches: Vec<_> = children
+                .into_iter()
+                .filter(|c| c.metadata().name().value == *segment)
+                .filter(|c| path_resolver::is_visible_from(c, &context_symbol))
+                .collect();
+
+            // If this is the last segment, handle overloads
+            if index == path.len() - 1 {
+                return self.extract_value_from_symbols(&matches, segment, index);
+            }
+
+            // Intermediate segments must resolve to a single symbol
+            match matches.len() {
+                0 => {
+                    return ValuePathResolution::NotFound {
+                        segment: segment.clone(),
+                        index,
+                    };
+                }
+                1 => {
+                    current_symbol = matches.into_iter().next().unwrap();
+                }
+                _ => {
+                    return ValuePathResolution::Ambiguous {
+                        segment: segment.clone(),
+                        index,
+                        candidates: matches.iter().map(|s| s.metadata().id()).collect(),
+                    };
+                }
+            }
+        }
+
+        // Should not reach here (handled in loop above)
+        ValuePathResolution::NotFound {
+            segment: path.last().cloned().unwrap_or_default(),
+            index: path.len().saturating_sub(1),
+        }
+    }
+}
+
+impl SemanticDatabase {
+    /// Helper to extract value information from a set of resolved symbols.
+    /// Handles the distinction between single values and overloaded functions.
+    fn extract_value_from_symbols(
+        &self,
+        symbols: &[Arc<dyn Symbol<KestrelLanguage>>],
+        segment: &str,
+        index: usize,
+    ) -> ValuePathResolution {
+        if symbols.is_empty() {
+            return ValuePathResolution::NotFound {
+                segment: segment.to_string(),
+                index,
+            };
+        }
+
+        // Check if all symbols are functions (potential overloads)
+        let all_functions = symbols.iter().all(|s| {
+            s.metadata().kind() == KestrelSymbolKind::Function
+        });
+
+        if all_functions && symbols.len() > 1 {
+            // Multiple function overloads - caller must disambiguate
+            return ValuePathResolution::Overloaded {
+                candidates: symbols.iter().map(|s| s.metadata().id()).collect(),
+            };
+        }
+
+        // Single symbol - try to extract value
+        let symbol = &symbols[0];
+
+        // First, check for ValueBehavior
+        let value_behavior = symbol.metadata().behaviors()
+            .into_iter()
+            .find(|b| matches!(b.kind(), KestrelBehaviorKind::Valued))
+            .and_then(|b| b.as_ref().downcast_ref::<ValueBehavior>().map(|vb| vb.ty().clone()));
+
+        if let Some(ty) = value_behavior {
+            return ValuePathResolution::Symbol {
+                symbol_id: symbol.metadata().id(),
+                ty,
+            };
+        }
+
+        // If no ValueBehavior, check for CallableBehavior (functions are values)
+        let callable_behavior = symbol.metadata().behaviors()
+            .into_iter()
+            .find(|b| matches!(b.kind(), KestrelBehaviorKind::Callable))
+            .and_then(|b| b.as_ref().downcast_ref::<CallableBehavior>().map(|cb| cb.function_type()));
+
+        if let Some(fn_ty) = callable_behavior {
+            return ValuePathResolution::Symbol {
+                symbol_id: symbol.metadata().id(),
+                ty: fn_ty,
+            };
+        }
+
+        // Symbol has no value behavior
+        ValuePathResolution::NotAValue {
+            symbol_id: symbol.metadata().id(),
         }
     }
 }

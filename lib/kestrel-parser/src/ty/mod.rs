@@ -58,6 +58,11 @@ impl TyExpression {
         self.kind() == SyntaxKind::TyPath
     }
 
+    /// Check if this is an array type
+    pub fn is_array(&self) -> bool {
+        self.kind() == SyntaxKind::TyArray
+    }
+
     /// Get the path segments if this is a path type
     /// Structure: Ty -> TyPath -> Path -> PathElement -> Identifier
     pub fn path_segments(&self) -> Option<Vec<String>> {
@@ -195,8 +200,20 @@ pub(crate) fn ty_parser() -> impl Parser<Token, TyVariant, Error = Simple<Token>
             )
             .map(|(segments, args)| TyVariant::Path { segments, args });
 
-        // Try never first, then paren types, then path
-        never.or(paren_types).or(path)
+        // Array type: [T]
+        let array = skip_trivia()
+            .ignore_then(just(Token::LBracket).map_with_span(|_, span| span))
+            .then(ty.clone())
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::RBracket).map_with_span(|_, span| span))
+            )
+            .map(|((lbracket, element_ty), rbracket)| {
+                TyVariant::Array(lbracket, Box::new(element_ty), rbracket)
+            });
+
+        // Try never first, then paren types, then array, then path
+        never.or(paren_types).or(array).or(path)
     })
 }
 
@@ -240,6 +257,9 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Path { segments, args } => {
             emit_path_type(sink, segments, args.as_ref());
         }
+        TyVariant::Array(lbracket, element_ty, rbracket) => {
+            emit_array_type(sink, lbracket.clone(), element_ty, rbracket.clone());
+        }
     }
 }
 
@@ -255,6 +275,8 @@ pub(crate) enum TyVariant {
         segments: Vec<Span>,
         args: Option<Vec<TyVariant>>,
     },
+    /// Array type: [T]
+    Array(Span, Box<TyVariant>, Span), // (lbracket, element_type, rbracket)
 }
 
 /// Emit events for a unit type
@@ -365,6 +387,24 @@ pub(crate) fn emit_function_type(
     emit_ty_variant(sink, return_ty);
 
     sink.finish_node(); // Finish TyFunction
+    sink.finish_node(); // Finish Ty
+}
+
+/// Emit events for an array type
+pub(crate) fn emit_array_type(
+    sink: &mut EventSink,
+    lbracket: Span,
+    element_ty: &TyVariant,
+    rbracket: Span,
+) {
+    sink.start_node(SyntaxKind::Ty);
+    sink.start_node(SyntaxKind::TyArray);
+
+    sink.add_token(SyntaxKind::LBracket, lbracket);
+    emit_ty_variant(sink, element_ty);
+    sink.add_token(SyntaxKind::RBracket, rbracket);
+
+    sink.finish_node(); // Finish TyArray
     sink.finish_node(); // Finish Ty
 }
 
@@ -501,5 +541,29 @@ mod tests {
         let ty = parse_ty_from_source(source);
 
         assert!(ty.is_function());
+    }
+
+    #[test]
+    fn test_array_type_simple() {
+        let source = "[Int]";
+        let ty = parse_ty_from_source(source);
+
+        assert!(ty.is_array());
+    }
+
+    #[test]
+    fn test_array_type_nested() {
+        let source = "[[Int]]";
+        let ty = parse_ty_from_source(source);
+
+        assert!(ty.is_array());
+    }
+
+    #[test]
+    fn test_array_type_of_tuple() {
+        let source = "[(Int, String)]";
+        let ty = parse_ty_from_source(source);
+
+        assert!(ty.is_array());
     }
 }

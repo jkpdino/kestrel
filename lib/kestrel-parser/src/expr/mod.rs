@@ -75,6 +75,21 @@ impl Expression {
     pub fn is_grouping(&self) -> bool {
         self.kind() == SyntaxKind::ExprGrouping
     }
+
+    /// Check if this is a path expression
+    pub fn is_path(&self) -> bool {
+        self.kind() == SyntaxKind::ExprPath
+    }
+
+    /// Check if this is a unary expression
+    pub fn is_unary(&self) -> bool {
+        self.kind() == SyntaxKind::ExprUnary
+    }
+
+    /// Check if this is a null literal
+    pub fn is_null(&self) -> bool {
+        self.kind() == SyntaxKind::ExprNull
+    }
 }
 
 /// Internal enum to distinguish between expression variants during parsing
@@ -90,12 +105,18 @@ pub enum ExprVariant {
     String(Span),
     /// Boolean literal: true, false
     Bool(Span),
+    /// Null literal: null
+    Null(Span),
     /// Array literal: [1, 2, 3]
     Array(Span, Vec<ExprVariant>, Vec<Span>, Span), // (lbracket, elements, commas, rbracket)
     /// Tuple literal: (1, 2, 3)
     Tuple(Span, Vec<ExprVariant>, Vec<Span>, Span), // (lparen, elements, commas, rparen)
     /// Grouping expression: (expr)
     Grouping(Span, Box<ExprVariant>, Span), // (lparen, inner, rparen)
+    /// Path expression: a.b.c
+    Path(Vec<Span>, Vec<Span>), // (segments, dots)
+    /// Unary expression: -expr, !expr
+    Unary(Token, Span, Box<ExprVariant>), // (operator_token, operator_span, operand)
 }
 
 /// Parser for expressions
@@ -142,6 +163,39 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
             }))
             .map(ExprVariant::Bool);
+
+        // Null literal
+        let null = skip_trivia()
+            .ignore_then(filter_map(|span, token| match token {
+                Token::Null => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .map(ExprVariant::Null);
+
+        // Path expression: a.b.c
+        let path = skip_trivia()
+            .ignore_then(filter_map(|span, token| match token {
+                Token::Identifier => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            }))
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
+                    .then(skip_trivia().ignore_then(filter_map(|span, token| match token {
+                        Token::Identifier => Ok(span),
+                        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                    })))
+                    .repeated()
+            )
+            .map(|(first, rest)| {
+                let mut segments = vec![first];
+                let mut dots = Vec::new();
+                for (dot, segment) in rest {
+                    dots.push(dot);
+                    segments.push(segment);
+                }
+                ExprVariant::Path(segments, dots)
+            });
 
         // Array literal: [elem, elem, ...]
         let array = skip_trivia()
@@ -252,14 +306,28 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 ParenContent::Tuple(elements, commas, rparen) => ExprVariant::Tuple(lparen, elements, commas, rparen),
             });
 
-        // Combine all expression parsers
-        // Order matters: try more specific patterns first
-        float
+        // Unary operators: -expr, !expr
+        // This must be defined after the other expression parsers so we can use them
+        let primary = float
             .or(integer)
             .or(string)
             .or(boolean)
+            .or(null)
             .or(array)
             .or(paren_expr)
+            .or(path);
+
+        let unary = skip_trivia()
+            .ignore_then(
+                just(Token::Minus).map_with_span(|tok, span| (tok, span))
+                    .or(just(Token::Bang).map_with_span(|tok, span| (tok, span)))
+            )
+            .then(expr.clone())
+            .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
+
+        // Combine all expression parsers
+        // Order matters: try unary first to handle -42, then primary expressions
+        unary.or(primary)
     })
 }
 
@@ -289,6 +357,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         ExprVariant::Bool(span) => {
             emit_bool_expr(sink, span.clone());
         }
+        ExprVariant::Null(span) => {
+            emit_null_expr(sink, span.clone());
+        }
         ExprVariant::Array(lbracket, elements, commas, rbracket) => {
             emit_array_expr(sink, lbracket.clone(), elements, commas, rbracket.clone());
         }
@@ -297,6 +368,12 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::Grouping(lparen, inner, rparen) => {
             emit_grouping_expr(sink, lparen.clone(), inner, rparen.clone());
+        }
+        ExprVariant::Path(segments, dots) => {
+            emit_path_expr(sink, segments, dots);
+        }
+        ExprVariant::Unary(tok, span, operand) => {
+            emit_unary_expr(sink, tok.clone(), span.clone(), operand);
         }
     }
 }
@@ -347,6 +424,15 @@ fn emit_bool_expr(sink: &mut EventSink, span: Span) {
     sink.finish_node();
 }
 
+/// Emit events for a null literal expression
+fn emit_null_expr(sink: &mut EventSink, span: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprNull);
+    sink.add_token(SyntaxKind::Null, span);
+    sink.finish_node();
+    sink.finish_node();
+}
+
 /// Emit events for an array literal expression
 fn emit_array_expr(sink: &mut EventSink, lbracket: Span, elements: &[ExprVariant], commas: &[Span], rbracket: Span) {
     sink.start_node(SyntaxKind::Expression);
@@ -388,6 +474,31 @@ fn emit_grouping_expr(sink: &mut EventSink, lparen: Span, inner: &ExprVariant, r
     sink.add_token(SyntaxKind::LParen, lparen);
     emit_expr_variant(sink, inner);
     sink.add_token(SyntaxKind::RParen, rparen);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+/// Emit events for a path expression
+fn emit_path_expr(sink: &mut EventSink, segments: &[Span], dots: &[Span]) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprPath);
+    for (i, segment) in segments.iter().enumerate() {
+        sink.add_token(SyntaxKind::Identifier, segment.clone());
+        // Add dot after segment if there is one
+        if i < dots.len() {
+            sink.add_token(SyntaxKind::Dot, dots[i].clone());
+        }
+    }
+    sink.finish_node();
+    sink.finish_node();
+}
+
+/// Emit events for a unary expression
+fn emit_unary_expr(sink: &mut EventSink, tok: Token, span: Span, operand: &ExprVariant) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprUnary);
+    sink.add_token(SyntaxKind::from(tok), span);
+    emit_expr_variant(sink, operand);
     sink.finish_node();
     sink.finish_node();
 }
@@ -678,5 +789,109 @@ mod tests {
         let source = "[[(1,)]]";
         let expr = parse_expr_from_source(source);
         assert!(expr.is_array());
+    }
+
+    // ===== Path Expression Tests =====
+
+    #[test]
+    fn test_path_single_segment() {
+        let source = "foo";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_path());
+    }
+
+    #[test]
+    fn test_path_two_segments() {
+        let source = "foo.bar";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_path());
+    }
+
+    #[test]
+    fn test_path_multiple_segments() {
+        let source = "a.b.c.d";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_path());
+    }
+
+    #[test]
+    fn test_path_with_whitespace() {
+        let source = "  foo . bar  ";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_path());
+    }
+
+    // ===== Unary Expression Tests =====
+
+    #[test]
+    fn test_unary_minus_integer() {
+        let source = "-42";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_unary());
+    }
+
+    #[test]
+    fn test_unary_minus_float() {
+        let source = "-3.14";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_unary());
+    }
+
+    #[test]
+    fn test_unary_bang() {
+        let source = "!true";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_unary());
+    }
+
+    #[test]
+    fn test_unary_double_minus() {
+        let source = "--42";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_unary());
+    }
+
+    #[test]
+    fn test_unary_double_bang() {
+        let source = "!!false";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_unary());
+    }
+
+    #[test]
+    fn test_unary_minus_path() {
+        let source = "-foo";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_unary());
+    }
+
+    #[test]
+    fn test_unary_minus_grouped() {
+        let source = "-(1)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_unary());
+    }
+
+    // ===== Null Literal Tests =====
+
+    #[test]
+    fn test_null() {
+        let source = "null";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_null());
+    }
+
+    #[test]
+    fn test_null_in_array() {
+        let source = "[null, null]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_array());
+    }
+
+    #[test]
+    fn test_null_in_tuple() {
+        let source = "(null, 42)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_tuple());
     }
 }

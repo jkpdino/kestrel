@@ -273,6 +273,13 @@ mod tests {
     }
 
     #[test]
+    fn test_let_with_array_type() {
+        let source = "let x: [Int] = [];";
+        let stmt = parse_stmt_from_source(source);
+        assert!(stmt.is_variable_declaration());
+    }
+
+    #[test]
     fn test_expression_statement() {
         let source = "();";
         let stmt = parse_stmt_from_source(source);

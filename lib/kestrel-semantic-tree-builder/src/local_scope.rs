@@ -1,0 +1,278 @@
+//! Local scope management for function body resolution
+//!
+//! This module provides a scope stack for tracking local variable bindings
+//! within function bodies. It supports shadowing - when a new variable with
+//! the same name is declared, it creates a new Local and shadows the old one.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::local::LocalId;
+use kestrel_semantic_tree::ty::Ty;
+use kestrel_span::Span;
+
+/// A scope level in the local scope stack
+#[derive(Debug, Clone)]
+struct ScopeLevel {
+    /// Bindings introduced at this scope level: name -> LocalId
+    bindings: HashMap<String, LocalId>,
+}
+
+impl ScopeLevel {
+    fn new() -> Self {
+        ScopeLevel {
+            bindings: HashMap::new(),
+        }
+    }
+}
+
+/// Manages local variable scopes within a function body.
+///
+/// The scope stack supports:
+/// - Nested scopes (blocks, if/else, loops, etc.)
+/// - Variable shadowing (same name can be rebound)
+/// - O(1) lookup of current binding for a name
+///
+/// # Example
+/// ```ignore
+/// fn example(x: Int) {
+///     let y = x + 1;     // y binds to Local(1)
+///     {
+///         let y = y * 2;  // shadows y, binds to Local(2), RHS uses Local(1)
+///         print(y);       // uses Local(2)
+///     }
+///     print(y);           // uses Local(1) again
+/// }
+/// ```
+#[derive(Debug)]
+pub struct LocalScope {
+    /// The function symbol we're building locals for
+    function: Arc<FunctionSymbol>,
+    /// Stack of scope levels (innermost at the end)
+    scopes: Vec<ScopeLevel>,
+    /// Cached lookup: name -> current LocalId (for O(1) access)
+    /// Updated when entering/exiting scopes
+    current_bindings: HashMap<String, LocalId>,
+    /// History stack for restoring bindings when exiting scopes
+    /// Each entry is (name, previous_local_id or None if not bound before)
+    shadow_stack: Vec<Vec<(String, Option<LocalId>)>>,
+}
+
+impl LocalScope {
+    /// Create a new LocalScope for the given function
+    pub fn new(function: Arc<FunctionSymbol>) -> Self {
+        let mut scope = LocalScope {
+            function,
+            scopes: Vec::new(),
+            current_bindings: HashMap::new(),
+            shadow_stack: Vec::new(),
+        };
+        // Start with the function's parameter scope
+        scope.push_scope();
+        scope
+    }
+
+    /// Push a new scope level (e.g., entering a block)
+    pub fn push_scope(&mut self) {
+        self.scopes.push(ScopeLevel::new());
+        self.shadow_stack.push(Vec::new());
+    }
+
+    /// Pop a scope level, restoring previous bindings
+    pub fn pop_scope(&mut self) {
+        self.scopes.pop();
+
+        // Restore previous bindings
+        if let Some(shadows) = self.shadow_stack.pop() {
+            for (name, prev_id) in shadows.into_iter().rev() {
+                match prev_id {
+                    Some(id) => {
+                        self.current_bindings.insert(name, id);
+                    }
+                    None => {
+                        self.current_bindings.remove(&name);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Bind a new local variable in the current scope.
+    /// Returns the LocalId for the new binding.
+    pub fn bind(&mut self, name: String, ty: Ty, mutable: bool, span: Span) -> LocalId {
+        // Record the previous binding (if any) for restoration
+        let prev = self.current_bindings.get(&name).copied();
+        if let Some(shadows) = self.shadow_stack.last_mut() {
+            shadows.push((name.clone(), prev));
+        }
+
+        // Create a new local in the function
+        let local_id = self.function.add_local(name.clone(), ty, mutable, span);
+
+        // Update current bindings
+        self.current_bindings.insert(name.clone(), local_id);
+
+        // Record in current scope level
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.bindings.insert(name, local_id);
+        }
+
+        local_id
+    }
+
+    /// Look up a name in the current scope.
+    /// Returns the LocalId if found, None otherwise.
+    pub fn lookup(&self, name: &str) -> Option<LocalId> {
+        self.current_bindings.get(name).copied()
+    }
+
+    /// Get the function symbol this scope is for
+    pub fn function(&self) -> &Arc<FunctionSymbol> {
+        &self.function
+    }
+
+    /// Get the current scope depth (for debugging)
+    pub fn depth(&self) -> usize {
+        self.scopes.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
+    use kestrel_semantic_tree::language::KestrelLanguage;
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_span::Name;
+    use semantic_tree::symbol::{Symbol, SymbolMetadataBuilder};
+
+    // Helper to create a test root symbol for visibility scope
+    fn create_test_root() -> Arc<dyn Symbol<KestrelLanguage>> {
+
+        let root_name = Name::new("TestRoot".to_string(), 0..8);
+        let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
+            .with_name(root_name)
+            .with_declaration_span(0..8)
+            .with_span(0..100)
+            .build();
+
+        #[derive(Debug)]
+        struct TestRootSymbol {
+            metadata: semantic_tree::symbol::SymbolMetadata<KestrelLanguage>,
+        }
+
+        impl Symbol<KestrelLanguage> for TestRootSymbol {
+            fn metadata(&self) -> &semantic_tree::symbol::SymbolMetadata<KestrelLanguage> {
+                &self.metadata
+            }
+        }
+
+        Arc::new(TestRootSymbol { metadata })
+    }
+
+    fn create_test_function() -> Arc<FunctionSymbol> {
+        let root = create_test_root();
+        let name = Name::new("test".to_string(), 0..4);
+        let visibility = VisibilityBehavior::new(Some(Visibility::Internal), 0..0, root);
+        let return_type = Ty::unit(0..2);
+
+        Arc::new(FunctionSymbol::new(
+            name,
+            0..50,
+            visibility,
+            true,  // is_static
+            true,  // has_body
+            vec![], // no parameters
+            return_type,
+            None,  // no parent
+        ))
+    }
+
+    #[test]
+    fn test_simple_binding() {
+        let func = create_test_function();
+        let mut scope = LocalScope::new(func.clone());
+
+        let ty = Ty::path(vec!["Int".to_string()], 0..3);
+        let id = scope.bind("x".to_string(), ty, false, 0..5);
+
+        assert_eq!(scope.lookup("x"), Some(id));
+        assert_eq!(func.local_count(), 1);
+    }
+
+    #[test]
+    fn test_shadowing() {
+        let func = create_test_function();
+        let mut scope = LocalScope::new(func.clone());
+
+        let ty = Ty::path(vec!["Int".to_string()], 0..3);
+
+        // First binding
+        let id1 = scope.bind("x".to_string(), ty.clone(), false, 0..5);
+        assert_eq!(scope.lookup("x"), Some(id1));
+
+        // Push new scope and shadow
+        scope.push_scope();
+        let id2 = scope.bind("x".to_string(), ty.clone(), false, 10..15);
+        assert_eq!(scope.lookup("x"), Some(id2));
+        assert_ne!(id1, id2);
+
+        // Pop scope - should restore old binding
+        scope.pop_scope();
+        assert_eq!(scope.lookup("x"), Some(id1));
+
+        // Function should have 2 locals
+        assert_eq!(func.local_count(), 2);
+    }
+
+    #[test]
+    fn test_nested_scopes() {
+        let func = create_test_function();
+        let mut scope = LocalScope::new(func.clone());
+
+        let ty = Ty::path(vec!["Int".to_string()], 0..3);
+
+        let id_a = scope.bind("a".to_string(), ty.clone(), false, 0..1);
+
+        scope.push_scope();
+        let id_b = scope.bind("b".to_string(), ty.clone(), false, 5..6);
+
+        scope.push_scope();
+        let id_c = scope.bind("c".to_string(), ty.clone(), false, 10..11);
+
+        // All visible at innermost scope
+        assert_eq!(scope.lookup("a"), Some(id_a));
+        assert_eq!(scope.lookup("b"), Some(id_b));
+        assert_eq!(scope.lookup("c"), Some(id_c));
+
+        scope.pop_scope();
+        assert_eq!(scope.lookup("a"), Some(id_a));
+        assert_eq!(scope.lookup("b"), Some(id_b));
+        assert_eq!(scope.lookup("c"), None);
+
+        scope.pop_scope();
+        assert_eq!(scope.lookup("a"), Some(id_a));
+        assert_eq!(scope.lookup("b"), None);
+        assert_eq!(scope.lookup("c"), None);
+    }
+
+    #[test]
+    fn test_multiple_shadows_same_scope() {
+        let func = create_test_function();
+        let mut scope = LocalScope::new(func.clone());
+
+        let ty = Ty::path(vec!["Int".to_string()], 0..3);
+
+        // Same name bound multiple times in same scope (valid in some languages)
+        let id1 = scope.bind("x".to_string(), ty.clone(), false, 0..5);
+        let id2 = scope.bind("x".to_string(), ty.clone(), false, 10..15);
+        let id3 = scope.bind("x".to_string(), ty.clone(), false, 20..25);
+
+        // Should see the latest binding
+        assert_eq!(scope.lookup("x"), Some(id3));
+
+        // All 3 locals created
+        assert_eq!(func.local_count(), 3);
+    }
+}

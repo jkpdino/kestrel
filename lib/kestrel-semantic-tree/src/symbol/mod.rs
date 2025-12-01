@@ -3,6 +3,7 @@ pub mod field;
 pub mod function;
 pub mod import;
 pub mod kind;
+pub mod local;
 pub mod module;
 pub mod protocol;
 pub mod source_file;

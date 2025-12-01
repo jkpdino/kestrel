@@ -76,10 +76,12 @@ pub enum Token {
     #[regex(r#""([^"\\]|\\.)*""#)]
     String,
 
-    #[regex(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|[0-9]+")]
+    // Integer literals with optional underscores: 1_000_000, 0xFF_FF, 0b1010_1010, 0o755_000
+    #[regex(r"0[xX][0-9a-fA-F][0-9a-fA-F_]*|0[bB][01][01_]*|0[oO][0-7][0-7_]*|[0-9][0-9_]*")]
     Integer,
 
-    #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?")]
+    // Float literals with optional underscores: 1_000.5, 1.5e10
+    #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?")]
     Float,
 
     #[token("true")]

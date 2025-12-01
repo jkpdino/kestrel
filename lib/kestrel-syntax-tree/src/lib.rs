@@ -81,6 +81,7 @@ pub enum SyntaxKind {
     TyTuple,
     TyFunction,
     TyPath,
+    TyArray,             // [T] - array/list type
     TyList,
 
     // Path nodes (shared between types and other constructs)
@@ -103,6 +104,9 @@ pub enum SyntaxKind {
     ExprArray,           // [1, 2, 3]
     ExprTuple,           // (1, 2, 3)
     ExprGrouping,        // (expr)
+    ExprPath,            // a.b.c (path expression)
+    ExprUnary,           // -expr, !expr
+    ExprNull,            // null
 
     // ===== Tokens (Terminals) =====
     // Literals
@@ -273,6 +277,7 @@ impl Language for KestrelLanguage {
         const TY_TUPLE: u16 = SyntaxKind::TyTuple as u16;
         const TY_FUNCTION: u16 = SyntaxKind::TyFunction as u16;
         const TY_PATH: u16 = SyntaxKind::TyPath as u16;
+        const TY_ARRAY: u16 = SyntaxKind::TyArray as u16;
         const TY_LIST: u16 = SyntaxKind::TyList as u16;
         const PATH: u16 = SyntaxKind::Path as u16;
         const PATH_ELEMENT: u16 = SyntaxKind::PathElement as u16;
@@ -289,6 +294,9 @@ impl Language for KestrelLanguage {
         const EXPR_ARRAY: u16 = SyntaxKind::ExprArray as u16;
         const EXPR_TUPLE: u16 = SyntaxKind::ExprTuple as u16;
         const EXPR_GROUPING: u16 = SyntaxKind::ExprGrouping as u16;
+        const EXPR_PATH: u16 = SyntaxKind::ExprPath as u16;
+        const EXPR_UNARY: u16 = SyntaxKind::ExprUnary as u16;
+        const EXPR_NULL: u16 = SyntaxKind::ExprNull as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
@@ -372,6 +380,7 @@ impl Language for KestrelLanguage {
             TY_TUPLE => SyntaxKind::TyTuple,
             TY_FUNCTION => SyntaxKind::TyFunction,
             TY_PATH => SyntaxKind::TyPath,
+            TY_ARRAY => SyntaxKind::TyArray,
             TY_LIST => SyntaxKind::TyList,
             PATH => SyntaxKind::Path,
             PATH_ELEMENT => SyntaxKind::PathElement,
@@ -388,6 +397,9 @@ impl Language for KestrelLanguage {
             EXPR_ARRAY => SyntaxKind::ExprArray,
             EXPR_TUPLE => SyntaxKind::ExprTuple,
             EXPR_GROUPING => SyntaxKind::ExprGrouping,
+            EXPR_PATH => SyntaxKind::ExprPath,
+            EXPR_UNARY => SyntaxKind::ExprUnary,
+            EXPR_NULL => SyntaxKind::ExprNull,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
             INTEGER => SyntaxKind::Integer,

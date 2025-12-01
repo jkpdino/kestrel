@@ -9,6 +9,12 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::resolvers::{ExpressionResolver, FieldResolver, FunctionResolver, ImportResolver, ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver};
 
+/// Storage for function body syntax nodes, keyed by function SymbolId
+pub type FunctionBodyMap = HashMap<SymbolId, SyntaxNode>;
+
+/// Storage for source code by file, keyed by file name
+pub type SourceMap = HashMap<String, String>;
+
 /// Trait for resolving syntax nodes into semantic symbols
 pub trait Resolver {
     /// Build phase: create symbol from syntax node and add to parent
@@ -46,6 +52,10 @@ pub struct BindingContext<'a> {
     pub file_id: usize,
     /// Cycle detector for type alias resolution
     pub type_alias_cycle_detector: &'a mut CycleDetector<SymbolId>,
+    /// Function body syntax nodes, keyed by function SymbolId
+    pub function_bodies: &'a FunctionBodyMap,
+    /// Source code by file name
+    pub sources: &'a SourceMap,
 }
 
 impl BindingContext<'_> {
@@ -63,6 +73,25 @@ impl BindingContext<'_> {
             current = s.metadata().parent();
         }
         None
+    }
+
+    /// Get the source file name for a symbol
+    pub fn source_file_name(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<String> {
+        let mut current = Some(symbol.clone());
+        while let Some(s) = current {
+            if s.metadata().kind() == KestrelSymbolKind::SourceFile {
+                return Some(s.metadata().name().value.clone());
+            }
+            current = s.metadata().parent();
+        }
+        None
+    }
+
+    /// Get the source code for a symbol's file
+    pub fn source_for_symbol(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<&str> {
+        self.source_file_name(symbol)
+            .and_then(|name| self.sources.get(&name))
+            .map(|s| s.as_str())
     }
 }
 

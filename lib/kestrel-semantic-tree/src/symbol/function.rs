@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
@@ -9,6 +9,7 @@ use crate::{
     behavior::visibility::VisibilityBehavior,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
+    symbol::local::{Local, LocalId},
     symbol::type_parameter::TypeParameterSymbol,
     ty::{Ty, WhereClause},
 };
@@ -43,6 +44,10 @@ pub struct FunctionSymbol {
     type_parameters: Vec<Arc<TypeParameterSymbol>>,
     /// Where clause constraints for type parameters
     where_clause: WhereClause,
+    /// Local variables within this function (populated during body resolution)
+    /// This includes function parameters and any let/var declarations.
+    /// Variables with the same name due to shadowing have different LocalIds.
+    locals: RwLock<Vec<Local>>,
 }
 
 impl Symbol<KestrelLanguage> for FunctionSymbol {
@@ -115,6 +120,7 @@ impl FunctionSymbol {
             callable,
             type_parameters,
             where_clause,
+            locals: RwLock::new(Vec::new()),
         }
     }
 
@@ -187,5 +193,30 @@ impl FunctionSymbol {
     /// Get the where clause for this function
     pub fn where_clause(&self) -> &WhereClause {
         &self.where_clause
+    }
+
+    /// Add a new local variable to this function.
+    /// Returns the LocalId assigned to the new local.
+    pub fn add_local(&self, name: String, ty: Ty, mutable: bool, span: Span) -> LocalId {
+        let mut locals = self.locals.write().unwrap();
+        let id = LocalId::new(locals.len());
+        locals.push(Local::new(id, name, ty, mutable, span));
+        id
+    }
+
+    /// Get a local by its ID
+    pub fn get_local(&self, id: LocalId) -> Option<Local> {
+        let locals = self.locals.read().unwrap();
+        locals.get(id.index()).cloned()
+    }
+
+    /// Get all locals in this function
+    pub fn locals(&self) -> Vec<Local> {
+        self.locals.read().unwrap().clone()
+    }
+
+    /// Get the number of locals
+    pub fn local_count(&self) -> usize {
+        self.locals.read().unwrap().len()
     }
 }

@@ -3,7 +3,7 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{AmbiguousTypeError, NotATypeError, NotGenericError, TooFewTypeArgumentsError, TooManyTypeArgumentsError, UnresolvedTypeError};
-use crate::queries::{self, Db, TypePathResolution};
+use crate::queries::{self, Db, TypePathResolution, ValuePathResolution};
 
 /// Context for type resolution during the binding phase
 pub struct TypeResolutionContext<'a> {
@@ -533,6 +533,13 @@ mod tests {
 
         fn resolve_type_path(&self, path: Vec<String>, _context: SymbolId) -> TypePathResolution {
             TypePathResolution::NotFound {
+                segment: path.first().cloned().unwrap_or_default(),
+                index: 0,
+            }
+        }
+
+        fn resolve_value_path(&self, path: Vec<String>, _context: SymbolId) -> ValuePathResolution {
+            ValuePathResolution::NotFound {
                 segment: path.first().cloned().unwrap_or_default(),
                 index: 0,
             }

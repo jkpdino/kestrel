@@ -58,6 +58,14 @@ impl Resolver for ExpressionResolver {
                 // For now, create a placeholder unit
                 ExpressionSymbol::unit(span, parent.cloned())
             }
+            SyntaxKind::ExprPath => {
+                // Parse path segments from the syntax node
+                let segments = parse_path_segments(&expr_node, source);
+                if segments.is_empty() {
+                    return None;
+                }
+                ExpressionSymbol::path(segments, span, parent.cloned())
+            }
             _ => return None,
         };
 
@@ -187,6 +195,20 @@ fn parse_bool(node: &SyntaxNode, _source: &str) -> Option<bool> {
         "false" => Some(false),
         _ => None,
     }
+}
+
+/// Parse path segments from an ExprPath syntax node
+/// Returns a vector of (segment_name, span) pairs
+fn parse_path_segments(node: &SyntaxNode, _source: &str) -> Vec<(String, kestrel_span::Span)> {
+    node.children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .filter(|tok| tok.kind() == SyntaxKind::Identifier)
+        .map(|tok| {
+            let range = tok.text_range();
+            let span = range.start().into()..range.end().into();
+            (tok.text().to_string(), span)
+        })
+        .collect()
 }
 
 #[cfg(test)]

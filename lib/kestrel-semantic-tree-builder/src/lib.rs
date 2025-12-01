@@ -1,5 +1,7 @@
+mod body_resolver;
 mod db;
 mod diagnostics;
+pub mod local_scope;
 pub mod path_resolver;
 mod queries;
 mod resolver;
@@ -435,6 +437,11 @@ pub fn bind_tree_with_config(
     // Create cycle detector for type alias resolution
     let mut type_alias_cycle_detector: CycleDetector<SymbolId> = CycleDetector::new();
 
+    // Empty maps for now - in the future, these would be populated during build phase
+    // TODO: Populate function_bodies during build phase for body resolution
+    let function_bodies = resolver::FunctionBodyMap::new();
+    let sources = resolver::SourceMap::new();
+
     // Walk all symbols and call bind_declaration
     // Note: file_id is determined per-symbol based on parent SourceFile
     bind_symbol(
@@ -444,6 +451,8 @@ pub fn bind_tree_with_config(
         &resolver_registry,
         0,
         &mut type_alias_cycle_detector,
+        &function_bodies,
+        &sources,
     );
 
     // Post-binding pass: detect duplicate function signatures
@@ -570,6 +579,8 @@ fn bind_symbol(
     registry: &ResolverRegistry,
     current_file_id: usize,
     type_alias_cycle_detector: &mut CycleDetector<SymbolId>,
+    function_bodies: &resolver::FunctionBodyMap,
+    sources: &resolver::SourceMap,
 ) {
     // Find resolver for this symbol kind and call bind_declaration
     let kind = symbol.metadata().kind();
@@ -604,6 +615,8 @@ fn bind_symbol(
                 diagnostics,
                 file_id,
                 type_alias_cycle_detector,
+                function_bodies,
+                sources,
             };
             resolver.bind_declaration(symbol, &mut ctx);
         }
@@ -611,7 +624,7 @@ fn bind_symbol(
 
     // Recursively bind children
     for child in symbol.metadata().children() {
-        bind_symbol(&child, db, diagnostics, registry, file_id, type_alias_cycle_detector);
+        bind_symbol(&child, db, diagnostics, registry, file_id, type_alias_cycle_detector, function_bodies, sources);
     }
 }
 
@@ -806,6 +819,14 @@ fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
                                 fd.has_body(),
                                 fd.is_static()
                             )
+                        } else {
+                            format!("{:?}", b.kind())
+                        }
+                    }
+                    KestrelBehaviorKind::Valued => {
+                        use kestrel_semantic_tree::behavior::valued::ValueBehavior;
+                        if let Some(vb) = b.as_ref().downcast_ref::<ValueBehavior>() {
+                            format!("Valued({})", format_type(vb.ty()))
                         } else {
                             format!("{:?}", b.kind())
                         }

@@ -11,6 +11,7 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::body_resolver::{resolve_function_body, BodyResolutionContext};
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
 use crate::type_resolver::{resolve_type_with_diagnostics, TypeResolutionContext};

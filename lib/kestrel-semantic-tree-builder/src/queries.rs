@@ -65,6 +65,45 @@ pub enum TypePathResolution {
     },
 }
 
+/// Result of value path resolution (for expressions)
+#[derive(Debug, Clone)]
+pub enum ValuePathResolution {
+    /// Successfully resolved to a symbol with ValueBehavior
+    Symbol {
+        /// The resolved symbol
+        symbol_id: SymbolId,
+        /// The type of the value
+        ty: Ty,
+    },
+    /// Resolved to multiple symbols (overloaded functions)
+    /// Caller must disambiguate based on context (e.g., call arguments or type annotation)
+    Overloaded {
+        /// The candidate symbol IDs (all have CallableBehavior)
+        candidates: Vec<SymbolId>,
+    },
+    /// A segment in the path was not found
+    NotFound {
+        /// The segment that wasn't found
+        segment: String,
+        /// Index of the failed segment in the path
+        index: usize,
+    },
+    /// A segment resolved to multiple non-overload candidates (ambiguous)
+    Ambiguous {
+        /// The ambiguous segment
+        segment: String,
+        /// Index of the ambiguous segment
+        index: usize,
+        /// The candidate symbol IDs
+        candidates: Vec<SymbolId>,
+    },
+    /// The final symbol doesn't have ValueBehavior (not a value)
+    NotAValue {
+        /// The symbol that isn't a value
+        symbol_id: SymbolId,
+    },
+}
+
 impl TypePathResolution {
     /// Returns true if resolution succeeded
     pub fn is_resolved(&self) -> bool {
@@ -75,6 +114,42 @@ impl TypePathResolution {
     pub fn ty(&self) -> Option<&Ty> {
         match self {
             TypePathResolution::Resolved(ty) => Some(ty),
+            _ => None,
+        }
+    }
+}
+
+impl ValuePathResolution {
+    /// Returns true if resolution succeeded (single symbol or overloaded)
+    pub fn is_resolved(&self) -> bool {
+        matches!(self, ValuePathResolution::Symbol { .. } | ValuePathResolution::Overloaded { .. })
+    }
+
+    /// Returns the single resolved symbol if not overloaded
+    pub fn single(&self) -> Option<(SymbolId, &Ty)> {
+        match self {
+            ValuePathResolution::Symbol { symbol_id, ty } => Some((*symbol_id, ty)),
+            _ => None,
+        }
+    }
+
+    /// Returns the type if resolved to a single symbol
+    pub fn ty(&self) -> Option<&Ty> {
+        match self {
+            ValuePathResolution::Symbol { ty, .. } => Some(ty),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this is an overloaded resolution
+    pub fn is_overloaded(&self) -> bool {
+        matches!(self, ValuePathResolution::Overloaded { .. })
+    }
+
+    /// Returns the overload candidates if overloaded
+    pub fn overload_candidates(&self) -> Option<&[SymbolId]> {
+        match self {
+            ValuePathResolution::Overloaded { candidates } => Some(candidates),
             _ => None,
         }
     }
@@ -145,6 +220,16 @@ pub trait Db {
     /// considering imports and local declarations. Subsequent segments
     /// are resolved by searching children of the previously resolved symbol.
     fn resolve_type_path(&self, path: Vec<String>, context: SymbolId) -> TypePathResolution;
+
+    /// Resolve a value path (e.g., "module.function" or "x") to a value.
+    ///
+    /// The first segment is resolved using scope-aware name resolution,
+    /// considering imports and local declarations. Subsequent segments
+    /// are resolved by searching children of the previously resolved symbol.
+    ///
+    /// Returns `ValuePathResolution::Overloaded` if the path resolves to
+    /// multiple function overloads.
+    fn resolve_value_path(&self, path: Vec<String>, context: SymbolId) -> ValuePathResolution;
 }
 
 
@@ -169,6 +254,15 @@ pub fn resolve_type_path(
     context: SymbolId,
 ) -> TypePathResolution {
     db.resolve_type_path(path, context)
+}
+
+/// Resolve a value path to a symbol with ValueBehavior
+pub fn resolve_value_path(
+    db: &dyn Db,
+    path: Vec<String>,
+    context: SymbolId,
+) -> ValuePathResolution {
+    db.resolve_value_path(path, context)
 }
 
 /// Helper to get ImportDataBehavior from a symbol
