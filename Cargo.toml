@@ -20,6 +20,7 @@ clap = { version = "4", features = ["derive"] }
 [workspace]
 members = [
     "lib/kestrel-span",
+    "lib/kestrel-prelude",
     "lib/kestrel-lexer",
     "lib/kestrel-parser",
     "lib/kestrel-syntax-tree",

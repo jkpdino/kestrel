@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_prelude::primitives;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -453,10 +454,10 @@ fn apply_type_args_to_resolved(
         _ => {
             // Get a name for the error message
             let type_name = match resolved_ty.kind() {
-                TyKind::Int(_) => "Int".to_string(),
-                TyKind::Float(_) => "Float".to_string(),
-                TyKind::Bool => "Bool".to_string(),
-                TyKind::String => "String".to_string(),
+                TyKind::Int(_) => primitives::INT.to_string(),
+                TyKind::Float(_) => primitives::FLOAT.to_string(),
+                TyKind::Bool => primitives::BOOL.to_string(),
+                TyKind::String => primitives::STRING.to_string(),
                 TyKind::Unit => "()".to_string(),
                 TyKind::Never => "Never".to_string(),
                 _ => "type".to_string(),

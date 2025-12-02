@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use kestrel_prelude::primitives;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
@@ -9,10 +10,30 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_semantic_tree::error::ModuleNotFoundError;
-use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_tree::ty::{Ty, IntBits, FloatBits};
 use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::queries::{self, Scope, Import, ImportItem, SymbolResolution, TypePathResolution, ValuePathResolution};
 use crate::path_resolver;
+
+/// Resolve a primitive type name to its semantic type
+///
+/// Uses kestrel-prelude constants for consistent type name handling.
+fn resolve_primitive_type(name: &str, span: kestrel_span::Span) -> Option<Ty> {
+    match name {
+        primitives::INT => Some(Ty::int(IntBits::I64, span)),
+        primitives::I8 => Some(Ty::int(IntBits::I8, span)),
+        primitives::I16 => Some(Ty::int(IntBits::I16, span)),
+        primitives::I32 => Some(Ty::int(IntBits::I32, span)),
+        primitives::I64 => Some(Ty::int(IntBits::I64, span)),
+        primitives::FLOAT => Some(Ty::float(FloatBits::F64, span)),
+        primitives::F32 => Some(Ty::float(FloatBits::F32, span)),
+        primitives::F64 => Some(Ty::float(FloatBits::F64, span)),
+        primitives::BOOL => Some(Ty::bool(span)),
+        primitives::STRING => Some(Ty::string(span)),
+        primitives::SELF_TYPE => Some(Ty::self_type(span)),
+        _ => None,
+    }
+}
 
 /// Thread-safe registry of all symbols in the tree
 #[derive(Debug, Clone)]
@@ -421,20 +442,8 @@ impl queries::Db for SemanticDatabase {
             let segment = &path[0];
             let span = 0..0; // Primitive types don't have a real span
 
-            match segment.as_str() {
-                "Int" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span)),
-                "I8" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I8, span)),
-                "I16" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I16, span)),
-                "I32" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I32, span)),
-                "I64" => return TypePathResolution::Resolved(Ty::int(kestrel_semantic_tree::ty::IntBits::I64, span)),
-                "Float" => return TypePathResolution::Resolved(Ty::float(kestrel_semantic_tree::ty::FloatBits::F64, span)),
-                "F32" => return TypePathResolution::Resolved(Ty::float(kestrel_semantic_tree::ty::FloatBits::F32, span)),
-                "F64" => return TypePathResolution::Resolved(Ty::float(kestrel_semantic_tree::ty::FloatBits::F64, span)),
-                "Bool" => return TypePathResolution::Resolved(Ty::bool(span)),
-                "String" => return TypePathResolution::Resolved(Ty::string(span)),
-                // Self is a special type that refers to the implementing type in protocols/structs
-                "Self" => return TypePathResolution::Resolved(Ty::self_type(span)),
-                _ => {} // Not a primitive, continue with regular resolution
+            if let Some(ty) = resolve_primitive_type(segment, span) {
+                return TypePathResolution::Resolved(ty);
             }
         }
 

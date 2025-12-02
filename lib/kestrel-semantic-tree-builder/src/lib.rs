@@ -13,6 +13,7 @@ pub mod validation;
 
 use std::sync::Arc;
 
+use kestrel_prelude::primitives;
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
@@ -698,8 +699,8 @@ fn format_type(ty: &Ty) -> String {
         TyKind::Never => "!".to_string(),
         TyKind::Int(bits) => format!("{:?}", bits),
         TyKind::Float(bits) => format!("{:?}", bits),
-        TyKind::Bool => "Bool".to_string(),
-        TyKind::String => "String".to_string(),
+        TyKind::Bool => primitives::BOOL.to_string(),
+        TyKind::String => primitives::STRING.to_string(),
         TyKind::Tuple(elements) => {
             let elem_strs: Vec<String> = elements.iter().map(format_type).collect();
             format!("({})", elem_strs.join(", "))

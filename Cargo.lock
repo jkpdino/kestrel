@@ -306,6 +306,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-prelude"
+version = "0.2.0"
+
+[[package]]
 name = "kestrel-reporting"
 version = "0.2.0"
 dependencies = [
@@ -329,6 +333,7 @@ dependencies = [
  "downcast-rs",
  "kestrel-lexer",
  "kestrel-parser",
+ "kestrel-prelude",
  "kestrel-reporting",
  "kestrel-semantic-tree",
  "kestrel-span",
