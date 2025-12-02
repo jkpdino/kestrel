@@ -2,36 +2,34 @@ use kestrel_reporting::{DiagnosticContext, IntoDiagnostic};
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::diagnostics::{AmbiguousTypeError, NotATypeError, NotGenericError, TooFewTypeArgumentsError, TooManyTypeArgumentsError, UnresolvedTypeError};
-use crate::queries::{self, Db, TypePathResolution, ValuePathResolution};
+use crate::diagnostics::{NotGenericError, TooFewTypeArgumentsError, TooManyTypeArgumentsError};
 
 /// Context for type resolution during the binding phase
 pub struct TypeResolutionContext<'a> {
-    pub db: &'a dyn Db,
+    pub db: &'a dyn crate::queries::Db,
 }
 
-/// Recursively resolve nested types
-///
-/// This function walks through the type structure and ensures all nested types
-/// (like in tuples, arrays, functions) are properly resolved.
-///
-/// # Arguments
-/// * `ty` - The type to resolve
-/// * `ctx` - Type resolution context containing the database
-/// * `context_id` - The symbol ID of the resolution context (for scope/visibility)
-///
-/// # Returns
-/// * `Some(Ty)` if resolution succeeds (all paths resolved)
-/// * `None` if any path fails to resolve
-///
-/// # Circular Reference Detection
-/// This function does not currently detect circular type aliases.
-/// Future implementation should track the chain of type aliases being resolved
-/// and detect cycles.
-pub fn resolve_type(
+/// Internal context for type resolution that optionally collects diagnostics
+struct ResolveContext<'a> {
+    diagnostics: Option<(&'a mut DiagnosticContext, usize)>, // (diagnostics, file_id)
+}
+
+impl<'a> ResolveContext<'a> {
+    fn without_diagnostics() -> Self {
+        Self { diagnostics: None }
+    }
+
+    fn with_diagnostics(diagnostics: &'a mut DiagnosticContext, file_id: usize) -> Self {
+        Self { diagnostics: Some((diagnostics, file_id)) }
+    }
+}
+
+/// Internal implementation of type resolution that handles both variants
+fn resolve_type_impl(
     ty: &Ty,
-    ctx: &TypeResolutionContext,
-    context_id: SymbolId,
+    _ctx: &TypeResolutionContext,
+    _context_id: SymbolId,
+    resolve_ctx: &mut ResolveContext,
 ) -> Option<Ty> {
     match ty.kind() {
         // Base types and special types that don't need resolution
@@ -48,59 +46,90 @@ pub fn resolve_type(
         // Type parameter types are already resolved
         TyKind::TypeParameter(_) => Some(ty.clone()),
 
-        // Struct types are already resolved
-        TyKind::Struct { .. } => Some(ty.clone()),
-
-        // Protocol types are already resolved
-        TyKind::Protocol { .. } => Some(ty.clone()),
-
-        // Type alias types should be resolved to their underlying type
-        // Note: This might need special handling to prevent infinite recursion
-        TyKind::TypeAlias { .. } => {
-            // For now, just return the type alias as-is
-            // Future: resolve to the underlying type
+        // Struct/Protocol/TypeAlias types are already resolved
+        TyKind::Struct { .. } | TyKind::Protocol { .. } | TyKind::TypeAlias { .. } => {
             Some(ty.clone())
         }
 
         // Tuple types: recursively resolve element types
         TyKind::Tuple(elements) => {
-            let resolved_elements: Option<Vec<Ty>> = elements
+            let resolved_elements: Vec<Option<Ty>> = elements
                 .iter()
-                .map(|elem_ty| resolve_type(elem_ty, ctx, context_id))
+                .map(|elem_ty| resolve_type_impl(elem_ty, _ctx, _context_id, resolve_ctx))
                 .collect();
 
-            resolved_elements.map(|elements| Ty::tuple(elements, ty.span().clone()))
+            // With diagnostics: continue even if some fail to collect all errors
+            // Without diagnostics: short-circuit on first failure
+            if resolve_ctx.diagnostics.is_some() {
+                if resolved_elements.iter().all(|e| e.is_some()) {
+                    let elements: Vec<Ty> = resolved_elements.into_iter().flatten().collect();
+                    Some(Ty::tuple(elements, ty.span().clone()))
+                } else {
+                    None
+                }
+            } else {
+                let collected: Option<Vec<Ty>> = resolved_elements.into_iter().collect();
+                collected.map(|elements| Ty::tuple(elements, ty.span().clone()))
+            }
         }
 
         // Array types: recursively resolve element type
         TyKind::Array(element_type) => {
-            resolve_type(element_type, ctx, context_id)
+            resolve_type_impl(element_type, _ctx, _context_id, resolve_ctx)
                 .map(|resolved_elem| Ty::array(resolved_elem, ty.span().clone()))
         }
 
         // Function types: recursively resolve parameter and return types
-        TyKind::Function {
-            params,
-            return_type,
-        } => {
-            // Resolve all parameter types
-            let resolved_params: Option<Vec<Ty>> = params
+        TyKind::Function { params, return_type } => {
+            let resolved_params: Vec<Option<Ty>> = params
                 .iter()
-                .map(|param_ty| resolve_type(param_ty, ctx, context_id))
+                .map(|param_ty| resolve_type_impl(param_ty, _ctx, _context_id, resolve_ctx))
                 .collect();
 
-            // Resolve return type
-            let resolved_return = resolve_type(return_type, ctx, context_id);
+            let resolved_return = resolve_type_impl(return_type, _ctx, _context_id, resolve_ctx);
 
-            // Combine results
-            match (resolved_params, resolved_return) {
-                (Some(params), Some(return_type)) => {
-                    Some(Ty::function(params, return_type, ty.span().clone()))
+            // With diagnostics: continue even if some fail to collect all errors
+            // Without diagnostics: short-circuit on first failure
+            if resolve_ctx.diagnostics.is_some() {
+                if resolved_params.iter().all(|p| p.is_some()) && resolved_return.is_some() {
+                    let params: Vec<Ty> = resolved_params.into_iter().flatten().collect();
+                    Some(Ty::function(params, resolved_return.unwrap(), ty.span().clone()))
+                } else {
+                    None
                 }
-                _ => None,
+            } else {
+                let collected_params: Option<Vec<Ty>> = resolved_params.into_iter().collect();
+                match (collected_params, resolved_return) {
+                    (Some(params), Some(return_type)) => {
+                        Some(Ty::function(params, return_type, ty.span().clone()))
+                    }
+                    _ => None,
+                }
             }
         }
     }
+}
+
+/// Recursively resolve nested types
+///
+/// This function walks through the type structure and ensures all nested types
+/// (like in tuples, arrays, functions) are properly resolved.
+///
+/// # Arguments
+/// * `ty` - The type to resolve
+/// * `ctx` - Type resolution context containing the database
+/// * `context_id` - The symbol ID of the resolution context (for scope/visibility)
+///
+/// # Returns
+/// * `Some(Ty)` if resolution succeeds (all paths resolved)
+/// * `None` if any path fails to resolve
+pub fn resolve_type(
+    ty: &Ty,
+    ctx: &TypeResolutionContext,
+    context_id: SymbolId,
+) -> Option<Ty> {
+    let mut resolve_ctx = ResolveContext::without_diagnostics();
+    resolve_type_impl(ty, ctx, context_id, &mut resolve_ctx)
 }
 
 /// Resolve a type with diagnostic reporting.
@@ -125,71 +154,11 @@ pub fn resolve_type_with_diagnostics(
     diagnostics: &mut DiagnosticContext,
     file_id: usize,
 ) -> Option<Ty> {
-    match ty.kind() {
-        // Base types and special types that don't need resolution
-        TyKind::Unit
-        | TyKind::Never
-        | TyKind::Int(_)
-        | TyKind::Float(_)
-        | TyKind::Bool
-        | TyKind::String
-        | TyKind::Error
-        | TyKind::SelfType
-        | TyKind::Inferred => Some(ty.clone()),
-
-        // Type parameter types are already resolved
-        TyKind::TypeParameter(_) => Some(ty.clone()),
-
-        // Struct/Protocol/TypeAlias types are already resolved
-        TyKind::Struct { .. } | TyKind::Protocol { .. } | TyKind::TypeAlias { .. } => {
-            Some(ty.clone())
-        }
-
-        // Tuple types: recursively resolve element types, collecting all errors
-        TyKind::Tuple(elements) => {
-            let resolved_elements: Vec<Option<Ty>> = elements
-                .iter()
-                .map(|elem_ty| resolve_type_with_diagnostics(elem_ty, ctx, context_id, diagnostics, file_id))
-                .collect();
-
-            // Check if all resolved successfully
-            if resolved_elements.iter().all(|e| e.is_some()) {
-                let elements: Vec<Ty> = resolved_elements.into_iter().flatten().collect();
-                Some(Ty::tuple(elements, ty.span().clone()))
-            } else {
-                None
-            }
-        }
-
-        // Array types: recursively resolve element type
-        TyKind::Array(element_type) => {
-            resolve_type_with_diagnostics(element_type, ctx, context_id, diagnostics, file_id)
-                .map(|resolved_elem| Ty::array(resolved_elem, ty.span().clone()))
-        }
-
-        // Function types: resolve params and return type, collecting all errors
-        TyKind::Function { params, return_type } => {
-            let resolved_params: Vec<Option<Ty>> = params
-                .iter()
-                .map(|param_ty| resolve_type_with_diagnostics(param_ty, ctx, context_id, diagnostics, file_id))
-                .collect();
-
-            let resolved_return = resolve_type_with_diagnostics(return_type, ctx, context_id, diagnostics, file_id);
-
-            // Check if all resolved successfully
-            if resolved_params.iter().all(|p| p.is_some()) && resolved_return.is_some() {
-                let params: Vec<Ty> = resolved_params.into_iter().flatten().collect();
-                Some(Ty::function(params, resolved_return.unwrap(), ty.span().clone()))
-            } else {
-                None
-            }
-        }
-    }
+    let mut resolve_ctx = ResolveContext::with_diagnostics(diagnostics, file_id);
+    resolve_type_impl(ty, ctx, context_id, &mut resolve_ctx)
 }
 
 /// Error when applying type arguments to a generic type.
-///
-/// This error provides detailed information for diagnostic messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeArgumentError {
     /// Too many type arguments provided
@@ -211,6 +180,59 @@ pub enum TypeArgumentError {
     NotAGenericType,
 }
 
+/// Helper to build substitutions from type parameters and arguments
+fn build_substitutions(
+    type_params: &[std::sync::Arc<kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol>],
+    type_args: Vec<Ty>,
+    type_name: &str,
+    existing_subs: &kestrel_semantic_tree::ty::Substitutions,
+) -> Result<kestrel_semantic_tree::ty::Substitutions, TypeArgumentError> {
+    let num_args = type_args.len();
+    let num_params = type_params.len();
+
+    // Too many arguments is always an error
+    if num_args > num_params {
+        return Err(TypeArgumentError::TooManyArguments {
+            type_name: type_name.to_string(),
+            expected: num_params,
+            got: num_args,
+        });
+    }
+
+    // Count required parameters (those without defaults)
+    let required_params = type_params.iter().take_while(|p| !p.has_default()).count();
+
+    // Too few arguments is an error if missing params don't have defaults
+    if num_args < required_params {
+        let first_missing = type_params
+            .get(num_args)
+            .map(|p| p.metadata().name().value.clone())
+            .unwrap_or_else(|| "?".to_string());
+        return Err(TypeArgumentError::TooFewArguments {
+            type_name: type_name.to_string(),
+            expected: required_params,
+            got: num_args,
+            first_missing,
+        });
+    }
+
+    // Build substitutions
+    let mut new_subs = existing_subs.clone();
+    for (i, param) in type_params.iter().enumerate() {
+        let param_id = Symbol::metadata(param.as_ref()).id();
+        if i < num_args {
+            // Use provided argument
+            new_subs.insert(param_id, type_args[i].clone());
+        } else if let Some(default) = param.default() {
+            // Use default type
+            new_subs.insert(param_id, default.clone());
+        }
+        // If we reach here without a default, we already errored above
+    }
+
+    Ok(new_subs)
+}
+
 /// Apply type arguments to a resolved type, creating a generic instantiation.
 ///
 /// Given a type like `Ty::Struct { symbol: List, substitutions: {} }` and type arguments `[Int]`,
@@ -223,62 +245,6 @@ fn apply_type_arguments(
     type_args: Vec<Ty>,
     span: kestrel_span::Span,
 ) -> Result<Ty, TypeArgumentError> {
-    use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-    use std::sync::Arc;
-
-    /// Helper to build substitutions from type parameters and arguments
-    fn build_substitutions(
-        type_params: &[Arc<TypeParameterSymbol>],
-        type_args: Vec<Ty>,
-        type_name: &str,
-        existing_subs: &kestrel_semantic_tree::ty::Substitutions,
-    ) -> Result<kestrel_semantic_tree::ty::Substitutions, TypeArgumentError> {
-        let num_args = type_args.len();
-        let num_params = type_params.len();
-
-        // Too many arguments is always an error
-        if num_args > num_params {
-            return Err(TypeArgumentError::TooManyArguments {
-                type_name: type_name.to_string(),
-                expected: num_params,
-                got: num_args,
-            });
-        }
-
-        // Count required parameters (those without defaults)
-        let required_params = type_params.iter().take_while(|p| !p.has_default()).count();
-
-        // Too few arguments is an error if missing params don't have defaults
-        if num_args < required_params {
-            let first_missing = type_params
-                .get(num_args)
-                .map(|p| p.metadata().name().value.clone())
-                .unwrap_or_else(|| "?".to_string());
-            return Err(TypeArgumentError::TooFewArguments {
-                type_name: type_name.to_string(),
-                expected: required_params,
-                got: num_args,
-                first_missing,
-            });
-        }
-
-        // Build substitutions
-        let mut new_subs = existing_subs.clone();
-        for (i, param) in type_params.iter().enumerate() {
-            let param_id = Symbol::metadata(param.as_ref()).id();
-            if i < num_args {
-                // Use provided argument
-                new_subs.insert(param_id, type_args[i].clone());
-            } else if let Some(default) = param.default() {
-                // Use default type
-                new_subs.insert(param_id, default.clone());
-            }
-            // If we reach here without a default, we already errored above
-        }
-
-        Ok(new_subs)
-    }
-
     match resolved_ty.kind() {
         TyKind::Struct { symbol, substitutions } => {
             let type_params = symbol.type_parameters();
@@ -346,38 +312,21 @@ fn report_type_argument_error(
 ) {
     match error {
         TypeArgumentError::TooManyArguments { type_name, expected, got } => {
-            let err = TooManyTypeArgumentsError {
-                span,
-                type_name,
-                expected,
-                got,
-            };
+            let err = TooManyTypeArgumentsError { span, type_name, expected, got };
             diagnostics.add_diagnostic(err.into_diagnostic(file_id));
         }
         TypeArgumentError::TooFewArguments { type_name, expected, got, first_missing } => {
-            let err = TooFewTypeArgumentsError {
-                span,
-                type_name,
-                expected,
-                got,
-                first_missing,
-            };
+            let err = TooFewTypeArgumentsError { span, type_name, expected, got, first_missing };
             diagnostics.add_diagnostic(err.into_diagnostic(file_id));
         }
         TypeArgumentError::NotGeneric { type_name } => {
-            let err = NotGenericError {
-                span,
-                type_name,
-            };
+            let err = NotGenericError { span, type_name };
             diagnostics.add_diagnostic(err.into_diagnostic(file_id));
         }
         TypeArgumentError::NotAGenericType => {
             // For primitives like Int[String], use the path segments as the type name
             let type_name = segments.join(".");
-            let err = NotGenericError {
-                span,
-                type_name,
-            };
+            let err = NotGenericError { span, type_name };
             diagnostics.add_diagnostic(err.into_diagnostic(file_id));
         }
     }
@@ -391,25 +340,22 @@ mod tests {
     use kestrel_semantic_tree::error::ModuleNotFoundError;
     use kestrel_semantic_tree::language::KestrelLanguage;
     use semantic_tree::symbol::Symbol;
-    use crate::queries::{Scope, Import, SymbolResolution};
+    use crate::queries::{Db, Scope, Import, SymbolResolution, TypePathResolution, ValuePathResolution};
 
     /// A mock Db for testing that doesn't require a full semantic tree.
-    /// Only used for testing basic type resolution (unit, never, tuple, function).
     struct MockDb {
         root_id: SymbolId,
     }
 
     impl MockDb {
         fn new() -> Self {
-            MockDb {
-                root_id: SymbolId::new(),
-            }
+            MockDb { root_id: SymbolId::new() }
         }
     }
 
     impl Db for MockDb {
         fn symbol_by_id(&self, _id: SymbolId) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-            None // Not needed for basic type tests
+            None
         }
 
         fn scope_for(&self, symbol_id: SymbolId) -> Arc<Scope> {
@@ -461,38 +407,32 @@ mod tests {
         }
     }
 
+    fn make_ctx(db: &MockDb) -> TypeResolutionContext {
+        TypeResolutionContext { db }
+    }
+
     #[test]
     fn test_resolve_unit_type() {
-        let ty = Ty::unit(0..2);
         let db = MockDb::new();
-
-        let ctx = TypeResolutionContext { db: &db };
-
-        let resolved = resolve_type(&ty, &ctx, db.root_id);
+        let resolved = resolve_type(&Ty::unit(0..2), &make_ctx(&db), db.root_id);
         assert!(resolved.is_some());
         assert!(resolved.unwrap().is_unit());
     }
 
     #[test]
     fn test_resolve_never_type() {
-        let ty = Ty::never(0..1);
         let db = MockDb::new();
-
-        let ctx = TypeResolutionContext { db: &db };
-
-        let resolved = resolve_type(&ty, &ctx, db.root_id);
+        let resolved = resolve_type(&Ty::never(0..1), &make_ctx(&db), db.root_id);
         assert!(resolved.is_some());
         assert!(resolved.unwrap().is_never());
     }
 
     #[test]
     fn test_resolve_tuple_type() {
-        let ty = Ty::tuple(vec![Ty::unit(0..2), Ty::never(4..5)], 0..6);
         let db = MockDb::new();
+        let ty = Ty::tuple(vec![Ty::unit(0..2), Ty::never(4..5)], 0..6);
+        let resolved = resolve_type(&ty, &make_ctx(&db), db.root_id);
 
-        let ctx = TypeResolutionContext { db: &db };
-
-        let resolved = resolve_type(&ty, &ctx, db.root_id);
         assert!(resolved.is_some());
         let resolved_ty = resolved.unwrap();
         assert!(resolved_ty.is_tuple());
@@ -505,16 +445,14 @@ mod tests {
 
     #[test]
     fn test_resolve_function_type() {
+        let db = MockDb::new();
         let ty = Ty::function(
             vec![Ty::unit(0..2), Ty::never(4..5)],
             Ty::unit(10..12),
             0..12,
         );
-        let db = MockDb::new();
+        let resolved = resolve_type(&ty, &make_ctx(&db), db.root_id);
 
-        let ctx = TypeResolutionContext { db: &db };
-
-        let resolved = resolve_type(&ty, &ctx, db.root_id);
         assert!(resolved.is_some());
         let resolved_ty = resolved.unwrap();
         assert!(resolved_ty.is_function());

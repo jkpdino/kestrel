@@ -847,6 +847,18 @@ fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
                             format!("{:?}", b.kind())
                         }
                     }
+                    KestrelBehaviorKind::Conformances => {
+                        use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
+                        if let Some(cb) = b.as_ref().downcast_ref::<ConformancesBehavior>() {
+                            let conformances: Vec<String> = cb.conformances()
+                                .iter()
+                                .map(|t| format_type(t))
+                                .collect();
+                            format!("Conformances({})", conformances.join(", "))
+                        } else {
+                            format!("{:?}", b.kind())
+                        }
+                    }
                 }
             })
             .collect();

@@ -231,10 +231,13 @@ fn check_function_visibility(
     let func_sym = symbol.as_ref().downcast_ref::<FunctionSymbol>();
 
     if let Some(func_sym) = func_sym {
-        let callable = func_sym.callable();
+        let callable = match func_sym.callable() {
+            Some(c) => c,
+            None => return,
+        };
         // Check return type
         if let Some((type_name, type_level)) =
-            find_less_visible_type(&callable.return_type(), VisibilityLevel::Public)
+            find_less_visible_type(callable.return_type(), VisibilityLevel::Public)
         {
             let message = if config.debug_mode {
                 format!(

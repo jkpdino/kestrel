@@ -136,11 +136,11 @@ impl Resolver for FunctionResolver {
         // Extract and resolve return type from syntax
         let resolved_return = resolve_return_type_from_syntax(syntax, source, symbol_id, context, file_id);
 
-        // Update the callable behavior with resolved types
-        if let Some(func_sym) = symbol.as_ref().downcast_ref::<FunctionSymbol>() {
-            let resolved_callable = CallableBehavior::new(resolved_params, resolved_return, span);
-            func_sym.set_callable(resolved_callable);
-        }
+        // Add a new CallableBehavior with resolved types
+        // The FunctionSymbol.get_callable() method returns the last CallableBehavior,
+        // which will be this resolved one.
+        let resolved_callable = CallableBehavior::new(resolved_params, resolved_return, span);
+        symbol.metadata().add_behavior(resolved_callable);
     }
 }
 

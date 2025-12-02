@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -12,7 +13,7 @@ use semantic_tree::symbol::Symbol;
 
 use crate::queries::TypePathResolution;
 use crate::resolver::{BindingContext, Resolver};
-use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause, extract_conformances};
+use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -59,17 +60,14 @@ impl Resolver for ProtocolResolver {
         // Extract where clause (uses type_parameters to look up SymbolIds)
         let where_clause = extract_where_clause(syntax, source, &type_parameters);
 
-        // Extract inherited protocols (protocol A: B, C { })
-        let inherited_protocols = extract_conformances(syntax, source);
-
-        // Create the protocol symbol with type parameters, where clause, and inherited protocols
+        // Create the protocol symbol with type parameters and where clause
+        // Inherited protocols are resolved and added as a ConformancesBehavior during bind phase
         let protocol_symbol = ProtocolSymbol::with_generics(
             name,
             full_span.clone(),
             visibility_behavior,
             type_parameters.clone(),
             where_clause,
-            inherited_protocols,
             parent.cloned(),
         );
         let protocol_arc = Arc::new(protocol_symbol);
@@ -117,12 +115,12 @@ impl Resolver for ProtocolResolver {
             .map(|s| s.as_str())
             .unwrap_or("");
 
-        // Resolve inherited protocols from syntax and store them
+        // Resolve inherited protocols from syntax and add as behavior
         resolve_inherited_protocols(syntax, source, symbol, symbol_id, context, file_id);
     }
 }
 
-/// Resolve inherited protocols from syntax and store them in the symbol
+/// Resolve inherited protocols from syntax and add them as a ConformancesBehavior
 fn resolve_inherited_protocols(
     syntax: &SyntaxNode,
     source: &str,
@@ -228,8 +226,7 @@ fn resolve_inherited_protocols(
         }
     }
 
-    // Update the protocol symbol with resolved inherited protocols
-    if let Some(protocol_sym) = symbol.as_ref().downcast_ref::<ProtocolSymbol>() {
-        protocol_sym.set_inherited_protocols(resolved_protocols);
-    }
+    // Add ConformancesBehavior with resolved inherited protocols
+    let conformances_behavior = ConformancesBehavior::new(resolved_protocols);
+    symbol.metadata().add_behavior(conformances_behavior);
 }

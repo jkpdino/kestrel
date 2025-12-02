@@ -7,6 +7,7 @@ use crate::{
     behavior::callable::{CallableBehavior, CallableSignature},
     behavior::function_data::FunctionDataBehavior,
     behavior::visibility::VisibilityBehavior,
+    behavior::KestrelBehaviorKind,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::local::{Local, LocalId},
@@ -34,14 +35,17 @@ pub use crate::behavior::callable::CallableParameter as Parameter;
 ///
 /// Two functions with the same `CallableSignature` are duplicates (error).
 /// Functions with different signatures can coexist as overloads.
+///
+/// # Type Resolution
+///
+/// During build phase, a `CallableBehavior` is added with unresolved (placeholder) types.
+/// During bind phase, a new `CallableBehavior` is added with resolved types.
+/// Query methods like `return_type()` and `signature()` get the last (resolved) behavior.
 #[derive(Debug)]
 pub struct FunctionSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
     is_static: bool,
     has_body: bool,
-    /// Callable behavior containing parameters and return type.
-    /// Initially contains unresolved types, updated during bind phase with resolved types.
-    callable: RwLock<CallableBehavior>,
     /// Type parameters for generic functions, e.g., `func identity[T](value: T) -> T`
     type_parameters: Vec<Arc<TypeParameterSymbol>>,
     /// Where clause constraints for type parameters
@@ -108,7 +112,7 @@ impl FunctionSymbol {
             .with_declaration_span(name.span.clone())
             .with_span(span)
             .with_behavior(Arc::new(visibility))
-            .with_behavior(Arc::new(callable.clone()))
+            .with_behavior(Arc::new(callable))
             .with_behavior(Arc::new(function_data));
 
         if let Some(p) = parent {
@@ -119,7 +123,6 @@ impl FunctionSymbol {
             metadata: builder.build(),
             is_static,
             has_body,
-            callable: RwLock::new(callable),
             type_parameters,
             where_clause,
             locals: RwLock::new(Vec::new()),
@@ -136,56 +139,76 @@ impl FunctionSymbol {
         self.has_body
     }
 
-    /// Get a clone of the callable behavior
-    pub fn callable(&self) -> CallableBehavior {
-        self.callable.read().unwrap().clone()
+    /// Get the callable behavior (the last/resolved one from metadata)
+    ///
+    /// During bind phase, a new CallableBehavior with resolved types is added.
+    /// This returns the last one, which has resolved types if bind has occurred.
+    fn get_callable(&self) -> Option<CallableBehavior> {
+        self.metadata
+            .behaviors()
+            .into_iter()
+            .rev()
+            .find_map(|b| {
+                if b.kind() == KestrelBehaviorKind::Callable {
+                    // Use downcast_rs via as_ref() then clone
+                    b.as_ref().downcast_ref::<CallableBehavior>().cloned()
+                } else {
+                    None
+                }
+            })
     }
 
-    /// Get the function's parameters
-    ///
-    /// Returns a clone of the parameters. The callable is updated during bind phase
-    /// with resolved types.
-    pub fn parameters(&self) -> Vec<Parameter> {
-        self.callable.read().unwrap().parameters().to_vec()
+    /// Get the callable behavior (cloned)
+    pub fn callable(&self) -> Option<CallableBehavior> {
+        self.get_callable()
     }
 
     /// Get the function's return type
     ///
-    /// Returns a clone of the return type. The callable is updated during bind phase
-    /// with resolved types.
+    /// Returns the resolved return type if bind has occurred.
     pub fn return_type(&self) -> Ty {
-        self.callable.read().unwrap().return_type().clone()
+        self.get_callable()
+            .map(|c| c.return_type().clone())
+            .unwrap_or_else(|| Ty::error(0..0))
+    }
+
+    /// Get the function's parameters
+    pub fn parameters(&self) -> Vec<Parameter> {
+        self.get_callable()
+            .map(|c| c.parameters().to_vec())
+            .unwrap_or_default()
     }
 
     /// Get the number of parameters (arity)
     pub fn arity(&self) -> usize {
-        self.callable.read().unwrap().arity()
+        self.get_callable().map(|c| c.arity()).unwrap_or(0)
     }
 
     /// Get the callable signature for overload resolution and duplicate detection.
     ///
     /// Two functions with the same signature are considered duplicates.
     pub fn signature(&self) -> CallableSignature {
-        self.callable.read().unwrap().signature(&self.metadata.name().value)
+        self.get_callable()
+            .map(|c| c.signature(&self.metadata.name().value))
+            .unwrap_or_else(|| CallableSignature::new(self.metadata.name().value.clone(), vec![], vec![]))
     }
 
     /// Get the function signature as a Ty::Function
     ///
     /// This is useful for type checking and storing the function's type.
     pub fn function_type(&self) -> Ty {
-        self.callable.read().unwrap().function_type()
+        self.get_callable()
+            .map(|c| c.function_type())
+            .unwrap_or_else(|| Ty::error(0..0))
     }
 
     /// Get parameter labels for display/debugging
     ///
     /// Returns a list of external labels (or None for unlabeled parameters).
     pub fn parameter_labels(&self) -> Vec<Option<String>> {
-        self.callable.read().unwrap().parameters().iter().map(|p| p.external_label().map(|s| s.to_string())).collect()
-    }
-
-    /// Set the callable behavior with resolved types (called during bind phase)
-    pub fn set_callable(&self, callable: CallableBehavior) {
-        *self.callable.write().unwrap() = callable;
+        self.get_callable()
+            .map(|c| c.parameters().iter().map(|p| p.external_label().map(|s| s.to_string())).collect())
+            .unwrap_or_default()
     }
 
     /// Get the type parameters for this function
