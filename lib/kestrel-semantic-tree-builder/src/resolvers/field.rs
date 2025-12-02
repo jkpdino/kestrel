@@ -11,7 +11,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{BindingContext, Resolver};
-use crate::type_resolver::{resolve_type_with_diagnostics, TypeResolutionContext};
+use crate::type_syntax::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -126,72 +126,22 @@ fn resolve_field_type_from_syntax(
     ctx: &mut BindingContext,
     file_id: usize,
 ) -> Ty {
-    use crate::queries::TypePathResolution;
-
     // Get source from context
     let source = source_file
         .and_then(|name| ctx.sources.get(name))
         .map(|s| s.as_str())
         .unwrap_or("");
 
-    // Find the Ty node
+    // Find the Ty node and resolve using shared utility
     if let Some(ty_node) = syntax.children().find(|child| child.kind() == SyntaxKind::Ty) {
-        let ty_span = get_node_span(&ty_node, source);
-
-        // Try to find a TyPath inside the Ty node
-        if let Some(ty_path_node) = ty_node.children().find(|child| child.kind() == SyntaxKind::TyPath) {
-            // Find the Path node inside TyPath
-            if let Some(path_node) = ty_path_node.children().find(|child| child.kind() == SyntaxKind::Path) {
-                // Collect path segments
-                let segments: Vec<String> = path_node
-                    .children()
-                    .filter(|child| child.kind() == SyntaxKind::PathElement)
-                    .filter_map(|path_elem| {
-                        path_elem
-                            .children_with_tokens()
-                            .filter_map(|elem| elem.into_token())
-                            .find(|tok| tok.kind() == SyntaxKind::Identifier)
-                            .map(|tok| tok.text().to_string())
-                    })
-                    .collect();
-
-                if !segments.is_empty() {
-                    // Resolve the path immediately
-                    match ctx.db.resolve_type_path(segments.clone(), context_id) {
-                        TypePathResolution::Resolved(resolved_ty) => {
-                            return resolved_ty;
-                        }
-                        TypePathResolution::NotFound { segment, .. } => {
-                            let diagnostic = kestrel_reporting::Diagnostic::error()
-                                .with_message(format!("cannot find type '{}' in this scope", segment))
-                                .with_labels(vec![kestrel_reporting::Label::primary(file_id, ty_span.clone())
-                                    .with_message("not found")]);
-                            ctx.diagnostics.add_diagnostic(diagnostic);
-                            return Ty::error(ty_span);
-                        }
-                        TypePathResolution::Ambiguous { segment, candidates, .. } => {
-                            let diagnostic = kestrel_reporting::Diagnostic::error()
-                                .with_message(format!("type '{}' is ambiguous ({} candidates)", segment, candidates.len()))
-                                .with_labels(vec![kestrel_reporting::Label::primary(file_id, ty_span.clone())
-                                    .with_message("ambiguous")]);
-                            ctx.diagnostics.add_diagnostic(diagnostic);
-                            return Ty::error(ty_span);
-                        }
-                        TypePathResolution::NotAType { .. } => {
-                            let diagnostic = kestrel_reporting::Diagnostic::error()
-                                .with_message(format!("'{}' is not a type", segments.join(".")))
-                                .with_labels(vec![kestrel_reporting::Label::primary(file_id, ty_span.clone())
-                                    .with_message("not a type")]);
-                            ctx.diagnostics.add_diagnostic(diagnostic);
-                            return Ty::error(ty_span);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fallback: return error type
-        return Ty::error(ty_span);
+        let mut type_ctx = TypeSyntaxContext {
+            db: ctx.db,
+            diagnostics: ctx.diagnostics,
+            file_id,
+            source,
+            context_id,
+        };
+        return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
     }
 
     // No type found - return error

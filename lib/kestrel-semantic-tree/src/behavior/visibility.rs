@@ -6,7 +6,7 @@ use semantic_tree::{behavior::Behavior, symbol::Symbol};
 
 use crate::{behavior::KestrelBehaviorKind, language::KestrelLanguage};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Private,
     Fileprivate,
@@ -25,7 +25,7 @@ impl fmt::Display for Visibility {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VisibilityBehavior {
     visibility: Option<Visibility>,
     #[allow(dead_code)]

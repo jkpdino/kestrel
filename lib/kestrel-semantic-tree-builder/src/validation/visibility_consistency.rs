@@ -9,10 +9,9 @@
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
+use kestrel_semantic_tree::behavior::visibility::Visibility;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_alias::TypeAliasTypedBehavior;
@@ -77,24 +76,16 @@ impl VisibilityLevel {
 
 /// Get the visibility level of a symbol
 fn get_symbol_visibility_level(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> VisibilityLevel {
-    let behaviors = symbol.metadata().behaviors();
-    let vis = behaviors
-        .iter()
-        .find(|b| matches!(b.kind(), KestrelBehaviorKind::Visibility))
-        .and_then(|b| b.as_ref().downcast_ref::<VisibilityBehavior>())
-        .and_then(|vb| vb.visibility());
-    VisibilityLevel::from_visibility(vis)
+    let vis = symbol.visibility_behavior()
+        .and_then(|vb| vb.visibility().cloned());
+    VisibilityLevel::from_visibility(vis.as_ref())
 }
 
 /// Get visibility level from a concrete symbol type
 fn get_visibility_level_from_symbol<S: Symbol<KestrelLanguage>>(symbol: &Arc<S>) -> VisibilityLevel {
-    let behaviors = symbol.metadata().behaviors();
-    let vis = behaviors
-        .iter()
-        .find(|b| matches!(b.kind(), KestrelBehaviorKind::Visibility))
-        .and_then(|b| b.as_ref().downcast_ref::<VisibilityBehavior>())
-        .and_then(|vb| vb.visibility());
-    VisibilityLevel::from_visibility(vis)
+    let vis = symbol.visibility_behavior()
+        .and_then(|vb| vb.visibility().cloned());
+    VisibilityLevel::from_visibility(vis.as_ref())
 }
 
 /// Check if a type exposes a less-visible symbol, returns the offending type name and visibility
@@ -362,18 +353,8 @@ fn check_field_visibility(
     let file_id = get_file_id_for_symbol(symbol, diagnostics);
     let span = symbol.metadata().declaration_span().clone();
 
-    // Get TypedBehavior for the field type
-    // We want the LAST TypedBehavior because the bind phase adds a resolved one after the syntactic one
-    let behaviors = symbol.metadata().behaviors();
-    let typed = behaviors.iter().rev().find_map(|b| {
-        if matches!(b.kind(), KestrelBehaviorKind::Typed) {
-            b.as_ref().downcast_ref::<TypedBehavior>()
-        } else {
-            None
-        }
-    });
-
-    if let Some(typed) = typed {
+    // Get TypedBehavior for the field type using the extension trait
+    if let Some(typed) = symbol.typed_behavior() {
         if let Some((type_name, type_level)) =
             find_less_visible_type(typed.ty(), VisibilityLevel::Public)
         {

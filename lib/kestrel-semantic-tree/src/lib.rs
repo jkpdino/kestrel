@@ -1,4 +1,5 @@
 pub mod behavior;
+pub mod behavior_ext;
 pub mod error;
 pub mod language;
 pub mod symbol;

@@ -38,9 +38,9 @@ pub use crate::behavior::callable::CallableParameter as Parameter;
 ///
 /// # Type Resolution
 ///
-/// During build phase, a `CallableBehavior` is added with unresolved (placeholder) types.
-/// During bind phase, a new `CallableBehavior` is added with resolved types.
-/// Query methods like `return_type()` and `signature()` get the last (resolved) behavior.
+/// During build phase, basic symbol information is captured but `CallableBehavior` is not yet added.
+/// During bind phase, `CallableBehavior` is added with resolved types.
+/// Query methods like `return_type()` and `signature()` return `None`/defaults until bind occurs.
 #[derive(Debug)]
 pub struct FunctionSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
@@ -89,30 +89,31 @@ impl FunctionSymbol {
     }
 
     /// Create a new generic FunctionSymbol with type parameters and where clause
+    ///
+    /// NOTE: CallableBehavior is NOT added here. It will be added during the bind phase
+    /// when types are resolved. This avoids having two CallableBehaviors (one with
+    /// unresolved placeholder types, one with resolved types).
     pub fn with_generics(
         name: Name,
         span: Span,
         visibility: VisibilityBehavior,
         is_static: bool,
         has_body: bool,
-        parameters: Vec<Parameter>,
-        return_type: Ty,
+        _parameters: Vec<Parameter>,
+        _return_type: Ty,
         type_parameters: Vec<Arc<TypeParameterSymbol>>,
         where_clause: WhereClause,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
-        // Create the callable behavior
-        let callable = CallableBehavior::new(parameters, return_type, span.clone());
-
         // Create the function data behavior
         let function_data = FunctionDataBehavior::new(has_body, is_static);
 
+        // Note: CallableBehavior is added during bind phase with resolved types
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Function)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
             .with_span(span)
             .with_behavior(Arc::new(visibility))
-            .with_behavior(Arc::new(callable))
             .with_behavior(Arc::new(function_data));
 
         if let Some(p) = parent {
@@ -139,18 +140,15 @@ impl FunctionSymbol {
         self.has_body
     }
 
-    /// Get the callable behavior (the last/resolved one from metadata)
+    /// Get the callable behavior from metadata.
     ///
-    /// During bind phase, a new CallableBehavior with resolved types is added.
-    /// This returns the last one, which has resolved types if bind has occurred.
+    /// Returns `None` if bind phase hasn't occurred yet (CallableBehavior is added during bind).
     fn get_callable(&self) -> Option<CallableBehavior> {
         self.metadata
             .behaviors()
             .into_iter()
-            .rev()
             .find_map(|b| {
                 if b.kind() == KestrelBehaviorKind::Callable {
-                    // Use downcast_rs via as_ref() then clone
                     b.as_ref().downcast_ref::<CallableBehavior>().cloned()
                 } else {
                     None

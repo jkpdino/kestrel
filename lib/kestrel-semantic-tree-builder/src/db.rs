@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
@@ -12,8 +13,6 @@ use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::queries::{self, Scope, Import, ImportItem, SymbolResolution, TypePathResolution, ValuePathResolution};
 use crate::path_resolver;
-use kestrel_semantic_tree::behavior::valued::ValueBehavior;
-use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 
 /// Thread-safe registry of all symbols in the tree
 #[derive(Debug, Clone)]
@@ -720,28 +719,18 @@ impl SemanticDatabase {
         let symbol = &symbols[0];
 
         // First, check for ValueBehavior
-        let value_behavior = symbol.metadata().behaviors()
-            .into_iter()
-            .find(|b| matches!(b.kind(), KestrelBehaviorKind::Valued))
-            .and_then(|b| b.as_ref().downcast_ref::<ValueBehavior>().map(|vb| vb.ty().clone()));
-
-        if let Some(ty) = value_behavior {
+        if let Some(value_beh) = symbol.value_behavior() {
             return ValuePathResolution::Symbol {
                 symbol_id: symbol.metadata().id(),
-                ty,
+                ty: value_beh.ty().clone(),
             };
         }
 
         // If no ValueBehavior, check for CallableBehavior (functions are values)
-        let callable_behavior = symbol.metadata().behaviors()
-            .into_iter()
-            .find(|b| matches!(b.kind(), KestrelBehaviorKind::Callable))
-            .and_then(|b| b.as_ref().downcast_ref::<CallableBehavior>().map(|cb| cb.function_type()));
-
-        if let Some(fn_ty) = callable_behavior {
+        if let Some(callable_beh) = symbol.callable_behavior() {
             return ValuePathResolution::Symbol {
                 symbol_id: symbol.metadata().id(),
-                ty: fn_ty,
+                ty: callable_beh.function_type(),
             };
         }
 

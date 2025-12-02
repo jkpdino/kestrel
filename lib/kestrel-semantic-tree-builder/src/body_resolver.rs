@@ -9,8 +9,7 @@
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::behavior::callable::CallableBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::expression::{ExprKind, ExpressionSymbol};
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
@@ -21,7 +20,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::local_scope::LocalScope;
 use crate::queries::{Db, ValuePathResolution};
-use crate::type_resolver::{resolve_type_with_diagnostics, TypeResolutionContext};
+use crate::type_syntax::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::utils::get_node_span;
 
 /// Context for body resolution
@@ -82,19 +81,10 @@ pub fn resolve_function_body(
 fn bind_parameters_as_locals(
     function: &Arc<FunctionSymbol>,
     local_scope: &mut LocalScope,
-    context: &BodyResolutionContext,
+    _context: &BodyResolutionContext,
 ) {
     // Get the CallableBehavior to access resolved parameter types
-    let behaviors = function.metadata().behaviors();
-    let callable = behaviors.iter().find_map(|b| {
-        if matches!(b.kind(), KestrelBehaviorKind::Callable) {
-            b.as_ref().downcast_ref::<CallableBehavior>()
-        } else {
-            None
-        }
-    });
-
-    if let Some(callable) = callable {
+    if let Some(callable) = function.callable_behavior() {
         for param in callable.parameters() {
             let name = param.bind_name.value.clone();
             let ty = param.ty.clone();
@@ -437,65 +427,14 @@ fn resolve_type_from_syntax(
     context_id: SymbolId,
     ctx: &mut BodyResolutionContext,
 ) -> Ty {
-    let span = get_node_span(ty_node, ctx.source);
-
-    // Try TyPath
-    if let Some(ty_path) = ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
-        if let Some(path) = ty_path.children().find(|c| c.kind() == SyntaxKind::Path) {
-            let segments: Vec<String> = path
-                .children()
-                .filter(|c| c.kind() == SyntaxKind::PathElement)
-                .filter_map(|pe| {
-                    pe.children_with_tokens()
-                        .filter_map(|e| e.into_token())
-                        .find(|t| t.kind() == SyntaxKind::Identifier)
-                        .map(|t| t.text().to_string())
-                })
-                .collect();
-
-            if !segments.is_empty() {
-                // Resolve the path immediately
-                use crate::queries::TypePathResolution;
-                match ctx.db.resolve_type_path(segments.clone(), context_id) {
-                    TypePathResolution::Resolved(resolved_ty) => {
-                        return resolved_ty;
-                    }
-                    TypePathResolution::NotFound { segment, .. } => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("cannot find type '{}' in this scope", segment))
-                            .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())
-                                .with_message("not found")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
-                        return Ty::error(span);
-                    }
-                    TypePathResolution::Ambiguous { segment, candidates, .. } => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("type '{}' is ambiguous ({} candidates)", segment, candidates.len()))
-                            .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())
-                                .with_message("ambiguous")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
-                        return Ty::error(span);
-                    }
-                    TypePathResolution::NotAType { .. } => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("'{}' is not a type", segments.join(".")))
-                            .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())
-                                .with_message("not a type")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
-                        return Ty::error(span);
-                    }
-                }
-            }
-        }
-    }
-
-    // Try TyUnit
-    if ty_node.children().any(|c| c.kind() == SyntaxKind::TyUnit) {
-        return Ty::unit(span);
-    }
-
-    // Fallback - use inferred type
-    Ty::inferred(span)
+    let mut type_ctx = TypeSyntaxContext {
+        db: ctx.db,
+        diagnostics: ctx.diagnostics,
+        file_id: ctx.file_id,
+        source: ctx.source,
+        context_id,
+    };
+    resolve_type_from_ty_node(ty_node, &mut type_ctx)
 }
 
 #[cfg(test)]

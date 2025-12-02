@@ -8,6 +8,7 @@ mod resolver;
 mod resolvers;
 pub mod type_builder;
 pub mod type_resolver;
+pub mod type_syntax;
 mod utils;
 pub mod validation;
 

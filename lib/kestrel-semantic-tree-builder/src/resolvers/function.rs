@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::{FunctionSymbol, Parameter};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -11,10 +10,9 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::body_resolver::{resolve_function_body, BodyResolutionContext};
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
-use crate::type_resolver::{resolve_type_with_diagnostics, TypeResolutionContext};
+use crate::type_syntax::{extract_type_from_ty_node, extract_type_from_node, resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
@@ -233,110 +231,6 @@ fn extract_return_type(syntax: &SyntaxNode, source: &str) -> Ty {
     Ty::unit(fn_span.end..fn_span.end)
 }
 
-/// Extract type from a node that contains a Ty child
-fn extract_type_from_node(node: &SyntaxNode, source: &str) -> Ty {
-    if let Some(ty_node) = find_child(node, SyntaxKind::Ty) {
-        return extract_type_from_ty_node(&ty_node, source);
-    }
-
-    Ty::error(0..0)
-}
-
-/// Extract type from a Ty syntax node
-fn extract_type_from_ty_node(ty_node: &SyntaxNode, source: &str) -> Ty {
-    let ty_span = get_node_span(ty_node, source);
-
-    // Try TyPath
-    if let Some(ty_path_node) = ty_node
-        .children()
-        .find(|child| child.kind() == SyntaxKind::TyPath)
-    {
-        // Find the Path node inside TyPath
-        if let Some(path_node) = ty_path_node
-            .children()
-            .find(|child| child.kind() == SyntaxKind::Path)
-        {
-            // Collect path segments
-            let segments: Vec<String> = path_node
-                .children()
-                .filter(|child| child.kind() == SyntaxKind::PathElement)
-                .filter_map(|path_elem| {
-                    path_elem
-                        .children_with_tokens()
-                        .filter_map(|elem| elem.into_token())
-                        .find(|tok| tok.kind() == SyntaxKind::Identifier)
-                        .map(|tok| tok.text().to_string())
-                })
-                .collect();
-
-            if !segments.is_empty() {
-                // Return error as placeholder - will be resolved during bind
-                return Ty::error(ty_span);
-            }
-        }
-    }
-
-    // Try TyUnit
-    if ty_node
-        .children()
-        .any(|child| child.kind() == SyntaxKind::TyUnit)
-    {
-        return Ty::unit(ty_span);
-    }
-
-    // Try TyNever
-    if ty_node
-        .children()
-        .any(|child| child.kind() == SyntaxKind::TyNever)
-    {
-        return Ty::never(ty_span);
-    }
-
-    // Try TyFunction
-    if let Some(fn_ty_node) = ty_node
-        .children()
-        .find(|child| child.kind() == SyntaxKind::TyFunction)
-    {
-        // Extract parameter types from TyList
-        let mut param_types = Vec::new();
-        if let Some(ty_list) = fn_ty_node
-            .children()
-            .find(|child| child.kind() == SyntaxKind::TyList)
-        {
-            for param_ty_node in ty_list.children().filter(|c| c.kind() == SyntaxKind::Ty) {
-                param_types.push(extract_type_from_ty_node(&param_ty_node, source));
-            }
-        }
-
-        // Extract return type (last Ty child of TyFunction, not in TyList)
-        let return_ty = fn_ty_node
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::Ty)
-            .last()
-            .map(|ty| extract_type_from_ty_node(&ty, source))
-            .unwrap_or_else(|| Ty::unit(ty_span.clone()));
-
-        return Ty::function(param_types, return_ty, ty_span);
-    }
-
-    // Try TyTuple
-    if let Some(tuple_node) = ty_node
-        .children()
-        .find(|child| child.kind() == SyntaxKind::TyTuple)
-    {
-        let element_types: Vec<Ty> = tuple_node
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::Ty)
-            .map(|ty| extract_type_from_ty_node(&ty, source))
-            .collect();
-
-        return Ty::tuple(element_types, ty_span);
-    }
-
-    // Fallback: error type
-    Ty::error(ty_span)
-}
-
 /// Resolve parameters from a FunctionDeclaration syntax node during bind phase
 fn resolve_parameters_from_syntax(
     syntax: &SyntaxNode,
@@ -345,8 +239,6 @@ fn resolve_parameters_from_syntax(
     ctx: &mut BindingContext,
     file_id: usize,
 ) -> Vec<Parameter> {
-    use crate::queries::TypePathResolution;
-
     // Find the ParameterList node
     let param_list = match find_child(syntax, SyntaxKind::ParameterList) {
         Some(node) => node,
@@ -369,8 +261,6 @@ fn resolve_single_parameter(
     ctx: &mut BindingContext,
     file_id: usize,
 ) -> Option<Parameter> {
-    use crate::queries::TypePathResolution;
-
     // Collect all Name nodes
     let name_nodes: Vec<SyntaxNode> = param_node
         .children()
@@ -408,127 +298,22 @@ fn resolve_single_parameter(
         (None, bind_name)
     };
 
-    // Find and resolve the type from Ty node
+    // Find and resolve the type from Ty node using shared utility
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        resolve_type_from_ty_node(&ty_node, source, context_id, ctx, file_id)
+        let mut type_ctx = TypeSyntaxContext {
+            db: ctx.db,
+            diagnostics: ctx.diagnostics,
+            file_id,
+            source,
+            context_id,
+        };
+        resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - inferred
         Ty::inferred(get_node_span(param_node, source))
     };
 
     Some(Parameter { label, bind_name, ty })
-}
-
-/// Resolve a type from a Ty syntax node during bind phase
-fn resolve_type_from_ty_node(
-    ty_node: &SyntaxNode,
-    source: &str,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-    file_id: usize,
-) -> Ty {
-    use crate::queries::TypePathResolution;
-
-    let ty_span = get_node_span(ty_node, source);
-
-    // Try TyPath
-    if let Some(ty_path_node) = ty_node
-        .children()
-        .find(|child| child.kind() == SyntaxKind::TyPath)
-    {
-        if let Some(path_node) = ty_path_node
-            .children()
-            .find(|child| child.kind() == SyntaxKind::Path)
-        {
-            let segments: Vec<String> = path_node
-                .children()
-                .filter(|child| child.kind() == SyntaxKind::PathElement)
-                .filter_map(|path_elem| {
-                    path_elem
-                        .children_with_tokens()
-                        .filter_map(|elem| elem.into_token())
-                        .find(|tok| tok.kind() == SyntaxKind::Identifier)
-                        .map(|tok| tok.text().to_string())
-                })
-                .collect();
-
-            if !segments.is_empty() {
-                // Resolve the path immediately
-                match ctx.db.resolve_type_path(segments.clone(), context_id) {
-                    TypePathResolution::Resolved(resolved_ty) => {
-                        return resolved_ty;
-                    }
-                    TypePathResolution::NotFound { segment, .. } => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("cannot find type '{}' in this scope", segment))
-                            .with_labels(vec![kestrel_reporting::Label::primary(file_id, ty_span.clone())
-                                .with_message("not found")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
-                        return Ty::error(ty_span);
-                    }
-                    TypePathResolution::Ambiguous { segment, candidates, .. } => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("type '{}' is ambiguous ({} candidates)", segment, candidates.len()))
-                            .with_labels(vec![kestrel_reporting::Label::primary(file_id, ty_span.clone())
-                                .with_message("ambiguous")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
-                        return Ty::error(ty_span);
-                    }
-                    TypePathResolution::NotAType { .. } => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("'{}' is not a type", segments.join(".")))
-                            .with_labels(vec![kestrel_reporting::Label::primary(file_id, ty_span.clone())
-                                .with_message("not a type")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
-                        return Ty::error(ty_span);
-                    }
-                }
-            }
-        }
-    }
-
-    // Try TyUnit
-    if ty_node.children().any(|child| child.kind() == SyntaxKind::TyUnit) {
-        return Ty::unit(ty_span);
-    }
-
-    // Try TyNever
-    if ty_node.children().any(|child| child.kind() == SyntaxKind::TyNever) {
-        return Ty::never(ty_span);
-    }
-
-    // Try TyFunction - recursively resolve nested types
-    if let Some(fn_ty_node) = ty_node.children().find(|child| child.kind() == SyntaxKind::TyFunction) {
-        let mut param_types = Vec::new();
-        if let Some(ty_list) = fn_ty_node.children().find(|child| child.kind() == SyntaxKind::TyList) {
-            for param_ty_node in ty_list.children().filter(|c| c.kind() == SyntaxKind::Ty) {
-                param_types.push(resolve_type_from_ty_node(&param_ty_node, source, context_id, ctx, file_id));
-            }
-        }
-
-        let return_ty = fn_ty_node
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::Ty)
-            .last()
-            .map(|ty| resolve_type_from_ty_node(&ty, source, context_id, ctx, file_id))
-            .unwrap_or_else(|| Ty::unit(ty_span.clone()));
-
-        return Ty::function(param_types, return_ty, ty_span);
-    }
-
-    // Try TyTuple - recursively resolve nested types
-    if let Some(tuple_node) = ty_node.children().find(|child| child.kind() == SyntaxKind::TyTuple) {
-        let element_types: Vec<Ty> = tuple_node
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::Ty)
-            .map(|ty| resolve_type_from_ty_node(&ty, source, context_id, ctx, file_id))
-            .collect();
-
-        return Ty::tuple(element_types, ty_span);
-    }
-
-    // Fallback: error type
-    Ty::error(ty_span)
 }
 
 /// Resolve return type from a FunctionDeclaration syntax node during bind phase
@@ -542,7 +327,14 @@ fn resolve_return_type_from_syntax(
     // Find the return type node: FunctionDeclaration -> ReturnType -> Ty
     if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType) {
         if let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty) {
-            return resolve_type_from_ty_node(&ty_node, source, context_id, ctx, file_id);
+            let mut type_ctx = TypeSyntaxContext {
+                db: ctx.db,
+                diagnostics: ctx.diagnostics,
+                file_id,
+                source,
+                context_id,
+            };
+            return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
         }
     }
 
