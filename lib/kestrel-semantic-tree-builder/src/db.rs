@@ -490,14 +490,12 @@ impl queries::Db for SemanticDatabase {
 
         // Subsequent segments: search visible children of the resolved symbol
         for (index, segment) in path.iter().enumerate().skip(1) {
-            let children = current_symbol.metadata().visible_children();
-
             // Find children matching the name and visible from context
-            let matches: Vec<_> = children
-                .into_iter()
-                .filter(|c| c.metadata().name().value == *segment)
-                .filter(|c| path_resolver::is_visible_from(c, &context_symbol))
-                .collect();
+            let matches = path_resolver::find_visible_children_by_name(
+                &current_symbol,
+                segment,
+                &context_symbol,
+            );
 
             match matches.len() {
                 0 => {
@@ -649,14 +647,12 @@ impl queries::Db for SemanticDatabase {
 
         // Subsequent segments: search visible children of the resolved symbol
         for (index, segment) in path.iter().enumerate().skip(1) {
-            let children = current_symbol.metadata().visible_children();
-
             // Find children matching the name and visible from context
-            let matches: Vec<_> = children
-                .into_iter()
-                .filter(|c| c.metadata().name().value == *segment)
-                .filter(|c| path_resolver::is_visible_from(c, &context_symbol))
-                .collect();
+            let matches = path_resolver::find_visible_children_by_name(
+                &current_symbol,
+                segment,
+                &context_symbol,
+            );
 
             // If this is the last segment, handle overloads
             if index == path.len() - 1 {
