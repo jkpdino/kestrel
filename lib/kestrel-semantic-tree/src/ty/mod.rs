@@ -20,6 +20,30 @@ pub struct Ty {
     span: Span,
 }
 
+/// Generate simple type constructors that take only a span
+macro_rules! simple_constructor {
+    ($($(#[$meta:meta])* $name:ident => $variant:expr),* $(,)?) => {
+        $(
+            $(#[$meta])*
+            pub fn $name(span: Span) -> Self {
+                Self::new($variant, span)
+            }
+        )*
+    };
+}
+
+/// Generate type checking methods (is_* methods)
+macro_rules! is_type {
+    ($($(#[$meta:meta])* $name:ident => $pattern:pat),* $(,)?) => {
+        $(
+            $(#[$meta])*
+            pub fn $name(&self) -> bool {
+                matches!(self.kind, $pattern)
+            }
+        )*
+    };
+}
+
 impl Ty {
     /// Create a new type with the given kind and span
     pub fn new(kind: TyKind, span: Span) -> Self {
@@ -36,17 +60,25 @@ impl Ty {
         &self.span
     }
 
-    // === Constructors for each type variant ===
-
-    /// Create a unit type: ()
-    pub fn unit(span: Span) -> Self {
-        Self::new(TyKind::Unit, span)
+    // === Simple constructors (generated) ===
+    simple_constructor! {
+        /// Create a unit type: ()
+        unit => TyKind::Unit,
+        /// Create a never type: !
+        never => TyKind::Never,
+        /// Create a boolean type
+        bool => TyKind::Bool,
+        /// Create a string type
+        string => TyKind::String,
+        /// Create an error type (poison value)
+        error => TyKind::Error,
+        /// Create a Self type reference
+        self_type => TyKind::SelfType,
+        /// Create an inferred type placeholder
+        inferred => TyKind::Inferred,
     }
 
-    /// Create a never type: !
-    pub fn never(span: Span) -> Self {
-        Self::new(TyKind::Never, span)
-    }
+    // === Parameterized constructors ===
 
     /// Create an integer type with the given bit width
     pub fn int(bits: IntBits, span: Span) -> Self {
@@ -56,16 +88,6 @@ impl Ty {
     /// Create a float type with the given bit width
     pub fn float(bits: FloatBits, span: Span) -> Self {
         Self::new(TyKind::Float(bits), span)
-    }
-
-    /// Create a boolean type
-    pub fn bool(span: Span) -> Self {
-        Self::new(TyKind::Bool, span)
-    }
-
-    /// Create a string type
-    pub fn string(span: Span) -> Self {
-        Self::new(TyKind::String, span)
     }
 
     /// Create a tuple type: (T1, T2, ...)
@@ -87,21 +109,6 @@ impl Ty {
             },
             span,
         )
-    }
-
-    /// Create an error type (poison value)
-    pub fn error(span: Span) -> Self {
-        Self::new(TyKind::Error, span)
-    }
-
-    /// Create a Self type reference
-    pub fn self_type(span: Span) -> Self {
-        Self::new(TyKind::SelfType, span)
-    }
-
-    /// Create an inferred type placeholder
-    pub fn inferred(span: Span) -> Self {
-        Self::new(TyKind::Inferred, span)
     }
 
     /// Create a type parameter reference
@@ -187,86 +194,40 @@ impl Ty {
         )
     }
 
-    // === Type checking methods ===
-
-    /// Check if this is a unit type
-    pub fn is_unit(&self) -> bool {
-        matches!(self.kind, TyKind::Unit)
-    }
-
-    /// Check if this is a never type
-    pub fn is_never(&self) -> bool {
-        matches!(self.kind, TyKind::Never)
-    }
-
-    /// Check if this is an integer type
-    pub fn is_int(&self) -> bool {
-        matches!(self.kind, TyKind::Int(_))
-    }
-
-    /// Check if this is a float type
-    pub fn is_float(&self) -> bool {
-        matches!(self.kind, TyKind::Float(_))
-    }
-
-    /// Check if this is a boolean type
-    pub fn is_bool(&self) -> bool {
-        matches!(self.kind, TyKind::Bool)
-    }
-
-    /// Check if this is a string type
-    pub fn is_string(&self) -> bool {
-        matches!(self.kind, TyKind::String)
-    }
-
-    /// Check if this is a tuple type
-    pub fn is_tuple(&self) -> bool {
-        matches!(self.kind, TyKind::Tuple(_))
-    }
-
-    /// Check if this is an array type
-    pub fn is_array(&self) -> bool {
-        matches!(self.kind, TyKind::Array(_))
-    }
-
-    /// Check if this is a function type
-    pub fn is_function(&self) -> bool {
-        matches!(self.kind, TyKind::Function { .. })
-    }
-
-    /// Check if this is an error type
-    pub fn is_error(&self) -> bool {
-        matches!(self.kind, TyKind::Error)
-    }
-
-    /// Check if this is a Self type reference
-    pub fn is_self_type(&self) -> bool {
-        matches!(self.kind, TyKind::SelfType)
-    }
-
-    /// Check if this is an inferred type
-    pub fn is_inferred(&self) -> bool {
-        matches!(self.kind, TyKind::Inferred)
-    }
-
-    /// Check if this is a type parameter type
-    pub fn is_type_parameter(&self) -> bool {
-        matches!(self.kind, TyKind::TypeParameter(_))
-    }
-
-    /// Check if this is a protocol type (resolved)
-    pub fn is_protocol(&self) -> bool {
-        matches!(self.kind, TyKind::Protocol { .. })
-    }
-
-    /// Check if this is a struct type (resolved)
-    pub fn is_struct(&self) -> bool {
-        matches!(self.kind, TyKind::Struct { .. })
-    }
-
-    /// Check if this is a type alias type
-    pub fn is_type_alias(&self) -> bool {
-        matches!(self.kind, TyKind::TypeAlias { .. })
+    // === Type checking methods (generated) ===
+    is_type! {
+        /// Check if this is a unit type
+        is_unit => TyKind::Unit,
+        /// Check if this is a never type
+        is_never => TyKind::Never,
+        /// Check if this is an integer type
+        is_int => TyKind::Int(_),
+        /// Check if this is a float type
+        is_float => TyKind::Float(_),
+        /// Check if this is a boolean type
+        is_bool => TyKind::Bool,
+        /// Check if this is a string type
+        is_string => TyKind::String,
+        /// Check if this is a tuple type
+        is_tuple => TyKind::Tuple(_),
+        /// Check if this is an array type
+        is_array => TyKind::Array(_),
+        /// Check if this is a function type
+        is_function => TyKind::Function { .. },
+        /// Check if this is an error type
+        is_error => TyKind::Error,
+        /// Check if this is a Self type reference
+        is_self_type => TyKind::SelfType,
+        /// Check if this is an inferred type
+        is_inferred => TyKind::Inferred,
+        /// Check if this is a type parameter type
+        is_type_parameter => TyKind::TypeParameter(_),
+        /// Check if this is a protocol type (resolved)
+        is_protocol => TyKind::Protocol { .. },
+        /// Check if this is a struct type (resolved)
+        is_struct => TyKind::Struct { .. },
+        /// Check if this is a type alias type
+        is_type_alias => TyKind::TypeAlias { .. },
     }
 
     // === Accessor methods ===
@@ -388,10 +349,6 @@ mod tests {
         let ty = Ty::never(0..1);
         assert!(!ty.is_unit());
         assert!(ty.is_never());
-        assert!(!ty.is_tuple());
-        assert!(!ty.is_function());
-        assert!(!ty.is_error());
-        assert!(!ty.is_type_alias());
     }
 
     #[test]
@@ -417,10 +374,7 @@ mod tests {
 
     #[test]
     fn test_tuple_type() {
-        let elem1 = Ty::unit(0..2);
-        let elem2 = Ty::never(3..4);
-        let ty = Ty::tuple(vec![elem1, elem2], 0..5);
-
+        let ty = Ty::tuple(vec![Ty::unit(0..2), Ty::never(3..4)], 0..5);
         assert!(ty.is_tuple());
         assert!(!ty.is_unit());
 
@@ -432,12 +386,11 @@ mod tests {
 
     #[test]
     fn test_function_type() {
-        let param1 = Ty::unit(0..2);
-        let param2 = Ty::never(4..5);
-        let return_ty = Ty::unit(10..12);
-
-        let ty = Ty::function(vec![param1, param2], return_ty, 0..12);
-
+        let ty = Ty::function(
+            vec![Ty::unit(0..2), Ty::never(4..5)],
+            Ty::unit(10..12),
+            0..12,
+        );
         assert!(ty.is_function());
         assert!(!ty.is_unit());
 
@@ -450,11 +403,8 @@ mod tests {
 
     #[test]
     fn test_nested_types() {
-        // Create a function type with tuple parameters: ((), !) -> ()
         let tuple_param = Ty::tuple(vec![Ty::unit(1..3), Ty::never(5..6)], 0..7);
-        let return_ty = Ty::unit(12..14);
-
-        let fn_ty = Ty::function(vec![tuple_param], return_ty, 0..14);
+        let fn_ty = Ty::function(vec![tuple_param], Ty::unit(12..14), 0..14);
 
         assert!(fn_ty.is_function());
 

@@ -146,23 +146,26 @@ mod tests {
     use super::*;
     use kestrel_lexer::lex;
 
-    #[test]
-    fn test_protocol_declaration_basic() {
-        let source = "protocol Drawable { }";
+    /// Helper to parse source code and return a ProtocolDeclaration
+    fn parse(source: &str) -> ProtocolDeclaration {
         let tokens: Vec<_> = lex(source)
             .filter_map(|t| t.ok())
             .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
+            .collect();
         let mut sink = EventSink::new();
         parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
         let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
+        ProtocolDeclaration { syntax: tree, span: 0..source.len() }
+    }
 
+    /// Helper to check if a syntax node exists as a child
+    fn has_child(decl: &ProtocolDeclaration, kind: SyntaxKind) -> bool {
+        decl.syntax.children().any(|child| child.kind() == kind)
+    }
+
+    #[test]
+    fn test_protocol_declaration_basic() {
+        let decl = parse("protocol Drawable { }");
         assert_eq!(decl.name(), Some("Drawable".to_string()));
         assert_eq!(decl.visibility(), None);
         assert_eq!(decl.syntax.kind(), SyntaxKind::ProtocolDeclaration);
@@ -170,185 +173,60 @@ mod tests {
 
     #[test]
     fn test_protocol_declaration_with_visibility() {
-        let source = "public protocol Serializable { }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("public protocol Serializable { }");
         assert_eq!(decl.name(), Some("Serializable".to_string()));
         assert_eq!(decl.visibility(), Some(SyntaxKind::Public));
     }
 
     #[test]
     fn test_protocol_with_type_params() {
-        let source = "protocol Collection[T] { }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol Collection[T] { }");
         assert_eq!(decl.name(), Some("Collection".to_string()));
-        let has_type_params = decl.syntax
-            .children()
-            .any(|child| child.kind() == SyntaxKind::TypeParameterList);
-        assert!(has_type_params, "Expected TypeParameterList node");
+        assert!(has_child(&decl, SyntaxKind::TypeParameterList));
     }
 
     #[test]
     fn test_protocol_with_where_clause() {
-        let source = "protocol Comparable[T] where T: Equatable { }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol Comparable[T] where T: Equatable { }");
         assert_eq!(decl.name(), Some("Comparable".to_string()));
-        let has_where_clause = decl.syntax
-            .children()
-            .any(|child| child.kind() == SyntaxKind::WhereClause);
-        assert!(has_where_clause, "Expected WhereClause node");
+        assert!(has_child(&decl, SyntaxKind::WhereClause));
     }
 
     #[test]
     fn test_protocol_with_method() {
-        let source = "protocol Drawable { func draw() }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol Drawable { func draw() }");
         assert_eq!(decl.name(), Some("Drawable".to_string()));
-        let methods = decl.methods();
-        assert_eq!(methods.len(), 1);
+        assert_eq!(decl.methods().len(), 1);
     }
 
     #[test]
     fn test_protocol_with_method_and_return_type() {
-        let source = "protocol Serializable { func serialize() -> String }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol Serializable { func serialize() -> String }");
         assert_eq!(decl.name(), Some("Serializable".to_string()));
-        let methods = decl.methods();
-        assert_eq!(methods.len(), 1);
+        assert_eq!(decl.methods().len(), 1);
     }
 
     #[test]
     fn test_protocol_with_multiple_methods() {
-        let source = "protocol Collection { func count() -> Int func isEmpty() -> Bool }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol Collection { func count() -> Int func isEmpty() -> Bool }");
         assert_eq!(decl.name(), Some("Collection".to_string()));
-        let methods = decl.methods();
-        assert_eq!(methods.len(), 2);
+        assert_eq!(decl.methods().len(), 2);
     }
 
     #[test]
     fn test_protocol_method_with_parameters() {
-        let source = "protocol NetworkClient { func fetch(from url: String) -> Data }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol NetworkClient { func fetch(from url: String) -> Data }");
         assert_eq!(decl.name(), Some("NetworkClient".to_string()));
-        let methods = decl.methods();
-        assert_eq!(methods.len(), 1);
+        assert_eq!(decl.methods().len(), 1);
     }
 
     #[test]
     fn test_protocol_method_with_generics() {
-        let source = "protocol Container { func get[T](index: Int) -> T }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol Container { func get[T](index: Int) -> T }");
         assert_eq!(decl.name(), Some("Container".to_string()));
         let methods = decl.methods();
         assert_eq!(methods.len(), 1);
-
-        // Check that the method has type parameters
-        let method = &methods[0];
-        let has_type_params = method.children()
+        let has_type_params = methods[0].children()
             .any(|child| child.kind() == SyntaxKind::TypeParameterList);
         assert!(has_type_params, "Expected TypeParameterList on method");
     }
@@ -357,77 +235,28 @@ mod tests {
     fn test_protocol_method_with_body_parses() {
         // This should parse successfully - the error about having a body
         // should be detected at semantic analysis, not parsing
-        let source = "protocol BadProtocol { func doSomething() { } }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol BadProtocol { func doSomething() { } }");
         assert_eq!(decl.name(), Some("BadProtocol".to_string()));
         let methods = decl.methods();
         assert_eq!(methods.len(), 1);
-
-        // The method should have a FunctionBody node
-        let method = &methods[0];
-        let has_body = method.children().any(|c| c.kind() == SyntaxKind::FunctionBody);
+        let has_body = methods[0].children().any(|c| c.kind() == SyntaxKind::FunctionBody);
         assert!(has_body, "Protocol method with body should parse and include FunctionBody node");
     }
 
     #[test]
     fn test_protocol_inheritance() {
-        let source = "protocol Shape: Drawable { }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol Shape: Drawable { }");
         assert_eq!(decl.name(), Some("Shape".to_string()));
-        let has_conformance = decl.syntax
-            .children()
-            .any(|child| child.kind() == SyntaxKind::ConformanceList);
-        assert!(has_conformance, "Expected ConformanceList node for protocol inheritance");
+        assert!(has_child(&decl, SyntaxKind::ConformanceList));
     }
 
     #[test]
     fn test_protocol_multiple_inheritance() {
-        let source = "protocol Widget: Drawable, Clickable { }";
-        let tokens: Vec<_> = lex(source)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect::<Vec<_>>();
-
-        let mut sink = EventSink::new();
-        parse_protocol_declaration(source, tokens.into_iter(), &mut sink);
-
-        let tree = TreeBuilder::new(source, sink.into_events()).build();
-        let decl = ProtocolDeclaration {
-            syntax: tree,
-            span: 0..source.len(),
-        };
-
+        let decl = parse("protocol Widget: Drawable, Clickable { }");
         let conformance_list = decl.syntax
             .children()
             .find(|child| child.kind() == SyntaxKind::ConformanceList)
             .expect("Expected ConformanceList node");
-
         let conformance_count = conformance_list
             .children()
             .filter(|c| c.kind() == SyntaxKind::ConformanceItem)
