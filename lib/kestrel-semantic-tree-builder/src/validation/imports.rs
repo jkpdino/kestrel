@@ -19,7 +19,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
-use crate::queries;
+use crate::queries::{self, Db};
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass for import declarations
@@ -139,12 +139,8 @@ fn validate_import(
     if !import_data.items().is_empty() {
         // import A.B.C.(D, E)
         for item in import_data.items() {
-            // Find the symbol in the module's visible children
-            let target = module_symbol
-                .metadata()
-                .visible_children()
-                .into_iter()
-                .find(|child| child.metadata().name().value == item.name);
+            // Find the symbol in the module's visible children using query
+            let target = db.find_child_by_name(module_id, &item.name);
 
             match target {
                 Some(target_symbol) => {
@@ -282,20 +278,8 @@ fn check_import_conflicts(
             Err(_) => continue, // Already reported in validate_import
         };
 
-        let module_symbol = match db.symbol_by_id(module_id) {
-            Some(s) => s,
-            None => continue,
-        };
-
-        // Check each visible symbol from the module
-        for child in module_symbol.metadata().visible_children() {
-            let child_id = child.metadata().id();
-
-            // Only check visible symbols
-            if !queries::is_visible_from(db, child_id, import_id) {
-                continue;
-            }
-
+        // Check each visible symbol from the module using query
+        for child in db.visible_children_from(module_id, import_id) {
             let name = child.metadata().name().value.clone();
 
             // Check if this name conflicts with existing names

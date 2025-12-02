@@ -405,6 +405,14 @@ mod tests {
                 index: 0,
             }
         }
+
+        fn visible_children_from(&self, _parent: SymbolId, _context: SymbolId) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
+            vec![]
+        }
+
+        fn find_child_by_name(&self, _parent: SymbolId, _name: &str) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+            None
+        }
     }
 
     fn make_ctx(db: &MockDb) -> TypeResolutionContext {

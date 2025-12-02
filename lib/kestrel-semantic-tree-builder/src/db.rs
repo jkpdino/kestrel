@@ -694,6 +694,33 @@ impl queries::Db for SemanticDatabase {
             index: path.len().saturating_sub(1),
         }
     }
+
+    fn visible_children_from(&self, parent: SymbolId, context: SymbolId) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
+        let parent_symbol = match self.symbol_by_id(parent) {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+
+        parent_symbol
+            .metadata()
+            .visible_children()
+            .into_iter()
+            .filter(|child| {
+                let child_id = child.metadata().id();
+                self.is_visible_from(child_id, context)
+            })
+            .collect()
+    }
+
+    fn find_child_by_name(&self, parent: SymbolId, name: &str) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+        let parent_symbol = self.symbol_by_id(parent)?;
+
+        parent_symbol
+            .metadata()
+            .visible_children()
+            .into_iter()
+            .find(|child| child.metadata().name().value == name)
+    }
 }
 
 impl SemanticDatabase {

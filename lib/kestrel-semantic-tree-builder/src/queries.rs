@@ -230,6 +230,18 @@ pub trait Db {
     /// Returns `ValuePathResolution::Overloaded` if the path resolves to
     /// multiple function overloads.
     fn resolve_value_path(&self, path: Vec<String>, context: SymbolId) -> ValuePathResolution;
+
+    /// Get visible children of a symbol that are visible from the given context.
+    ///
+    /// This filters the symbol's children based on visibility rules,
+    /// returning only those accessible from the context scope.
+    fn visible_children_from(&self, parent: SymbolId, context: SymbolId) -> Vec<Arc<dyn Symbol<KestrelLanguage>>>;
+
+    /// Find a child symbol by name (without visibility check).
+    ///
+    /// Returns the first child with the given name, or None if not found.
+    /// Use `is_visible_from` separately to check visibility.
+    fn find_child_by_name(&self, parent: SymbolId, name: &str) -> Option<Arc<dyn Symbol<KestrelLanguage>>>;
 }
 
 
