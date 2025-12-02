@@ -142,7 +142,9 @@ impl SignatureType {
                 params: params.iter().map(SignatureType::from_ty).collect(),
                 return_type: Box::new(SignatureType::from_ty(return_type)),
             },
-            TyKind::Path(segments, _) => SignatureType::Named(segments.clone()),
+            TyKind::Error => SignatureType::Named(vec!["<error>".to_string()]),
+            TyKind::SelfType => SignatureType::Named(vec!["Self".to_string()]),
+            TyKind::Inferred => SignatureType::Named(vec!["_".to_string()]),
             TyKind::TypeParameter(param) => {
                 SignatureType::Named(vec![param.metadata().name().value.clone()])
             }
@@ -415,12 +417,13 @@ mod tests {
 
     #[test]
     fn test_callable_behavior_signature_unlabeled() {
+        use crate::ty::IntBits;
         // Unlabeled parameters have None for labels
         let params = vec![
-            CallableParameter::new(make_name("x"), Ty::path(vec!["Int".to_string()], 0..3)),
-            CallableParameter::new(make_name("y"), Ty::path(vec!["Int".to_string()], 5..8)),
+            CallableParameter::new(make_name("x"), Ty::int(IntBits::I64, 0..3)),
+            CallableParameter::new(make_name("y"), Ty::int(IntBits::I64, 5..8)),
         ];
-        let return_ty = Ty::path(vec!["Int".to_string()], 13..16);
+        let return_ty = Ty::int(IntBits::I64, 13..16);
         let behavior = CallableBehavior::new(params, return_ty, 0..20);
 
         let sig = behavior.signature("add");
@@ -436,7 +439,7 @@ mod tests {
         let params = vec![CallableParameter::with_label(
             make_name("with"),
             make_name("name"),
-            Ty::path(vec!["String".to_string()], 0..6),
+            Ty::string(0..6),
         )];
         let return_ty = Ty::unit(10..12);
         let behavior = CallableBehavior::new(params, return_ty, 0..15);

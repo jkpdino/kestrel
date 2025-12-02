@@ -89,14 +89,19 @@ impl Ty {
         )
     }
 
-    /// Create a path type (unresolved): A.B.C
-    pub fn path(segments: Vec<String>, span: Span) -> Self {
-        Self::new(TyKind::Path(segments, vec![]), span)
+    /// Create an error type (poison value)
+    pub fn error(span: Span) -> Self {
+        Self::new(TyKind::Error, span)
     }
 
-    /// Create a generic path type (unresolved): A.B.C[T1, T2]
-    pub fn generic_path(segments: Vec<String>, type_args: Vec<Ty>, span: Span) -> Self {
-        Self::new(TyKind::Path(segments, type_args), span)
+    /// Create a Self type reference
+    pub fn self_type(span: Span) -> Self {
+        Self::new(TyKind::SelfType, span)
+    }
+
+    /// Create an inferred type placeholder
+    pub fn inferred(span: Span) -> Self {
+        Self::new(TyKind::Inferred, span)
     }
 
     /// Create a type parameter reference
@@ -229,9 +234,19 @@ impl Ty {
         matches!(self.kind, TyKind::Function { .. })
     }
 
-    /// Check if this is a path type (unresolved)
-    pub fn is_path(&self) -> bool {
-        matches!(self.kind, TyKind::Path(_, _))
+    /// Check if this is an error type
+    pub fn is_error(&self) -> bool {
+        matches!(self.kind, TyKind::Error)
+    }
+
+    /// Check if this is a Self type reference
+    pub fn is_self_type(&self) -> bool {
+        matches!(self.kind, TyKind::SelfType)
+    }
+
+    /// Check if this is an inferred type
+    pub fn is_inferred(&self) -> bool {
+        matches!(self.kind, TyKind::Inferred)
     }
 
     /// Check if this is a type parameter type
@@ -292,22 +307,6 @@ impl Ty {
     pub fn as_function(&self) -> Option<(&Vec<Ty>, &Ty)> {
         match &self.kind {
             TyKind::Function { params, return_type } => Some((params, return_type)),
-            _ => None,
-        }
-    }
-
-    /// Get path segments if this is a path type
-    pub fn as_path(&self) -> Option<&Vec<String>> {
-        match &self.kind {
-            TyKind::Path(segments, _) => Some(segments),
-            _ => None,
-        }
-    }
-
-    /// Get path segments and type arguments if this is a path type
-    pub fn as_path_with_args(&self) -> Option<(&Vec<String>, &Vec<Ty>)> {
-        match &self.kind {
-            TyKind::Path(segments, args) => Some((segments, args)),
             _ => None,
         }
     }
@@ -380,7 +379,7 @@ mod tests {
         assert!(!ty.is_never());
         assert!(!ty.is_tuple());
         assert!(!ty.is_function());
-        assert!(!ty.is_path());
+        assert!(!ty.is_error());
         assert!(!ty.is_type_alias());
     }
 
@@ -391,8 +390,29 @@ mod tests {
         assert!(ty.is_never());
         assert!(!ty.is_tuple());
         assert!(!ty.is_function());
-        assert!(!ty.is_path());
+        assert!(!ty.is_error());
         assert!(!ty.is_type_alias());
+    }
+
+    #[test]
+    fn test_error_type() {
+        let ty = Ty::error(0..5);
+        assert!(ty.is_error());
+        assert!(!ty.is_unit());
+    }
+
+    #[test]
+    fn test_self_type() {
+        let ty = Ty::self_type(0..4);
+        assert!(ty.is_self_type());
+        assert!(!ty.is_unit());
+    }
+
+    #[test]
+    fn test_inferred_type() {
+        let ty = Ty::inferred(0..1);
+        assert!(ty.is_inferred());
+        assert!(!ty.is_unit());
     }
 
     #[test]
@@ -426,20 +446,6 @@ mod tests {
         assert!(params[0].is_unit());
         assert!(params[1].is_never());
         assert!(ret.is_unit());
-    }
-
-    #[test]
-    fn test_path_type() {
-        let ty = Ty::path(vec!["A".to_string(), "B".to_string(), "C".to_string()], 0..5);
-
-        assert!(ty.is_path());
-        assert!(!ty.is_unit());
-
-        let segments = ty.as_path().unwrap();
-        assert_eq!(segments.len(), 3);
-        assert_eq!(segments[0], "A");
-        assert_eq!(segments[1], "B");
-        assert_eq!(segments[2], "C");
     }
 
     #[test]

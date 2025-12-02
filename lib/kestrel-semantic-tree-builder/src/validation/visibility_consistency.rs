@@ -162,14 +162,16 @@ fn find_less_visible_type(ty: &Ty, required_level: VisibilityLevel) -> Option<(S
             }
             find_less_visible_type(return_type, required_level)
         }
-        // Primitive types and unresolved paths don't have visibility issues
+        // Primitive types and special types don't have visibility issues
         TyKind::Unit
         | TyKind::Never
         | TyKind::Int(_)
         | TyKind::Float(_)
         | TyKind::Bool
         | TyKind::String
-        | TyKind::Path(_, _) => None,
+        | TyKind::Error
+        | TyKind::SelfType
+        | TyKind::Inferred => None,
     }
 }
 
@@ -218,25 +220,21 @@ fn check_function_visibility(
     diagnostics: &mut DiagnosticContext,
     config: &ValidationConfig,
 ) {
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+
     let name = &symbol.metadata().name().value;
     let file_id = get_file_id_for_symbol(symbol, diagnostics);
     let span = symbol.metadata().declaration_span().clone();
 
-    // Get CallableBehavior for parameter and return types
-    // We want the LAST CallableBehavior because the bind phase adds a resolved one after the syntactic one
-    let behaviors = symbol.metadata().behaviors();
-    let callable = behaviors.iter().rev().find_map(|b| {
-        if matches!(b.kind(), KestrelBehaviorKind::Callable) {
-            b.as_ref().downcast_ref::<CallableBehavior>()
-        } else {
-            None
-        }
-    });
+    // Get callable behavior from FunctionSymbol directly
+    // The callable is updated with resolved types during bind phase
+    let func_sym = symbol.as_ref().downcast_ref::<FunctionSymbol>();
 
-    if let Some(callable) = callable {
+    if let Some(func_sym) = func_sym {
+        let callable = func_sym.callable();
         // Check return type
         if let Some((type_name, type_level)) =
-            find_less_visible_type(callable.return_type(), VisibilityLevel::Public)
+            find_less_visible_type(&callable.return_type(), VisibilityLevel::Public)
         {
             let message = if config.debug_mode {
                 format!(

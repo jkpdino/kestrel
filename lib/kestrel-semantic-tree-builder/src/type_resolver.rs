@@ -10,10 +10,10 @@ pub struct TypeResolutionContext<'a> {
     pub db: &'a dyn Db,
 }
 
-/// Recursively resolve all Path variants in a type
+/// Recursively resolve nested types
 ///
-/// This function walks through the type structure and replaces all `TyKind::Path`
-/// variants with their resolved types using scope-aware name resolution.
+/// This function walks through the type structure and ensures all nested types
+/// (like in tuples, arrays, functions) are properly resolved.
 ///
 /// # Arguments
 /// * `ty` - The type to resolve
@@ -34,41 +34,16 @@ pub fn resolve_type(
     context_id: SymbolId,
 ) -> Option<Ty> {
     match ty.kind() {
-        // Base types that don't need resolution
+        // Base types and special types that don't need resolution
         TyKind::Unit
         | TyKind::Never
         | TyKind::Int(_)
         | TyKind::Float(_)
         | TyKind::Bool
-        | TyKind::String => Some(ty.clone()),
-
-        // Path types need to be resolved using scope-aware resolution
-        TyKind::Path(segments, type_args) => {
-            match queries::resolve_type_path(ctx.db, segments.clone(), context_id) {
-                TypePathResolution::Resolved(resolved_ty) => {
-                    // If there are type arguments, we need to create substitutions
-                    if type_args.is_empty() {
-                        Some(resolved_ty)
-                    } else {
-                        // Resolve each type argument recursively
-                        let resolved_args: Option<Vec<Ty>> = type_args
-                            .iter()
-                            .map(|arg| resolve_type(arg, ctx, context_id))
-                            .collect();
-
-                        match resolved_args {
-                            Some(args) => {
-                                // Apply type arguments, converting Result to Option
-                                // Errors are logged but resolution continues
-                                apply_type_arguments(&resolved_ty, args, ty.span().clone()).ok()
-                            }
-                            None => None,
-                        }
-                    }
-                }
-                _ => None, // NotFound, Ambiguous, or NotAType
-            }
-        }
+        | TyKind::String
+        | TyKind::Error
+        | TyKind::SelfType
+        | TyKind::Inferred => Some(ty.clone()),
 
         // Type parameter types are already resolved
         TyKind::TypeParameter(_) => Some(ty.clone()),
@@ -151,78 +126,16 @@ pub fn resolve_type_with_diagnostics(
     file_id: usize,
 ) -> Option<Ty> {
     match ty.kind() {
-        // Base types that don't need resolution
+        // Base types and special types that don't need resolution
         TyKind::Unit
         | TyKind::Never
         | TyKind::Int(_)
         | TyKind::Float(_)
         | TyKind::Bool
-        | TyKind::String => Some(ty.clone()),
-
-        // Path types need resolution with error reporting
-        TyKind::Path(segments, type_args) => {
-            match queries::resolve_type_path(ctx.db, segments.clone(), context_id) {
-                TypePathResolution::Resolved(resolved_ty) => {
-                    if type_args.is_empty() {
-                        Some(resolved_ty)
-                    } else {
-                        // Resolve each type argument, collecting all errors
-                        let resolved_args: Option<Vec<Ty>> = type_args
-                            .iter()
-                            .map(|arg| resolve_type_with_diagnostics(arg, ctx, context_id, diagnostics, file_id))
-                            .collect();
-
-                        match resolved_args {
-                            Some(args) => {
-                                match apply_type_arguments(&resolved_ty, args, ty.span().clone()) {
-                                    Ok(result_ty) => Some(result_ty),
-                                    Err(err) => {
-                                        report_type_argument_error(err, ty.span().clone(), segments, diagnostics, file_id);
-                                        None
-                                    }
-                                }
-                            }
-                            None => None,
-                        }
-                    }
-                }
-                TypePathResolution::NotFound { segment, .. } => {
-                    let error = UnresolvedTypeError {
-                        span: ty.span().clone(),
-                        type_name: segment,
-                    };
-                    diagnostics.add_diagnostic(error.into_diagnostic(file_id));
-                    None
-                }
-                TypePathResolution::Ambiguous { segment, candidates, .. } => {
-                    let error = AmbiguousTypeError {
-                        span: ty.span().clone(),
-                        type_name: segment,
-                        candidate_count: candidates.len(),
-                    };
-                    diagnostics.add_diagnostic(error.into_diagnostic(file_id));
-                    None
-                }
-                TypePathResolution::NotAType { symbol_id } => {
-                    // Try to get the symbol's kind for a better error message
-                    let (name, kind) = ctx.db.symbol_by_id(symbol_id)
-                        .map(|s| {
-                            let name = s.metadata().name().value.clone();
-                            let kind = format!("{:?}", s.metadata().kind());
-                            (name, kind)
-                        })
-                        .unwrap_or_else(|| (segments.join("."), "symbol".to_string()));
-
-                    let error = NotATypeError {
-                        span: ty.span().clone(),
-                        name,
-                        actual_kind: kind,
-                    };
-                    diagnostics.add_diagnostic(error.into_diagnostic(file_id));
-                    None
-                }
-            }
-        }
+        | TyKind::String
+        | TyKind::Error
+        | TyKind::SelfType
+        | TyKind::Inferred => Some(ty.clone()),
 
         // Type parameter types are already resolved
         TyKind::TypeParameter(_) => Some(ty.clone()),
@@ -407,7 +320,7 @@ fn apply_type_arguments(
         // Type parameters with type arguments (e.g., T[Int]) are not supported
         TyKind::TypeParameter(_) => Err(TypeArgumentError::NotAGenericType),
 
-        // Base types don't accept type arguments
+        // Base types and special types don't accept type arguments
         TyKind::Unit
         | TyKind::Never
         | TyKind::Int(_)
@@ -417,7 +330,9 @@ fn apply_type_arguments(
         | TyKind::Tuple(_)
         | TyKind::Array(_)
         | TyKind::Function { .. }
-        | TyKind::Path(_, _) => Err(TypeArgumentError::NotAGenericType),
+        | TyKind::Error
+        | TyKind::SelfType
+        | TyKind::Inferred => Err(TypeArgumentError::NotAGenericType),
     }
 }
 

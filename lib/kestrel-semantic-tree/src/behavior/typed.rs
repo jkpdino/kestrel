@@ -61,21 +61,21 @@ mod tests {
     }
 
     #[test]
-    fn test_typed_behavior_path() {
-        let ty = Ty::path(vec!["Int".to_string()], 5..8);
+    fn test_typed_behavior_int() {
+        use crate::ty::IntBits;
+        let ty = Ty::int(IntBits::I64, 5..8);
         let behavior = TypedBehavior::new(ty, 5..8);
 
-        assert!(behavior.ty().is_path());
-        let segments = behavior.ty().as_path().unwrap();
-        assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0], "Int");
+        assert!(behavior.ty().is_int());
+        assert_eq!(behavior.ty().as_int(), Some(IntBits::I64));
     }
 
     #[test]
     fn test_typed_behavior_function() {
-        let param1 = Ty::path(vec!["Int".to_string()], 1..4);
-        let param2 = Ty::path(vec!["String".to_string()], 6..12);
-        let return_ty = Ty::path(vec!["Bool".to_string()], 17..21);
+        use crate::ty::IntBits;
+        let param1 = Ty::int(IntBits::I64, 1..4);
+        let param2 = Ty::string(6..12);
+        let return_ty = Ty::bool(17..21);
 
         let fn_ty = Ty::function(vec![param1, param2], return_ty, 0..21);
         let behavior = TypedBehavior::new(fn_ty, 0..21);
@@ -84,6 +84,6 @@ mod tests {
 
         let (params, ret) = behavior.ty().as_function().unwrap();
         assert_eq!(params.len(), 2);
-        assert!(ret.is_path());
+        assert!(ret.is_bool());
     }
 }

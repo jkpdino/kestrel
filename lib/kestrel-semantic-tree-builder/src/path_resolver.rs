@@ -274,8 +274,8 @@ mod tests {
         let struct_symbol = StructSymbol::new(struct_name, 0..20, visibility, None);
         let struct_arc = Arc::new(struct_symbol);
 
-        // Add TypedBehavior after creation (following the pattern in resolvers/struct.rs)
-        let struct_type = Ty::path(vec!["MyStruct".to_string()], 0..8);
+        // Add TypedBehavior after creation (using struct type)
+        let struct_type = Ty::r#struct(struct_arc.clone(), 0..8);
         let typed_behavior = TypedBehavior::new(struct_type, 0..8);
         struct_arc.metadata().add_behavior(typed_behavior);
 
@@ -291,12 +291,7 @@ mod tests {
 
         assert!(result.is_some());
         let ty = result.unwrap();
-        assert!(ty.is_path());
-
-        if let Some(segments) = ty.as_path() {
-            assert_eq!(segments.len(), 1);
-            assert_eq!(segments[0], "MyStruct");
-        }
+        assert!(ty.is_struct());
     }
 
     #[test]
@@ -325,7 +320,7 @@ mod tests {
         let outer_arc = Arc::new(outer_symbol);
 
         // Add TypedBehavior to outer class
-        let outer_type = Ty::path(vec!["Outer".to_string()], 0..5);
+        let outer_type = Ty::r#struct(outer_arc.clone(), 0..5);
         let outer_typed = TypedBehavior::new(outer_type, 0..5);
         outer_arc.metadata().add_behavior(outer_typed);
 
@@ -339,7 +334,7 @@ mod tests {
         let inner_arc = Arc::new(inner_symbol);
 
         // Add TypedBehavior to inner struct
-        let inner_type = Ty::path(vec!["Outer".to_string(), "Inner".to_string()], 10..15);
+        let inner_type = Ty::r#struct(inner_arc.clone(), 10..15);
         let inner_typed = TypedBehavior::new(inner_type, 10..15);
         inner_arc.metadata().add_behavior(inner_typed);
 
@@ -361,13 +356,7 @@ mod tests {
             "Failed to resolve nested path Outer.Inner"
         );
         let ty = result.unwrap();
-        assert!(ty.is_path(), "Result should be a path type");
-
-        if let Some(segments) = ty.as_path() {
-            assert_eq!(segments.len(), 2);
-            assert_eq!(segments[0], "Outer");
-            assert_eq!(segments[1], "Inner");
-        }
+        assert!(ty.is_struct(), "Result should be a struct type");
     }
 
     #[test]
@@ -384,7 +373,7 @@ mod tests {
         let outer_arc = Arc::new(outer_symbol);
 
         // Add TypedBehavior to outer class
-        let outer_type = Ty::path(vec!["Outer".to_string()], 0..5);
+        let outer_type = Ty::r#struct(outer_arc.clone(), 0..5);
         let outer_typed = TypedBehavior::new(outer_type, 0..5);
         outer_arc.metadata().add_behavior(outer_typed);
 
@@ -398,7 +387,7 @@ mod tests {
         let inner_arc = Arc::new(inner_symbol);
 
         // Add TypedBehavior to inner struct
-        let inner_type = Ty::path(vec!["Outer".to_string(), "Inner".to_string()], 10..15);
+        let inner_type = Ty::r#struct(inner_arc.clone(), 10..15);
         let inner_typed = TypedBehavior::new(inner_type, 10..15);
         inner_arc.metadata().add_behavior(inner_typed);
 
@@ -432,7 +421,7 @@ mod tests {
         let a_visibility = VisibilityBehavior::new(Some(Visibility::Public), 0..6, root.clone());
         let a_symbol = StructSymbol::new(a_name, 0..100, a_visibility, None);
         let a_arc = Arc::new(a_symbol);
-        let a_type = Ty::path(vec!["A".to_string()], 0..1);
+        let a_type = Ty::r#struct(a_arc.clone(), 0..1);
         let a_typed = TypedBehavior::new(a_type, 0..1);
         a_arc.metadata().add_behavior(a_typed);
         let a_arc_dyn: Arc<dyn Symbol<KestrelLanguage>> = a_arc;
@@ -442,7 +431,7 @@ mod tests {
         let b_visibility = VisibilityBehavior::new(Some(Visibility::Public), 10..16, root.clone());
         let b_symbol = StructSymbol::new(b_name, 10..80, b_visibility, None);
         let b_arc = Arc::new(b_symbol);
-        let b_type = Ty::path(vec!["A".to_string(), "B".to_string()], 10..11);
+        let b_type = Ty::r#struct(b_arc.clone(), 10..11);
         let b_typed = TypedBehavior::new(b_type, 10..11);
         b_arc.metadata().add_behavior(b_typed);
         let b_arc_dyn: Arc<dyn Symbol<KestrelLanguage>> = b_arc;
@@ -452,10 +441,7 @@ mod tests {
         let c_visibility = VisibilityBehavior::new(Some(Visibility::Public), 20..26, root.clone());
         let c_symbol = StructSymbol::new(c_name, 20..50, c_visibility, None);
         let c_arc = Arc::new(c_symbol);
-        let c_type = Ty::path(
-            vec!["A".to_string(), "B".to_string(), "C".to_string()],
-            20..21,
-        );
+        let c_type = Ty::r#struct(c_arc.clone(), 20..21);
         let c_typed = TypedBehavior::new(c_type, 20..21);
         c_arc.metadata().add_behavior(c_typed);
         let c_arc_dyn: Arc<dyn Symbol<KestrelLanguage>> = c_arc;
@@ -477,14 +463,7 @@ mod tests {
             "Failed to resolve deeply nested path A.B.C"
         );
         let ty = result.unwrap();
-        assert!(ty.is_path());
-
-        if let Some(segments) = ty.as_path() {
-            assert_eq!(segments.len(), 3);
-            assert_eq!(segments[0], "A");
-            assert_eq!(segments[1], "B");
-            assert_eq!(segments[2], "C");
-        }
+        assert!(ty.is_struct());
     }
 
     // Helper to create a test root symbol

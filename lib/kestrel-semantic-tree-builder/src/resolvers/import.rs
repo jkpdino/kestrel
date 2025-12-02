@@ -70,6 +70,7 @@ impl Resolver for ImportResolver {
     fn bind_declaration(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        _syntax: &SyntaxNode,
         ctx: &mut BindingContext,
     ) {
         // Get import data from behavior

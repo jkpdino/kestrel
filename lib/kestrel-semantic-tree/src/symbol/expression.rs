@@ -35,7 +35,9 @@ pub enum ExprKind {
     /// Grouping expression: (expr)
     Grouping(Arc<ExpressionSymbol>),
     /// Path expression: a.b.c (unresolved)
-    /// Stores the path segments with their spans
+    /// Stores the path segments with their spans.
+    /// This should only exist temporarily - during resolution it should become
+    /// LocalRef, SymbolRef, OverloadedRef, or Error.
     Path(Vec<(String, Span)>),
     /// Reference to a local variable (resolved from a path)
     /// Stores the function's SymbolId and the LocalId within that function
@@ -43,6 +45,12 @@ pub enum ExprKind {
     /// Reference to a symbol with ValueBehavior (resolved from a path)
     /// Used for module-level functions, fields, globals, etc.
     SymbolRef(SymbolId),
+    /// Overloaded function reference (pending call resolution)
+    /// Stores candidates that will be disambiguated by call arguments
+    OverloadedRef(Vec<SymbolId>),
+    /// Error expression (poison value)
+    /// Used when expression resolution fails - prevents cascading errors
+    Error,
 }
 
 /// A symbol representing an expression in the semantic tree
@@ -223,6 +231,26 @@ impl ExpressionSymbol {
         Self::new(name, span, ExprKind::SymbolRef(symbol_id), Some(ty), parent)
     }
 
+    /// Create an overloaded function reference expression
+    /// Type is None until call resolution disambiguates the overload
+    pub fn overloaded_ref(
+        candidates: Vec<SymbolId>,
+        span: Span,
+        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
+    ) -> Self {
+        let name = Name::new("<overloaded>".to_string(), span.clone());
+        Self::new(name, span, ExprKind::OverloadedRef(candidates), None, parent)
+    }
+
+    /// Create an error expression (poison value)
+    pub fn error(
+        span: Span,
+        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
+    ) -> Self {
+        let name = Name::new("<error>".to_string(), span.clone());
+        Self::new(name, span, ExprKind::Error, None, parent)
+    }
+
     /// Get the expression kind
     pub fn expr_kind(&self) -> &ExprKind {
         &self.expr_kind
@@ -266,6 +294,16 @@ impl ExpressionSymbol {
     /// Check if this is a symbol reference
     pub fn is_symbol_ref(&self) -> bool {
         matches!(self.expr_kind, ExprKind::SymbolRef(_))
+    }
+
+    /// Check if this is an overloaded function reference
+    pub fn is_overloaded_ref(&self) -> bool {
+        matches!(self.expr_kind, ExprKind::OverloadedRef(_))
+    }
+
+    /// Check if this is an error expression
+    pub fn is_error(&self) -> bool {
+        matches!(self.expr_kind, ExprKind::Error)
     }
 
     /// Get the literal value if this is a literal expression
@@ -320,6 +358,14 @@ impl ExpressionSymbol {
     pub fn as_symbol_ref(&self) -> Option<SymbolId> {
         match &self.expr_kind {
             ExprKind::SymbolRef(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    /// Get the overloaded candidates if this is an OverloadedRef
+    pub fn as_overloaded_ref(&self) -> Option<&Vec<SymbolId>> {
+        match &self.expr_kind {
+            ExprKind::OverloadedRef(candidates) => Some(candidates),
             _ => None,
         }
     }

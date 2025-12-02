@@ -27,14 +27,9 @@ impl TypeBuilder {
             // Handle direct Identifier tokens (from current parser output)
             // This is a fallback for the current syntax tree structure where
             // AliasedType contains Identifier directly instead of Ty -> TyPath -> Path
+            // Use error as placeholder - will be resolved during bind
             SyntaxKind::AliasedType => {
-                // Try to extract identifier directly
-                let identifier = node
-                    .children_with_tokens()
-                    .filter_map(|elem| elem.into_token())
-                    .find(|tok| tok.kind() == SyntaxKind::Identifier)?;
-                let name = identifier.text().to_string();
-                Some(Ty::path(vec![name], span))
+                Some(Ty::error(span))
             }
             _ => None,
         }
@@ -42,39 +37,9 @@ impl TypeBuilder {
 
     fn build_path(node: &SyntaxNode, source: &str) -> Option<Ty> {
         let span = get_node_span(node, source);
-        let path_node = find_child(node, SyntaxKind::Path)?;
-
-        let segments: Vec<String> = path_node
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::PathElement)
-            .filter_map(|elem| {
-                elem.children_with_tokens()
-                    .filter_map(|t| t.into_token())
-                    .find(|tok| tok.kind() == SyntaxKind::Identifier)
-                    .map(|tok| tok.text().to_string())
-            })
-            .collect();
-
-        if segments.is_empty() {
-            return None;
-        }
-
-        // Extract type arguments if present: List[Int, String]
-        let type_args: Vec<Ty> = find_child(node, SyntaxKind::TypeArgumentList)
-            .map(|arg_list| {
-                arg_list
-                    .children()
-                    .filter(|c| c.kind() == SyntaxKind::Ty)
-                    .filter_map(|c| Self::build(&c, source))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        if type_args.is_empty() {
-            Some(Ty::path(segments, span))
-        } else {
-            Some(Ty::generic_path(segments, type_args, span))
-        }
+        // Path types are placeholders during build - actual resolution happens during bind
+        // Return error type as a placeholder
+        Some(Ty::error(span))
     }
 
     fn build_tuple(node: &SyntaxNode, source: &str) -> Option<Ty> {

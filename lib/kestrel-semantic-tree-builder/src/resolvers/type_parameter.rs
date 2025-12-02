@@ -135,13 +135,13 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str) -> Option<Ty> {
         SyntaxKind::TyUnit => Some(Ty::unit(span)),
         SyntaxKind::TyNever => Some(Ty::never(span)),
         SyntaxKind::TyPath => {
-            // Extract path segments
+            // Extract path segments - use error as placeholder, will be resolved during bind
             let path_node = find_child(&variant_node, SyntaxKind::Path)?;
             let segments = extract_path_segments(&path_node);
             if segments.is_empty() {
                 None
             } else {
-                Some(Ty::path(segments, span))
+                Some(Ty::error(span))
             }
         }
         SyntaxKind::TyTuple => {
@@ -244,9 +244,9 @@ fn parse_type_bound(
         .children()
         .filter(|c| c.kind() == SyntaxKind::Path)
         .map(|path_node| {
-            let segments = extract_path_segments(&path_node);
             let span = get_node_span(&path_node, source);
-            Ty::path(segments, span)
+            // Use error as placeholder - will be resolved during bind
+            Ty::error(span)
         })
         .collect();
 

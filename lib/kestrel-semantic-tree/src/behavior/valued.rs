@@ -55,17 +55,19 @@ mod tests {
 
     #[test]
     fn test_value_behavior_simple() {
-        let ty = Ty::path(vec!["Int".to_string()], 5..8);
+        use crate::ty::IntBits;
+        let ty = Ty::int(IntBits::I64, 5..8);
         let behavior = ValueBehavior::new(ty, 0..10);
 
-        assert!(behavior.ty().is_path());
+        assert!(behavior.ty().is_int());
         assert_eq!(behavior.span(), &(0..10));
     }
 
     #[test]
     fn test_value_behavior_function_type() {
-        let param = Ty::path(vec!["Int".to_string()], 1..4);
-        let return_ty = Ty::path(vec!["Int".to_string()], 9..12);
+        use crate::ty::IntBits;
+        let param = Ty::int(IntBits::I64, 1..4);
+        let return_ty = Ty::int(IntBits::I64, 9..12);
         let fn_ty = Ty::function(vec![param], return_ty, 0..12);
 
         let behavior = ValueBehavior::new(fn_ty, 0..20);

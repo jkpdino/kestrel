@@ -56,11 +56,17 @@ pub enum TyKind {
         return_type: Box<Ty>,
     },
 
-    /// Path type (unresolved)
-    /// This represents a path like A.B.C that hasn't been resolved yet
-    /// During semantic analysis, this should be resolved to a concrete type
-    /// The second element contains type arguments if present (e.g., List[Int])
-    Path(Vec<String>, Vec<Ty>),
+    /// Error type (poison value)
+    /// Used when type resolution fails - prevents cascading errors
+    Error,
+
+    /// Self type reference
+    /// Represents the `Self` keyword within a type context
+    SelfType,
+
+    /// Inferred type (placeholder for type inference)
+    /// Represents `_` in type annotations, to be resolved by inference
+    Inferred,
 
     /// Type parameter reference (resolved)
     /// This represents a reference to a type parameter within a generic context

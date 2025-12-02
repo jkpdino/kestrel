@@ -434,8 +434,7 @@ impl queries::Db for SemanticDatabase {
                 "Bool" => return TypePathResolution::Resolved(Ty::bool(span)),
                 "String" => return TypePathResolution::Resolved(Ty::string(span)),
                 // Self is a special type that refers to the implementing type in protocols/structs
-                // It resolves to a Path("Self") for now - the type checker handles substitution
-                "Self" => return TypePathResolution::Resolved(Ty::path(vec!["Self".to_string()], span)),
+                "Self" => return TypePathResolution::Resolved(Ty::self_type(span)),
                 _ => {} // Not a primitive, continue with regular resolution
             }
         }

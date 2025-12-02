@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
@@ -19,7 +19,8 @@ pub struct ProtocolSymbol {
     /// Where clause constraints for type parameters
     where_clause: WhereClause,
     /// Inherited protocols, e.g., `protocol Shape: Drawable { }`
-    inherited_protocols: Vec<Ty>,
+    /// Initially contains unresolved placeholder types, resolved during bind phase.
+    inherited_protocols: RwLock<Vec<Ty>>,
 }
 
 impl Symbol<KestrelLanguage> for ProtocolSymbol {
@@ -63,7 +64,7 @@ impl ProtocolSymbol {
             metadata: builder.build(),
             type_parameters,
             where_clause,
-            inherited_protocols,
+            inherited_protocols: RwLock::new(inherited_protocols),
         }
     }
 
@@ -88,12 +89,17 @@ impl ProtocolSymbol {
     }
 
     /// Get the protocols this protocol inherits from
-    pub fn inherited_protocols(&self) -> &[Ty] {
-        &self.inherited_protocols
+    pub fn inherited_protocols(&self) -> Vec<Ty> {
+        self.inherited_protocols.read().unwrap().clone()
     }
 
     /// Check if this protocol inherits from any other protocols
     pub fn has_inherited_protocols(&self) -> bool {
-        !self.inherited_protocols.is_empty()
+        !self.inherited_protocols.read().unwrap().is_empty()
+    }
+
+    /// Set the resolved inherited protocols (called during bind phase)
+    pub fn set_inherited_protocols(&self, protocols: Vec<Ty>) {
+        *self.inherited_protocols.write().unwrap() = protocols;
     }
 }

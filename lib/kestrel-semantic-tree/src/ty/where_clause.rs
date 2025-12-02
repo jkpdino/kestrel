@@ -127,7 +127,8 @@ mod tests {
     #[test]
     fn test_where_clause_with_constraints() {
         let param_id = SymbolId::new();
-        let bound = Ty::path(vec!["Hashable".to_string()], 0..8);
+        // Use error type as placeholder for protocol bound in test
+        let bound = Ty::error(0..8);
 
         let constraint = Constraint::type_bound(param_id, "T".to_string(), 0..1, vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
@@ -143,7 +144,8 @@ mod tests {
     fn test_bounds_for_unknown_param() {
         let param_id = SymbolId::new();
         let other_id = SymbolId::new();
-        let bound = Ty::path(vec!["Hashable".to_string()], 0..8);
+        // Use error type as placeholder for protocol bound in test
+        let bound = Ty::error(0..8);
 
         let constraint = Constraint::type_bound(param_id, "T".to_string(), 0..1, vec![bound]);
         let wc = WhereClause::with_constraints(vec![constraint]);
@@ -155,7 +157,8 @@ mod tests {
 
     #[test]
     fn test_unresolved_constraint() {
-        let bound = Ty::path(vec!["Hashable".to_string()], 0..8);
+        // Use error type as placeholder for protocol bound in test
+        let bound = Ty::error(0..8);
         let constraint = Constraint::unresolved_type_bound("U".to_string(), 0..1, vec![bound]);
 
         assert!(constraint.is_unresolved());

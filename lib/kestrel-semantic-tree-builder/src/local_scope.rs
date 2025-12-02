@@ -191,10 +191,11 @@ mod tests {
 
     #[test]
     fn test_simple_binding() {
+        use kestrel_semantic_tree::ty::IntBits;
         let func = create_test_function();
         let mut scope = LocalScope::new(func.clone());
 
-        let ty = Ty::path(vec!["Int".to_string()], 0..3);
+        let ty = Ty::int(IntBits::I64, 0..3);
         let id = scope.bind("x".to_string(), ty, false, 0..5);
 
         assert_eq!(scope.lookup("x"), Some(id));
@@ -203,10 +204,11 @@ mod tests {
 
     #[test]
     fn test_shadowing() {
+        use kestrel_semantic_tree::ty::IntBits;
         let func = create_test_function();
         let mut scope = LocalScope::new(func.clone());
 
-        let ty = Ty::path(vec!["Int".to_string()], 0..3);
+        let ty = Ty::int(IntBits::I64, 0..3);
 
         // First binding
         let id1 = scope.bind("x".to_string(), ty.clone(), false, 0..5);
@@ -228,10 +230,11 @@ mod tests {
 
     #[test]
     fn test_nested_scopes() {
+        use kestrel_semantic_tree::ty::IntBits;
         let func = create_test_function();
         let mut scope = LocalScope::new(func.clone());
 
-        let ty = Ty::path(vec!["Int".to_string()], 0..3);
+        let ty = Ty::int(IntBits::I64, 0..3);
 
         let id_a = scope.bind("a".to_string(), ty.clone(), false, 0..1);
 
@@ -259,10 +262,11 @@ mod tests {
 
     #[test]
     fn test_multiple_shadows_same_scope() {
+        use kestrel_semantic_tree::ty::IntBits;
         let func = create_test_function();
         let mut scope = LocalScope::new(func.clone());
 
-        let ty = Ty::path(vec!["Int".to_string()], 0..3);
+        let ty = Ty::int(IntBits::I64, 0..3);
 
         // Same name bound multiple times in same scope (valid in some languages)
         let id1 = scope.bind("x".to_string(), ty.clone(), false, 0..5);

@@ -212,25 +212,12 @@ fn extract_type_annotation(
         .find(|c| c.kind() == SyntaxKind::Ty);
 
     if let Some(ty_node) = ty_node {
-        let ty = extract_type_from_syntax(&ty_node, context.source);
-
-        // Resolve the type
-        let type_ctx = TypeResolutionContext { db: context.db };
-        if let Some(resolved) = resolve_type_with_diagnostics(
-            &ty,
-            &type_ctx,
-            function_id,
-            context.diagnostics,
-            context.file_id,
-        ) {
-            return resolved;
-        }
-        return ty;
+        return resolve_type_from_syntax(&ty_node, function_id, context);
     }
 
-    // No type annotation - return placeholder for inference
+    // No type annotation - return inferred type placeholder
     let span = get_node_span(var_decl_node, context.source);
-    Ty::path(vec!["_".to_string()], span)
+    Ty::inferred(span)
 }
 
 /// Find the initializer expression in a variable declaration
@@ -441,9 +428,16 @@ fn parse_integer(text: &str) -> Option<i64> {
     }
 }
 
-/// Extract type from a Ty syntax node (simplified version)
-fn extract_type_from_syntax(ty_node: &SyntaxNode, source: &str) -> Ty {
-    let span = get_node_span(ty_node, source);
+/// Resolve a type from a Ty syntax node
+///
+/// This extracts the type from syntax and immediately resolves it using the database.
+/// Returns an error type if resolution fails.
+fn resolve_type_from_syntax(
+    ty_node: &SyntaxNode,
+    context_id: SymbolId,
+    ctx: &mut BodyResolutionContext,
+) -> Ty {
+    let span = get_node_span(ty_node, ctx.source);
 
     // Try TyPath
     if let Some(ty_path) = ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
@@ -460,7 +454,37 @@ fn extract_type_from_syntax(ty_node: &SyntaxNode, source: &str) -> Ty {
                 .collect();
 
             if !segments.is_empty() {
-                return Ty::path(segments, span);
+                // Resolve the path immediately
+                use crate::queries::TypePathResolution;
+                match ctx.db.resolve_type_path(segments.clone(), context_id) {
+                    TypePathResolution::Resolved(resolved_ty) => {
+                        return resolved_ty;
+                    }
+                    TypePathResolution::NotFound { segment, .. } => {
+                        let diagnostic = kestrel_reporting::Diagnostic::error()
+                            .with_message(format!("cannot find type '{}' in this scope", segment))
+                            .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())
+                                .with_message("not found")]);
+                        ctx.diagnostics.add_diagnostic(diagnostic);
+                        return Ty::error(span);
+                    }
+                    TypePathResolution::Ambiguous { segment, candidates, .. } => {
+                        let diagnostic = kestrel_reporting::Diagnostic::error()
+                            .with_message(format!("type '{}' is ambiguous ({} candidates)", segment, candidates.len()))
+                            .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())
+                                .with_message("ambiguous")]);
+                        ctx.diagnostics.add_diagnostic(diagnostic);
+                        return Ty::error(span);
+                    }
+                    TypePathResolution::NotAType { .. } => {
+                        let diagnostic = kestrel_reporting::Diagnostic::error()
+                            .with_message(format!("'{}' is not a type", segments.join(".")))
+                            .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())
+                                .with_message("not a type")]);
+                        ctx.diagnostics.add_diagnostic(diagnostic);
+                        return Ty::error(span);
+                    }
+                }
             }
         }
     }
@@ -470,8 +494,8 @@ fn extract_type_from_syntax(ty_node: &SyntaxNode, source: &str) -> Ty {
         return Ty::unit(span);
     }
 
-    // Fallback
-    Ty::path(vec!["_".to_string()], span)
+    // Fallback - use inferred type
+    Ty::inferred(span)
 }
 
 #[cfg(test)]

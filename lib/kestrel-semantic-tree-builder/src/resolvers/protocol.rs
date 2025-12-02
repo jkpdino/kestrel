@@ -3,13 +3,15 @@ use std::sync::Arc;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::resolver::Resolver;
+use crate::queries::TypePathResolution;
+use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause, extract_conformances};
 use crate::utils::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
@@ -89,5 +91,145 @@ impl Resolver for ProtocolResolver {
         }
 
         Some(protocol_arc)
+    }
+
+    fn bind_declaration(
+        &self,
+        symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
+        context: &mut BindingContext,
+    ) {
+        // Only process protocol symbols
+        if symbol.metadata().kind() != KestrelSymbolKind::Protocol {
+            return;
+        }
+
+        let symbol_id = symbol.metadata().id();
+
+        // Get file_id for this symbol
+        let file_id = context.file_id_for_symbol(symbol).unwrap_or(context.file_id);
+
+        // Get source for this symbol's file
+        let source_file = context.source_file_name(symbol);
+        let source = source_file
+            .as_ref()
+            .and_then(|name| context.sources.get(name))
+            .map(|s| s.as_str())
+            .unwrap_or("");
+
+        // Resolve inherited protocols from syntax and store them
+        resolve_inherited_protocols(syntax, source, symbol, symbol_id, context, file_id);
+    }
+}
+
+/// Resolve inherited protocols from syntax and store them in the symbol
+fn resolve_inherited_protocols(
+    syntax: &SyntaxNode,
+    source: &str,
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    context_id: semantic_tree::symbol::SymbolId,
+    ctx: &mut BindingContext,
+    file_id: usize,
+) {
+    // Find the ConformanceList node
+    let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {
+        Some(node) => node,
+        None => return,
+    };
+
+    let mut resolved_protocols = Vec::new();
+
+    // Process each ConformanceItem
+    for item in conformance_list.children() {
+        if item.kind() != SyntaxKind::ConformanceItem {
+            continue;
+        }
+
+        // ConformanceItem contains a Ty node
+        let ty_node = match find_child(&item, SyntaxKind::Ty) {
+            Some(node) => node,
+            None => continue,
+        };
+
+        let span = get_node_span(&ty_node, source);
+
+        // Find the TyPath inside Ty
+        let ty_path = match ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
+            Some(node) => node,
+            None => continue,
+        };
+
+        // Extract path from TyPath
+        let path_node = match find_child(&ty_path, SyntaxKind::Path) {
+            Some(node) => node,
+            None => continue,
+        };
+
+        // Extract path segments
+        let segments: Vec<String> = path_node
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::PathElement)
+            .filter_map(|elem| {
+                elem.children_with_tokens()
+                    .filter_map(|e| e.into_token())
+                    .find(|t| t.kind() == SyntaxKind::Identifier)
+                    .map(|t| t.text().to_string())
+            })
+            .collect();
+
+        if segments.is_empty() {
+            continue;
+        }
+
+        let protocol_name = segments.join(".");
+
+        // Resolve the path
+        match ctx.db.resolve_type_path(segments.clone(), context_id) {
+            TypePathResolution::Resolved(resolved_ty) => {
+                use kestrel_semantic_tree::ty::TyKind;
+                match resolved_ty.kind() {
+                    TyKind::Protocol { .. } => {
+                        // Valid protocol - add to resolved list
+                        resolved_protocols.push(resolved_ty);
+                    }
+                    TyKind::Struct { symbol, .. } => {
+                        let diagnostic = kestrel_reporting::Diagnostic::error()
+                            .with_message(format!("'{}' is not a protocol", symbol.metadata().name().value))
+                            .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
+                                .with_message("struct cannot be inherited by a protocol")]);
+                        ctx.diagnostics.add_diagnostic(diagnostic);
+                        resolved_protocols.push(Ty::error(span));
+                    }
+                    _ => {
+                        let diagnostic = kestrel_reporting::Diagnostic::error()
+                            .with_message(format!("'{}' is not a protocol", protocol_name))
+                            .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
+                                .with_message("not a protocol")]);
+                        ctx.diagnostics.add_diagnostic(diagnostic);
+                        resolved_protocols.push(Ty::error(span));
+                    }
+                }
+            }
+            TypePathResolution::NotFound { .. } => {
+                let diagnostic = kestrel_reporting::Diagnostic::error()
+                    .with_message(format!("cannot find type '{}' in this scope", protocol_name))
+                    .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
+                        .with_message("not found")]);
+                ctx.diagnostics.add_diagnostic(diagnostic);
+                resolved_protocols.push(Ty::error(span));
+            }
+            TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
+                let diagnostic = kestrel_reporting::Diagnostic::error()
+                    .with_message(format!("'{}' is not a protocol", protocol_name))
+                    .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())]);
+                ctx.diagnostics.add_diagnostic(diagnostic);
+                resolved_protocols.push(Ty::error(span));
+            }
+        }
+    }
+
+    // Update the protocol symbol with resolved inherited protocols
+    if let Some(protocol_sym) = symbol.as_ref().downcast_ref::<ProtocolSymbol>() {
+        protocol_sym.set_inherited_protocols(resolved_protocols);
     }
 }

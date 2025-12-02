@@ -29,12 +29,14 @@ use crate::db::{SemanticDatabase, SymbolRegistry};
 use crate::diagnostics::{
     ModuleNotFirstError, MultipleModuleDeclarationsError, NoModuleDeclarationError,
 };
-use crate::resolver::{BindingContext, ResolverRegistry};
+use crate::resolver::{BindingContext, ResolverRegistry, SyntaxMap};
 
 /// Represents the root of a semantic tree
 pub struct SemanticTree {
     root: Arc<dyn Symbol<KestrelLanguage>>,
     symbol_table: SymbolTable<KestrelLanguage>,
+    /// Maps symbol IDs to their original syntax nodes for the bind phase
+    syntax_map: SyntaxMap,
 }
 
 impl SemanticTree {
@@ -42,8 +44,9 @@ impl SemanticTree {
     pub fn new() -> Self {
         let root: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(RootSymbol::new(0..0));
         let symbol_table = SymbolTable::new();
+        let syntax_map = SyntaxMap::new();
 
-        SemanticTree { root, symbol_table }
+        SemanticTree { root, symbol_table, syntax_map }
     }
 
     /// Get the root symbol
@@ -68,6 +71,16 @@ impl SemanticTree {
     /// Get a mutable reference to the symbol table
     pub(crate) fn symbol_table_mut(&mut self) -> &mut SymbolTable<KestrelLanguage> {
         &mut self.symbol_table
+    }
+
+    /// Get the syntax map (for bind phase)
+    pub(crate) fn syntax_map(&self) -> &SyntaxMap {
+        &self.syntax_map
+    }
+
+    /// Get a mutable reference to the syntax map (for build phase)
+    pub(crate) fn syntax_map_mut(&mut self) -> &mut SyntaxMap {
+        &mut self.syntax_map
     }
 }
 
@@ -322,17 +335,23 @@ pub fn add_file_to_tree(
 
     // Step 4: Process all top-level declarations (except module declaration)
     // They become children of the SourceFile symbol
+    // Collect symbols first to avoid borrow conflicts
+    let mut created_symbols = Vec::new();
     for child in syntax.children() {
         // Skip module declarations - they were already processed
         if child.kind() == SyntaxKind::ModuleDeclaration {
             continue;
         }
 
-        if let Some(symbol) = walk_node(&child, source, Some(&source_file_symbol), &root, &registry)
+        if let Some(symbol) = walk_node(&child, source, Some(&source_file_symbol), &root, &registry, tree.syntax_map_mut())
         {
-            // Add this symbol and all its descendants to the table
-            add_symbol_to_table(&symbol, tree.symbol_table_mut());
+            created_symbols.push(symbol);
         }
+    }
+
+    // Add all created symbols to the symbol table
+    for symbol in created_symbols {
+        add_symbol_to_table(&symbol, tree.symbol_table_mut());
     }
 }
 
@@ -358,16 +377,20 @@ fn walk_node(
     parent: Option<&Arc<dyn Symbol<KestrelLanguage>>>,
     root: &Arc<dyn Symbol<KestrelLanguage>>,
     registry: &ResolverRegistry,
+    syntax_map: &mut SyntaxMap,
 ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
     // Look up resolver for this syntax kind
     if let Some(resolver) = registry.get(syntax.kind()) {
         // Resolver creates symbol and adds to parent
         if let Some(symbol) = resolver.build_declaration(syntax, source, parent, root) {
+            // Store the syntax node for the bind phase
+            syntax_map.insert(symbol.metadata().id(), syntax.clone());
+
             // Check if terminal - if so, don't walk children (but still return the symbol)
             if !resolver.is_terminal() {
                 // Walk children
                 for child in syntax.children() {
-                    walk_node(&child, source, Some(&symbol), root, registry);
+                    walk_node(&child, source, Some(&symbol), root, registry, syntax_map);
                 }
             }
             return Some(symbol);
@@ -376,7 +399,7 @@ fn walk_node(
 
     // No resolver found - walk children anyway (e.g., ClassBody)
     for child in syntax.children() {
-        walk_node(&child, source, parent, root, registry);
+        walk_node(&child, source, parent, root, registry, syntax_map);
     }
 
     None
@@ -453,6 +476,7 @@ pub fn bind_tree_with_config(
         &mut type_alias_cycle_detector,
         &function_bodies,
         &sources,
+        tree.syntax_map(),
     );
 
     // Post-binding pass: detect duplicate function signatures
@@ -474,6 +498,7 @@ fn check_duplicate_signatures(
     diagnostics: &mut DiagnosticContext,
 ) {
     use kestrel_semantic_tree::behavior::callable::CallableSignature;
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
     use std::collections::HashMap;
 
     let kind = symbol.metadata().kind();
@@ -493,18 +518,10 @@ fn check_duplicate_signatures(
 
         for child in symbol.metadata().children() {
             if child.metadata().kind() == KestrelSymbolKind::Function {
-                // Get the CallableBehavior from the symbol's behaviors
-                let behaviors = child.metadata().behaviors();
-                if let Some(callable) = behaviors.iter().find_map(|b| {
-                    if matches!(b.kind(), KestrelBehaviorKind::Callable) {
-                        b.as_ref().downcast_ref::<kestrel_semantic_tree::behavior::callable::CallableBehavior>()
-                    } else {
-                        None
-                    }
-                }) {
-                    // Build signature using name from metadata and callable info
-                    let name = child.metadata().name().value.clone();
-                    let sig = callable.signature(&name);
+                // Get the signature from the FunctionSymbol directly
+                // The callable behavior is updated with resolved types during bind phase
+                if let Some(func_sym) = child.as_ref().downcast_ref::<FunctionSymbol>() {
+                    let sig = func_sym.signature();
                     signatures.entry(sig).or_default().push(child.clone());
                 }
             }
@@ -581,6 +598,7 @@ fn bind_symbol(
     type_alias_cycle_detector: &mut CycleDetector<SymbolId>,
     function_bodies: &resolver::FunctionBodyMap,
     sources: &resolver::SourceMap,
+    syntax_map: &SyntaxMap,
 ) {
     // Find resolver for this symbol kind and call bind_declaration
     let kind = symbol.metadata().kind();
@@ -610,21 +628,24 @@ fn bind_symbol(
 
     if let Some(sk) = syntax_kind {
         if let Some(resolver) = registry.get(sk) {
-            let mut ctx = BindingContext {
-                db,
-                diagnostics,
-                file_id,
-                type_alias_cycle_detector,
-                function_bodies,
-                sources,
-            };
-            resolver.bind_declaration(symbol, &mut ctx);
+            // Retrieve the syntax node for this symbol from the syntax map
+            if let Some(syntax_node) = syntax_map.get(&symbol.metadata().id()) {
+                let mut ctx = BindingContext {
+                    db,
+                    diagnostics,
+                    file_id,
+                    type_alias_cycle_detector,
+                    function_bodies,
+                    sources,
+                };
+                resolver.bind_declaration(symbol, syntax_node, &mut ctx);
+            }
         }
     }
 
     // Recursively bind children
     for child in symbol.metadata().children() {
-        bind_symbol(&child, db, diagnostics, registry, file_id, type_alias_cycle_detector, function_bodies, sources);
+        bind_symbol(&child, db, diagnostics, registry, file_id, type_alias_cycle_detector, function_bodies, sources, syntax_map);
     }
 }
 
@@ -697,14 +718,6 @@ fn format_type(ty: &Ty) -> String {
                 format_type(return_type)
             )
         }
-        TyKind::Path(segments, type_args) => {
-            if type_args.is_empty() {
-                segments.join(".")
-            } else {
-                let args_str: Vec<String> = type_args.iter().map(format_type).collect();
-                format!("{}[{}]", segments.join("."), args_str.join(", "))
-            }
-        }
         TyKind::TypeParameter(param_symbol) => param_symbol.metadata().name().value.clone(),
         TyKind::Protocol { symbol: protocol_symbol, substitutions } => {
             let name = protocol_symbol.metadata().name().value.clone();
@@ -733,6 +746,9 @@ fn format_type(ty: &Ty) -> String {
                 format!("{}[{}]", name, args.join(", "))
             }
         }
+        TyKind::Error => "<error>".to_string(),
+        TyKind::SelfType => "Self".to_string(),
+        TyKind::Inferred => "_".to_string(),
     }
 }
 

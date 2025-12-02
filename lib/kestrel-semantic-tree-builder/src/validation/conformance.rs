@@ -133,13 +133,13 @@ fn has_inheritance_cycle(
     path.push(id);
 
     // Check all inherited protocols
-    for inherited_ty in protocol.inherited_protocols() {
+    for inherited_ty in &protocol.inherited_protocols() {
         if let TyKind::Protocol { symbol, .. } = inherited_ty.kind() {
             if has_inheritance_cycle(symbol, visited, path) {
                 return true;
             }
         }
-        // Note: TyKind::Path types are unresolved and can't be checked for cycles yet
+        // Note: Error types are unresolved and can't be checked for cycles yet
         // This is handled during type resolution
     }
 
@@ -187,11 +187,11 @@ fn check_struct_conformance(
     let struct_methods = collect_methods_from_symbol(symbol);
     let struct_method_map: HashMap<CallableSignature, (&Arc<FunctionSymbol>, SignatureType)> = struct_methods
         .iter()
-        .map(|f| (f.signature(), (f, SignatureType::from_ty(f.return_type()))))
+        .map(|f| (f.signature(), (f, SignatureType::from_ty(&f.return_type()))))
         .collect();
 
     // Check each conformance
-    for conformance_ty in struct_sym.conformances() {
+    for conformance_ty in &struct_sym.conformances() {
         // Resolve the protocol type
         let protocol_symbol = match resolve_protocol_type(conformance_ty, struct_id, db) {
             Some(proto) => proto,
@@ -206,7 +206,7 @@ fn check_struct_conformance(
         // Check each required method
         for (sig, method) in &required_methods {
             let method_name = &method.metadata().name().value;
-            let required_return_type = SignatureType::from_ty(method.return_type());
+            let required_return_type = SignatureType::from_ty(&method.return_type());
 
             match struct_method_map.get(sig) {
                 None => {
@@ -286,18 +286,8 @@ fn resolve_protocol_type(
         // Already resolved to a protocol
         TyKind::Protocol { symbol, .. } => Some(symbol.clone()),
 
-        // Unresolved path - need to resolve it
-        TyKind::Path(segments, _type_args) => {
-            let resolution = db.resolve_type_path(segments.clone(), context);
-            match resolution {
-                TypePathResolution::Resolved(resolved_ty) => {
-                    resolved_ty.as_protocol().cloned()
-                }
-                _ => None, // Resolution errors are reported elsewhere
-            }
-        }
-
-        _ => None, // Not a protocol type
+        // Error types and other unresolved types - resolution errors are reported elsewhere
+        _ => None,
     }
 }
 
@@ -346,7 +336,7 @@ fn collect_protocol_methods_recursive(
     visited.insert(id);
 
     // First, collect methods from inherited protocols (so child methods can override)
-    for inherited_ty in protocol.inherited_protocols() {
+    for inherited_ty in &protocol.inherited_protocols() {
         if let Some(inherited_protocol) = resolve_protocol_type(inherited_ty, id, db) {
             collect_protocol_methods_recursive(&inherited_protocol, db, methods, visited);
         }

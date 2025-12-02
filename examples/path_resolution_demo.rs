@@ -115,9 +115,10 @@ fn create_struct(
     Arc::new(struct_symbol)
 }
 
-fn add_typed_behavior(symbol: &Arc<dyn Symbol<KestrelLanguage>>, path: Vec<String>) {
+fn add_typed_behavior(symbol: &Arc<dyn Symbol<KestrelLanguage>>, _path: Vec<String>) {
     let span = symbol.metadata().span();
-    let ty = Ty::path(path, span.clone());
+    // Use error type as placeholder - actual struct types would need downcasting
+    let ty = Ty::error(span.clone());
     let typed_behavior = TypedBehavior::new(ty, span.clone());
     symbol.metadata().add_behavior(typed_behavior);
 }
@@ -134,12 +135,9 @@ fn test_resolution(
     let result = resolve_type_path(&path_vec, symbol_table, context);
 
     match result {
-        Some(ty) => {
+        Some(_ty) => {
             if should_succeed {
                 println!("✓ Successfully resolved: {}", path_str);
-                if let Some(segments) = ty.as_path() {
-                    println!("  Type: Path({})", segments.join("."));
-                }
             } else {
                 println!("✗ Unexpected success for: {}", path_str);
             }

@@ -15,6 +15,9 @@ pub type FunctionBodyMap = HashMap<SymbolId, SyntaxNode>;
 /// Storage for source code by file, keyed by file name
 pub type SourceMap = HashMap<String, String>;
 
+/// Storage for syntax nodes by symbol ID, allowing bind phase to access syntax
+pub type SyntaxMap = HashMap<SymbolId, SyntaxNode>;
+
 /// Trait for resolving syntax nodes into semantic symbols
 pub trait Resolver {
     /// Build phase: create symbol from syntax node and add to parent
@@ -28,9 +31,14 @@ pub trait Resolver {
     ) -> Option<Arc<dyn Symbol<KestrelLanguage>>>;
 
     /// Binding phase: resolve references and establish relationships
+    ///
+    /// The syntax node is the same node that was passed to build_declaration,
+    /// allowing resolvers to extract type information directly from syntax
+    /// during binding rather than storing intermediate Path representations.
     fn bind_declaration(
         &self,
         _symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        _syntax: &SyntaxNode,
         _context: &mut BindingContext,
     ) {
         // Default: do nothing

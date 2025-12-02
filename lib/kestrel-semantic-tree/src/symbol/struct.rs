@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use kestrel_span::{Name, Span};
 use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
@@ -19,7 +19,8 @@ pub struct StructSymbol {
     /// Where clause constraints for type parameters
     where_clause: WhereClause,
     /// Protocols this struct conforms to, e.g., `struct Point: Drawable { }`
-    conformances: Vec<Ty>,
+    /// Initially contains unresolved placeholder types, resolved during bind phase.
+    conformances: RwLock<Vec<Ty>>,
 }
 
 impl Symbol<KestrelLanguage> for StructSymbol {
@@ -63,7 +64,7 @@ impl StructSymbol {
             metadata: builder.build(),
             type_parameters,
             where_clause,
-            conformances,
+            conformances: RwLock::new(conformances),
         }
     }
 
@@ -88,12 +89,17 @@ impl StructSymbol {
     }
 
     /// Get the protocols this struct conforms to
-    pub fn conformances(&self) -> &[Ty] {
-        &self.conformances
+    pub fn conformances(&self) -> Vec<Ty> {
+        self.conformances.read().unwrap().clone()
     }
 
     /// Check if this struct has any conformances
     pub fn has_conformances(&self) -> bool {
-        !self.conformances.is_empty()
+        !self.conformances.read().unwrap().is_empty()
+    }
+
+    /// Set the resolved conformances (called during bind phase)
+    pub fn set_conformances(&self, conformances: Vec<Ty>) {
+        *self.conformances.write().unwrap() = conformances;
     }
 }

@@ -60,8 +60,8 @@ impl Resolver for FieldResolver {
             .filter_map(|elem| elem.into_token())
             .any(|tok| tok.kind() == SyntaxKind::Var);
 
-        // Extract the syntactic type (will be resolved in bind phase)
-        let field_type = extract_field_type(syntax, source);
+        // Use error type as placeholder - actual type will be resolved in bind phase from syntax
+        let field_type = Ty::error(full_span.clone());
 
         // Create the name object
         let name = Spanned::new(name_str, name_span);
@@ -91,6 +91,7 @@ impl Resolver for FieldResolver {
     fn bind_declaration(
         &self,
         symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+        syntax: &SyntaxNode,
         context: &mut BindingContext,
     ) {
         // Only process field symbols
@@ -98,44 +99,41 @@ impl Resolver for FieldResolver {
             return;
         }
 
-        // Downcast to FieldSymbol to get the syntactic field type
-        let field_symbol = match symbol
-            .as_ref()
-            .as_any()
-            .downcast_ref::<FieldSymbol>()
-        {
-            Some(f) => f,
-            None => return,
-        };
-
-        let syntactic_type = field_symbol.field_type();
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
         // Get file_id for this symbol
         let file_id = context.file_id_for_symbol(symbol).unwrap_or(context.file_id);
 
-        // Create type resolution context
-        let type_ctx = TypeResolutionContext { db: context.db };
+        // Get source file name (doesn't borrow context mutably)
+        let source_file = context.source_file_name(symbol);
 
-        // Resolve the type with diagnostics
-        if let Some(resolved_type) = resolve_type_with_diagnostics(
-            syntactic_type,
-            &type_ctx,
-            symbol_id,
-            context.diagnostics,
-            file_id,
-        ) {
-            // Add a TypedBehavior with the resolved type
-            let typed_behavior = TypedBehavior::new(resolved_type, span);
-            symbol.metadata().add_behavior(typed_behavior);
-        }
+        // Resolve the type directly from syntax
+        let resolved_type = resolve_field_type_from_syntax(syntax, source_file.as_deref(), symbol_id, context, file_id);
+
+        // Add a TypedBehavior with the resolved type
+        let typed_behavior = TypedBehavior::new(resolved_type, span);
+        symbol.metadata().add_behavior(typed_behavior);
     }
 }
 
-/// Extract the field type from a FieldDeclaration syntax node
-/// Returns a Path type with the type name segments
-fn extract_field_type(syntax: &SyntaxNode, source: &str) -> Ty {
+/// Resolve the field type from a FieldDeclaration syntax node
+/// This extracts the type from syntax and immediately resolves it
+fn resolve_field_type_from_syntax(
+    syntax: &SyntaxNode,
+    source_file: Option<&str>,
+    context_id: semantic_tree::symbol::SymbolId,
+    ctx: &mut BindingContext,
+    file_id: usize,
+) -> Ty {
+    use crate::queries::TypePathResolution;
+
+    // Get source from context
+    let source = source_file
+        .and_then(|name| ctx.sources.get(name))
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
     // Find the Ty node
     if let Some(ty_node) = syntax.children().find(|child| child.kind() == SyntaxKind::Ty) {
         let ty_span = get_node_span(&ty_node, source);
@@ -158,15 +156,44 @@ fn extract_field_type(syntax: &SyntaxNode, source: &str) -> Ty {
                     .collect();
 
                 if !segments.is_empty() {
-                    return Ty::path(segments, ty_span);
+                    // Resolve the path immediately
+                    match ctx.db.resolve_type_path(segments.clone(), context_id) {
+                        TypePathResolution::Resolved(resolved_ty) => {
+                            return resolved_ty;
+                        }
+                        TypePathResolution::NotFound { segment, .. } => {
+                            let diagnostic = kestrel_reporting::Diagnostic::error()
+                                .with_message(format!("cannot find type '{}' in this scope", segment))
+                                .with_labels(vec![kestrel_reporting::Label::primary(file_id, ty_span.clone())
+                                    .with_message("not found")]);
+                            ctx.diagnostics.add_diagnostic(diagnostic);
+                            return Ty::error(ty_span);
+                        }
+                        TypePathResolution::Ambiguous { segment, candidates, .. } => {
+                            let diagnostic = kestrel_reporting::Diagnostic::error()
+                                .with_message(format!("type '{}' is ambiguous ({} candidates)", segment, candidates.len()))
+                                .with_labels(vec![kestrel_reporting::Label::primary(file_id, ty_span.clone())
+                                    .with_message("ambiguous")]);
+                            ctx.diagnostics.add_diagnostic(diagnostic);
+                            return Ty::error(ty_span);
+                        }
+                        TypePathResolution::NotAType { .. } => {
+                            let diagnostic = kestrel_reporting::Diagnostic::error()
+                                .with_message(format!("'{}' is not a type", segments.join(".")))
+                                .with_labels(vec![kestrel_reporting::Label::primary(file_id, ty_span.clone())
+                                    .with_message("not a type")]);
+                            ctx.diagnostics.add_diagnostic(diagnostic);
+                            return Ty::error(ty_span);
+                        }
+                    }
                 }
             }
         }
 
-        // Fallback: return an error/unknown type
-        return Ty::path(vec!["<unknown>".to_string()], ty_span);
+        // Fallback: return error type
+        return Ty::error(ty_span);
     }
 
-    // No type found - return unknown
-    Ty::path(vec!["<unknown>".to_string()], 0..0)
+    // No type found - return error
+    Ty::error(0..0)
 }

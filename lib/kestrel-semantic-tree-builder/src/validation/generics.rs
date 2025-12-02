@@ -267,93 +267,46 @@ fn validate_constraint(
 /// Validate that a bound type is a valid protocol
 fn validate_bound_type(
     bound: &kestrel_semantic_tree::ty::Ty,
-    context_id: semantic_tree::symbol::SymbolId,
-    db: &SemanticDatabase,
+    _context_id: semantic_tree::symbol::SymbolId,
+    _db: &SemanticDatabase,
     file_id: usize,
     diagnostics: &mut DiagnosticContext,
 ) {
     match bound.kind() {
-        // Path types need to be resolved and checked
-        TyKind::Path(segments, _type_args) => {
-            // Resolve the type path
-            let resolution = db.resolve_type_path(segments.clone(), context_id);
-
-            match resolution {
-                TypePathResolution::Resolved(ty) => {
-                    // Check if the resolved type is a protocol
-                    match ty.kind() {
-                        TyKind::Protocol { .. } => {
-                            // Valid protocol bound
-                        }
-                        TyKind::Struct { symbol, .. } => {
-                            let error = NonProtocolBoundError {
-                                type_name: symbol.metadata().name().value.clone(),
-                                type_kind: "struct".to_string(),
-                                span: bound.span().clone(),
-                            };
-                            diagnostics.throw(error, file_id);
-                        }
-                        TyKind::TypeAlias { symbol, .. } => {
-                            let error = NonProtocolBoundError {
-                                type_name: symbol.metadata().name().value.clone(),
-                                type_kind: "type alias".to_string(),
-                                span: bound.span().clone(),
-                            };
-                            diagnostics.throw(error, file_id);
-                        }
-                        TyKind::TypeParameter(param) => {
-                            let error = NonProtocolBoundError {
-                                type_name: param.metadata().name().value.clone(),
-                                type_kind: "type parameter".to_string(),
-                                span: bound.span().clone(),
-                            };
-                            diagnostics.throw(error, file_id);
-                        }
-                        _ => {
-                            // Other types (primitives, tuples, functions) can't be bounds
-                            let type_name = segments.join(".");
-                            let error = NonProtocolBoundError {
-                                type_name,
-                                type_kind: "type".to_string(),
-                                span: bound.span().clone(),
-                            };
-                            diagnostics.throw(error, file_id);
-                        }
-                    }
-                }
-                TypePathResolution::NotFound { segment, .. } => {
-                    // Type not found - report unresolved bound error
-                    let error = NonProtocolBoundError {
-                        type_name: segment,
-                        type_kind: "unresolved type".to_string(),
-                        span: bound.span().clone(),
-                    };
-                    diagnostics.throw(error, file_id);
-                }
-                TypePathResolution::Ambiguous { segment, .. } => {
-                    // Ambiguous type - report as error
-                    let error = NonProtocolBoundError {
-                        type_name: segment,
-                        type_kind: "ambiguous type".to_string(),
-                        span: bound.span().clone(),
-                    };
-                    diagnostics.throw(error, file_id);
-                }
-                TypePathResolution::NotAType { .. } => {
-                    // Not a type - report error
-                    let type_name = segments.join(".");
-                    let error = NonProtocolBoundError {
-                        type_name,
-                        type_kind: "non-type symbol".to_string(),
-                        span: bound.span().clone(),
-                    };
-                    diagnostics.throw(error, file_id);
-                }
-            }
-        }
-        // Protocol types are already resolved and valid
+        // Protocol types are valid bounds
         TyKind::Protocol { .. } => {
             // Valid protocol bound
+        }
+        // Error types - resolution errors are reported elsewhere
+        TyKind::Error => {
+            // Skip - error already reported during type resolution
+        }
+        // Struct types are not valid as bounds
+        TyKind::Struct { symbol, .. } => {
+            let error = NonProtocolBoundError {
+                type_name: symbol.metadata().name().value.clone(),
+                type_kind: "struct".to_string(),
+                span: bound.span().clone(),
+            };
+            diagnostics.throw(error, file_id);
+        }
+        // Type aliases are not valid as bounds
+        TyKind::TypeAlias { symbol, .. } => {
+            let error = NonProtocolBoundError {
+                type_name: symbol.metadata().name().value.clone(),
+                type_kind: "type alias".to_string(),
+                span: bound.span().clone(),
+            };
+            diagnostics.throw(error, file_id);
+        }
+        // Type parameters are not valid as bounds
+        TyKind::TypeParameter(param) => {
+            let error = NonProtocolBoundError {
+                type_name: param.metadata().name().value.clone(),
+                type_kind: "type parameter".to_string(),
+                span: bound.span().clone(),
+            };
+            diagnostics.throw(error, file_id);
         }
         // All other type kinds are not valid as bounds
         _ => {

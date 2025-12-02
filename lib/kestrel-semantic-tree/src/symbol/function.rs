@@ -39,7 +39,9 @@ pub struct FunctionSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
     is_static: bool,
     has_body: bool,
-    callable: CallableBehavior,
+    /// Callable behavior containing parameters and return type.
+    /// Initially contains unresolved types, updated during bind phase with resolved types.
+    callable: RwLock<CallableBehavior>,
     /// Type parameters for generic functions, e.g., `func identity[T](value: T) -> T`
     type_parameters: Vec<Arc<TypeParameterSymbol>>,
     /// Where clause constraints for type parameters
@@ -117,7 +119,7 @@ impl FunctionSymbol {
             metadata: builder.build(),
             is_static,
             has_body,
-            callable,
+            callable: RwLock::new(callable),
             type_parameters,
             where_clause,
             locals: RwLock::new(Vec::new()),
@@ -134,45 +136,56 @@ impl FunctionSymbol {
         self.has_body
     }
 
-    /// Get the callable behavior
-    pub fn callable(&self) -> &CallableBehavior {
-        &self.callable
+    /// Get a clone of the callable behavior
+    pub fn callable(&self) -> CallableBehavior {
+        self.callable.read().unwrap().clone()
     }
 
     /// Get the function's parameters
-    pub fn parameters(&self) -> &[Parameter] {
-        self.callable.parameters()
+    ///
+    /// Returns a clone of the parameters. The callable is updated during bind phase
+    /// with resolved types.
+    pub fn parameters(&self) -> Vec<Parameter> {
+        self.callable.read().unwrap().parameters().to_vec()
     }
 
     /// Get the function's return type
-    pub fn return_type(&self) -> &Ty {
-        self.callable.return_type()
+    ///
+    /// Returns a clone of the return type. The callable is updated during bind phase
+    /// with resolved types.
+    pub fn return_type(&self) -> Ty {
+        self.callable.read().unwrap().return_type().clone()
     }
 
     /// Get the number of parameters (arity)
     pub fn arity(&self) -> usize {
-        self.callable.arity()
+        self.callable.read().unwrap().arity()
     }
 
     /// Get the callable signature for overload resolution and duplicate detection.
     ///
     /// Two functions with the same signature are considered duplicates.
     pub fn signature(&self) -> CallableSignature {
-        self.callable.signature(&self.metadata.name().value)
+        self.callable.read().unwrap().signature(&self.metadata.name().value)
     }
 
     /// Get the function signature as a Ty::Function
     ///
     /// This is useful for type checking and storing the function's type.
     pub fn function_type(&self) -> Ty {
-        self.callable.function_type()
+        self.callable.read().unwrap().function_type()
     }
 
     /// Get parameter labels for display/debugging
     ///
     /// Returns a list of external labels (or None for unlabeled parameters).
-    pub fn parameter_labels(&self) -> Vec<Option<&str>> {
-        self.callable.parameter_labels()
+    pub fn parameter_labels(&self) -> Vec<Option<String>> {
+        self.callable.read().unwrap().parameters().iter().map(|p| p.external_label().map(|s| s.to_string())).collect()
+    }
+
+    /// Set the callable behavior with resolved types (called during bind phase)
+    pub fn set_callable(&self, callable: CallableBehavior) {
+        *self.callable.write().unwrap() = callable;
     }
 
     /// Get the type parameters for this function
