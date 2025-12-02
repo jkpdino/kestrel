@@ -1,4 +1,3 @@
-mod body_resolver;
 mod db;
 mod diagnostics;
 pub mod local_scope;

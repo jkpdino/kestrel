@@ -1,11 +1,10 @@
 //! Shared type-from-syntax resolution utilities
 //!
 //! This module provides a unified interface for resolving types from syntax nodes.
-//! It consolidates the duplicate logic that existed across:
-//! - `resolvers/function.rs` (extract_type_from_ty_node, resolve_type_from_ty_node)
-//! - `resolvers/field.rs` (resolve_field_type_from_syntax)
-//! - `resolvers/type_alias.rs` (resolve_type_from_syntax)
-//! - `body_resolver.rs` (resolve_type_from_syntax)
+//! It consolidates the type resolution logic used by:
+//! - `resolvers/function.rs` (parameter and return type resolution)
+//! - `resolvers/field.rs` (field type resolution)
+//! - `resolvers/type_alias.rs` (aliased type resolution)
 
 use kestrel_prelude::primitives;
 use kestrel_reporting::DiagnosticContext;
