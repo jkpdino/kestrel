@@ -7,7 +7,7 @@ use crate::{
     behavior::callable::{CallableBehavior, CallableSignature},
     behavior::function_data::FunctionDataBehavior,
     behavior::visibility::VisibilityBehavior,
-    behavior::KestrelBehaviorKind,
+    behavior_ext::BehaviorExt,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::local::{Local, LocalId},
@@ -144,16 +144,7 @@ impl FunctionSymbol {
     ///
     /// Returns `None` if bind phase hasn't occurred yet (CallableBehavior is added during bind).
     fn get_callable(&self) -> Option<CallableBehavior> {
-        self.metadata
-            .behaviors()
-            .into_iter()
-            .find_map(|b| {
-                if b.kind() == KestrelBehaviorKind::Callable {
-                    b.as_ref().downcast_ref::<CallableBehavior>().cloned()
-                } else {
-                    None
-                }
-            })
+        self.metadata.callable_behavior()
     }
 
     /// Get the callable behavior (cloned)

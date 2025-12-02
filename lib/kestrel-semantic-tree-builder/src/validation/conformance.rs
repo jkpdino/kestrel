@@ -10,8 +10,7 @@ use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, SignatureType};
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -33,21 +32,12 @@ impl ConformancePass {
 
 /// Get the resolved conformances from a symbol's ConformancesBehavior
 ///
-/// Returns the last ConformancesBehavior's conformances (the resolved ones from bind phase).
-/// Returns an empty slice if no ConformancesBehavior exists.
+/// Returns the conformances from the symbol's ConformancesBehavior.
+/// Returns an empty vec if no ConformancesBehavior exists.
 fn get_conformances(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Vec<Ty> {
     symbol
-        .metadata()
-        .behaviors()
-        .into_iter()
-        .rev()
-        .find_map(|b| {
-            if b.kind() == KestrelBehaviorKind::Conformances {
-                b.as_ref().downcast_ref::<ConformancesBehavior>().map(|c| c.conformances().to_vec())
-            } else {
-                None
-            }
-        })
+        .conformances_behavior()
+        .map(|cb| cb.conformances().to_vec())
         .unwrap_or_default()
 }
 
@@ -61,22 +51,13 @@ fn has_conformances(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> bool {
 /// Protocol symbols have a TypedBehavior that stores their Ty::Protocol,
 /// which contains the Arc<ProtocolSymbol>.
 fn get_protocol_arc_from_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Arc<ProtocolSymbol>> {
-    use kestrel_semantic_tree::behavior::typed::TypedBehavior;
-
-    symbol
-        .metadata()
-        .behaviors()
-        .into_iter()
-        .find_map(|b| {
-            if b.kind() == KestrelBehaviorKind::Typed {
-                if let Some(tb) = b.as_ref().downcast_ref::<TypedBehavior>() {
-                    if let TyKind::Protocol { symbol, .. } = tb.ty().kind() {
-                        return Some(symbol.clone());
-                    }
-                }
-            }
+    symbol.typed_behavior().and_then(|tb| {
+        if let TyKind::Protocol { symbol, .. } = tb.ty().kind() {
+            Some(symbol.clone())
+        } else {
             None
-        })
+        }
+    })
 }
 
 impl ValidationPass for ConformancePass {

@@ -21,7 +21,7 @@ use kestrel_lexer::lex;
 use kestrel_parser::{parse_source_file, Parser};
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree_builder::SemanticTree;
 use semantic_tree::symbol::Symbol as SymbolTrait;
@@ -299,15 +299,7 @@ impl Behavior {
     ) -> Result<(), String> {
         match self {
             Behavior::Visibility(expected) => {
-                use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-
-                let behaviors = symbol.metadata().behaviors();
-                let vis_behavior = behaviors
-                    .iter()
-                    .find(|b| matches!(b.kind(), KestrelBehaviorKind::Visibility))
-                    .and_then(|b| b.as_ref().downcast_ref::<VisibilityBehavior>());
-
-                match vis_behavior {
+                match symbol.visibility_behavior() {
                     Some(vb) => {
                         let actual = vb.visibility();
                         let matches = match (actual, expected) {

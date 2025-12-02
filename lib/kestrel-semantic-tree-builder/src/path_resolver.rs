@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
+use kestrel_semantic_tree::behavior::visibility::Visibility;
+use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
@@ -49,14 +50,7 @@ pub fn is_visible_from(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     context: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> bool {
-    // Find the visibility behavior
-    let behaviors = symbol.metadata().behaviors();
-    let visibility_behavior = behaviors
-        .iter()
-        .find(|behavior| behavior.as_ref().is::<VisibilityBehavior>())
-        .and_then(|behavior| behavior.as_ref().downcast_ref::<VisibilityBehavior>());
-
-    let Some(visibility_behavior) = visibility_behavior else {
+    let Some(visibility_behavior) = symbol.visibility_behavior() else {
         // No visibility behavior means default (internal), which is always visible
         return true;
     };

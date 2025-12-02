@@ -327,16 +327,9 @@ struct NameSource {
 
 /// Get visibility information from a symbol for error reporting
 fn get_visibility_info(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (String, Option<kestrel_span::Span>) {
-    use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 
-    let behaviors = symbol.metadata().behaviors();
-    let visibility_behavior = behaviors
-        .iter()
-        .find(|b| matches!(b.kind(), KestrelBehaviorKind::Visibility))
-        .and_then(|b| b.as_ref().downcast_ref::<VisibilityBehavior>());
-
-    match visibility_behavior {
+    match symbol.visibility_behavior() {
         Some(vb) => {
             let vis_str = match vb.visibility() {
                 Some(v) => v.to_string(),
