@@ -127,7 +127,7 @@ mod static_context {
     #[test]
     fn static_function_at_module_level_errors() {
         Test::new("module Test\nstatic func topLevel() { }")
-            .expect(HasError("static modifier is only allowed inside struct or protocol"));
+            .expect(HasError("cannot be static in this context"));
     }
 }
 
@@ -142,7 +142,7 @@ mod duplicate_symbol {
             struct Foo { }
         "#,
         )
-        .expect(HasError("duplicate type 'Foo'"));
+        .expect(HasError("duplicate definition of struct 'Foo'"));
     }
 
     #[test]
@@ -153,7 +153,7 @@ mod duplicate_symbol {
             protocol Bar { }
         "#,
         )
-        .expect(HasError("duplicate type 'Bar'"));
+        .expect(HasError("duplicate definition of protocol 'Bar'"));
     }
 
     #[test]
@@ -164,7 +164,7 @@ mod duplicate_symbol {
             protocol Thing { }
         "#,
         )
-        .expect(HasError("duplicate type 'Thing'"));
+        .expect(HasError("'Thing' is already defined as a struct"));
     }
 
     #[test]
@@ -197,7 +197,7 @@ mod duplicate_symbol {
             type Alias = String;
         "#,
         )
-        .expect(HasError("duplicate type 'Alias'"));
+        .expect(HasError("duplicate definition of type alias 'Alias'"));
     }
 
     #[test]
@@ -210,7 +210,7 @@ mod duplicate_symbol {
             }
         "#,
         )
-        .expect(HasError("duplicate member 'name'"));
+        .expect(HasError("duplicate definition of field 'name'"));
     }
 
     #[test]
@@ -245,7 +245,7 @@ mod visibility_consistency {
             }
         "#,
         )
-        .expect(HasError("exposes private type"));
+        .expect(HasError("has type less visible than the field"));
     }
 
     #[test]
@@ -256,7 +256,7 @@ mod visibility_consistency {
             public func getSecret() -> Secret { }
         "#,
         )
-        .expect(HasError("exposes private type"));
+        .expect(HasError("return type of 'getSecret' is less visible"));
     }
 
     #[test]
@@ -267,7 +267,7 @@ mod visibility_consistency {
             public func process(s: Secret) { }
         "#,
         )
-        .expect(HasError("exposes private type"));
+        .expect(HasError("parameter type in 'process' is less visible"));
     }
 
     #[test]
@@ -290,7 +290,7 @@ mod visibility_consistency {
             public type Exposed = Hidden;
         "#,
         )
-        .expect(HasError("exposes private type"));
+        .expect(HasError("aliased type in 'Exposed' is less visible"));
     }
 
     #[test]
@@ -303,7 +303,7 @@ mod visibility_consistency {
             }
         "#,
         )
-        .expect(HasError("exposes private type"));
+        .expect(HasError("parameter type in 'handle' is less visible"));
     }
 }
 

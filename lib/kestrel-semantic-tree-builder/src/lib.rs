@@ -1,5 +1,5 @@
 mod db;
-mod diagnostics;
+pub mod diagnostics;
 pub mod local_scope;
 pub mod path_resolver;
 mod queries;
@@ -27,6 +27,7 @@ use semantic_tree::symbol::{Symbol, SymbolId, SymbolMetadata, SymbolMetadataBuil
 
 use crate::db::{SemanticDatabase, SymbolRegistry};
 use crate::diagnostics::{
+    DuplicateFunctionSignatureError,
     ModuleNotFirstError, MultipleModuleDeclarationsError, NoModuleDeclarationError,
 };
 use crate::resolver::{BindingContext, ResolverRegistry, SyntaxMap};
@@ -530,36 +531,25 @@ fn check_duplicate_signatures(
         // Report duplicates
         for (sig, funcs) in signatures {
             if funcs.len() > 1 {
-                // Build the error message
-                let message = format!(
-                    "duplicate function signature: {}",
-                    sig.display()
-                );
+                let first = &funcs[0];
+                let first_span = first.metadata().declaration_span().clone();
+                let first_file_id = get_file_id_for_symbol(first, diagnostics);
 
-                // Build labels for all occurrences
-                let mut labels = Vec::new();
-                for (i, func) in funcs.iter().enumerate() {
-                    let span = func.metadata().declaration_span().clone();
-                    let func_file_id = get_file_id_for_symbol(func, diagnostics);
-                    if i == 0 {
-                        labels.push(
-                            kestrel_reporting::Label::secondary(func_file_id, span)
-                                .with_message("first defined here"),
-                        );
-                    } else {
-                        labels.push(
-                            kestrel_reporting::Label::primary(func_file_id, span.clone())
-                                .with_message("duplicate definition"),
-                        );
-                    }
-                }
+                let duplicate_spans: Vec<(Span, usize)> = funcs[1..]
+                    .iter()
+                    .map(|f| {
+                        let span = f.metadata().declaration_span().clone();
+                        let file_id = get_file_id_for_symbol(f, diagnostics);
+                        (span, file_id)
+                    })
+                    .collect();
 
-                // Create and add the diagnostic
-                let diagnostic = kestrel_reporting::Diagnostic::error()
-                    .with_message(message)
-                    .with_labels(labels);
-
-                diagnostics.add_diagnostic(diagnostic);
+                diagnostics.throw(DuplicateFunctionSignatureError {
+                    signature: sig.display(),
+                    first_span,
+                    first_file_id,
+                    duplicate_spans,
+                }, first_file_id);
             }
         }
     }

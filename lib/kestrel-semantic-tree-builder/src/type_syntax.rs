@@ -12,6 +12,10 @@ use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::diagnostics::{
+    AmbiguousTypeError, NotATypeError, NotGenericError,
+    TooFewTypeArgumentsError, TooManyTypeArgumentsError, UnresolvedTypeError,
+};
 use crate::queries::{Db, TypePathResolution};
 use crate::utils::get_node_span;
 
@@ -205,27 +209,25 @@ fn resolve_type_path(
     match ctx.db.resolve_type_path(segments.to_vec(), ctx.context_id) {
         TypePathResolution::Resolved(resolved_ty) => resolved_ty,
         TypePathResolution::NotFound { segment, .. } => {
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(format!("cannot find type '{}' in this scope", segment))
-                .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, ty_span.clone())
-                    .with_message("not found")]);
-            ctx.diagnostics.add_diagnostic(diagnostic);
+            ctx.diagnostics.throw(UnresolvedTypeError {
+                span: ty_span.clone(),
+                type_name: segment,
+            }, ctx.file_id);
             Ty::error(ty_span)
         }
         TypePathResolution::Ambiguous { segment, candidates, .. } => {
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(format!("type '{}' is ambiguous ({} candidates)", segment, candidates.len()))
-                .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, ty_span.clone())
-                    .with_message("ambiguous")]);
-            ctx.diagnostics.add_diagnostic(diagnostic);
+            ctx.diagnostics.throw(AmbiguousTypeError {
+                span: ty_span.clone(),
+                type_name: segment,
+                candidate_count: candidates.len(),
+            }, ctx.file_id);
             Ty::error(ty_span)
         }
         TypePathResolution::NotAType { .. } => {
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(format!("'{}' is not a type", segments.join(".")))
-                .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, ty_span.clone())
-                    .with_message("not a type")]);
-            ctx.diagnostics.add_diagnostic(diagnostic);
+            ctx.diagnostics.throw(NotATypeError {
+                span: ty_span.clone(),
+                name: segments.join("."),
+            }, ctx.file_id);
             Ty::error(ty_span)
         }
     }
@@ -310,10 +312,10 @@ pub fn apply_type_arguments(
                 TyKind::TypeParameter(p) => p.metadata().name().value.clone(),
                 _ => "type".to_string(),
             };
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(format!("type '{}' does not accept type arguments", type_name))
-                .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())]);
-            ctx.diagnostics.add_diagnostic(diagnostic);
+            ctx.diagnostics.throw(NotGenericError {
+                span: span.clone(),
+                type_name,
+            }, ctx.file_id);
             Ty::error(span)
         }
     }
@@ -337,26 +339,30 @@ where
 
     // Non-generic type with type args
     if max_args == 0 {
-        let diagnostic = kestrel_reporting::Diagnostic::error()
-            .with_message(format!("type '{}' does not accept type arguments", type_name))
-            .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())]);
-        ctx.diagnostics.add_diagnostic(diagnostic);
+        ctx.diagnostics.throw(NotGenericError {
+            span: span.clone(),
+            type_name: type_name.to_string(),
+        }, ctx.file_id);
         return Ty::error(span);
     }
 
     // Check arity with defaults
     if actual < min_args {
-        let diagnostic = kestrel_reporting::Diagnostic::error()
-            .with_message(format!("too few type arguments: expected at least {}, found {}", min_args, actual))
-            .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())]);
-        ctx.diagnostics.add_diagnostic(diagnostic);
+        ctx.diagnostics.throw(TooFewTypeArgumentsError {
+            span: span.clone(),
+            type_name: type_name.to_string(),
+            min_expected: min_args,
+            got: actual,
+        }, ctx.file_id);
         return Ty::error(span);
     }
     if actual > max_args {
-        let diagnostic = kestrel_reporting::Diagnostic::error()
-            .with_message(format!("too many type arguments: expected at most {}, found {}", max_args, actual))
-            .with_labels(vec![kestrel_reporting::Label::primary(ctx.file_id, span.clone())]);
-        ctx.diagnostics.add_diagnostic(diagnostic);
+        ctx.diagnostics.throw(TooManyTypeArgumentsError {
+            span: span.clone(),
+            type_name: type_name.to_string(),
+            max_expected: max_args,
+            got: actual,
+        }, ctx.file_id);
         return Ty::error(span);
     }
 

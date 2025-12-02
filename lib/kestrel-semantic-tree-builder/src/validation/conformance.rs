@@ -20,6 +20,9 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::db::SemanticDatabase;
+use crate::diagnostics::{
+    CircularProtocolInheritanceError, MissingProtocolMethodError, WrongMethodReturnTypeError,
+};
 use crate::queries::{Db, TypePathResolution};
 use crate::validation::{ValidationConfig, ValidationPass};
 
@@ -125,24 +128,11 @@ fn check_circular_inheritance(
         let span = protocol.metadata().declaration_span().clone();
         let file_id = get_file_id_for_symbol(symbol, diagnostics);
 
-        let message = if config.debug_mode {
-            format!(
-                "[{}] protocol '{}' has circular inheritance",
-                ConformancePass::NAME,
-                protocol_name
-            )
-        } else {
-            format!("protocol '{}' has circular inheritance", protocol_name)
-        };
-
-        let diagnostic = kestrel_reporting::Diagnostic::error()
-            .with_message(message)
-            .with_labels(vec![
-                kestrel_reporting::Label::primary(file_id, span)
-                    .with_message("circular inheritance detected")
-            ]);
-
-        diagnostics.add_diagnostic(diagnostic);
+        diagnostics.throw(CircularProtocolInheritanceError {
+            span,
+            protocol_name: protocol_name.to_string(),
+            cycle: path.iter().map(|_| protocol_name.to_string()).collect(), // Simplified for now
+        }, file_id);
     }
 }
 
@@ -251,62 +241,25 @@ fn check_struct_conformance(
                     // Method not found - report error
                     let span = struct_sym.metadata().declaration_span().clone();
 
-                    let message = if config.debug_mode {
-                        format!(
-                            "[{}] struct '{}' does not implement required method '{}' from protocol '{}'",
-                            ConformancePass::NAME,
-                            struct_name,
-                            method_name,
-                            protocol_name
-                        )
-                    } else {
-                        format!(
-                            "struct '{}' does not implement required method '{}' from protocol '{}'",
-                            struct_name,
-                            method_name,
-                            protocol_name
-                        )
-                    };
-
-                    let diagnostic = kestrel_reporting::Diagnostic::error()
-                        .with_message(message)
-                        .with_labels(vec![
-                            kestrel_reporting::Label::primary(file_id, span)
-                                .with_message(format!("missing method '{}'", method_name))
-                        ]);
-
-                    diagnostics.add_diagnostic(diagnostic);
+                    diagnostics.throw(MissingProtocolMethodError {
+                        span,
+                        struct_name: struct_name.clone(),
+                        protocol_name: protocol_name.clone(),
+                        method_name: method_name.clone(),
+                    }, file_id);
                 }
                 Some((_struct_method, struct_return_type)) => {
                     // Method found - check return type matches
                     if struct_return_type != &required_return_type {
                         let span = struct_sym.metadata().declaration_span().clone();
 
-                        let message = if config.debug_mode {
-                            format!(
-                                "[{}] struct '{}' does not implement required method '{}' from protocol '{}' (return type mismatch)",
-                                ConformancePass::NAME,
-                                struct_name,
-                                method_name,
-                                protocol_name
-                            )
-                        } else {
-                            format!(
-                                "struct '{}' does not implement required method '{}' from protocol '{}'",
-                                struct_name,
-                                method_name,
-                                protocol_name
-                            )
-                        };
-
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(message)
-                            .with_labels(vec![
-                                kestrel_reporting::Label::primary(file_id, span)
-                                    .with_message(format!("method '{}' has wrong return type", method_name))
-                            ]);
-
-                        diagnostics.add_diagnostic(diagnostic);
+                        diagnostics.throw(WrongMethodReturnTypeError {
+                            span,
+                            method_name: method_name.clone(),
+                            protocol_name: protocol_name.clone(),
+                            expected_type: format!("{:?}", required_return_type),
+                            actual_type: format!("{:?}", struct_return_type),
+                        }, file_id);
                     }
                 }
             }

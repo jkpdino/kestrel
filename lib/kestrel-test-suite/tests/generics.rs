@@ -237,7 +237,7 @@ mod where_clause {
             struct Set[T] where T: NonExistent { }
         "#,
         )
-        .expect(HasError("'NonExistent' is not a protocol"));
+        .expect(HasError("cannot find type 'NonExistent' in this scope"));
     }
 
     #[test]

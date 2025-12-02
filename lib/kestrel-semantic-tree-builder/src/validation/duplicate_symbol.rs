@@ -16,6 +16,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
+use crate::diagnostics::{DuplicateSymbolDifferentKindError, DuplicateSymbolError};
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass that ensures no duplicate symbols exist
@@ -100,33 +101,24 @@ fn check_duplicate_types(
             let file_id = get_file_id_for_symbol(&child, diagnostics);
             let first_file_id = get_file_id_for_symbol(first, diagnostics);
 
-            let message = if config.debug_mode {
-                format!(
-                    "[{}] duplicate type '{}': already defined as {}",
-                    DuplicateSymbolPass::NAME,
-                    name,
-                    first_kind
-                )
+            if kind_desc == *first_kind {
+                diagnostics.throw(DuplicateSymbolError {
+                    name: name.clone(),
+                    kind: kind_desc.to_string(),
+                    original_span: first.metadata().declaration_span().clone(),
+                    original_file_id: first_file_id,
+                    duplicate_span: child.metadata().declaration_span().clone(),
+                }, file_id);
             } else {
-                format!("duplicate type '{}': already defined as {}", name, first_kind)
-            };
-
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(message)
-                .with_labels(vec![
-                    kestrel_reporting::Label::primary(
-                        file_id,
-                        child.metadata().declaration_span().clone(),
-                    )
-                    .with_message(format!("{} defined here", kind_desc)),
-                    kestrel_reporting::Label::secondary(
-                        first_file_id,
-                        first.metadata().declaration_span().clone(),
-                    )
-                    .with_message(format!("first defined as {} here", first_kind)),
-                ]);
-
-            diagnostics.add_diagnostic(diagnostic);
+                diagnostics.throw(DuplicateSymbolDifferentKindError {
+                    name: name.clone(),
+                    new_kind: kind_desc.to_string(),
+                    original_kind: first_kind.to_string(),
+                    original_span: first.metadata().declaration_span().clone(),
+                    original_file_id: first_file_id,
+                    duplicate_span: child.metadata().declaration_span().clone(),
+                }, file_id);
+            }
         } else {
             types.insert(name, (child.clone(), kind_desc));
         }
@@ -174,38 +166,24 @@ fn check_duplicate_members(
             let file_id = get_file_id_for_symbol(&child, diagnostics);
             let first_file_id = get_file_id_for_symbol(first, diagnostics);
 
-            let message = if config.debug_mode {
-                format!(
-                    "[{}] duplicate member '{}' in {} '{}': already defined as {}",
-                    DuplicateSymbolPass::NAME,
-                    name,
-                    type_kind,
-                    type_name,
-                    first_kind
-                )
+            if kind_desc == *first_kind {
+                diagnostics.throw(DuplicateSymbolError {
+                    name: name.clone(),
+                    kind: kind_desc.to_string(),
+                    original_span: first.metadata().declaration_span().clone(),
+                    original_file_id: first_file_id,
+                    duplicate_span: child.metadata().declaration_span().clone(),
+                }, file_id);
             } else {
-                format!(
-                    "duplicate member '{}' in {} '{}': already defined as {}",
-                    name, type_kind, type_name, first_kind
-                )
-            };
-
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(message)
-                .with_labels(vec![
-                    kestrel_reporting::Label::primary(
-                        file_id,
-                        child.metadata().declaration_span().clone(),
-                    )
-                    .with_message(format!("{} defined here", kind_desc)),
-                    kestrel_reporting::Label::secondary(
-                        first_file_id,
-                        first.metadata().declaration_span().clone(),
-                    )
-                    .with_message(format!("first defined as {} here", first_kind)),
-                ]);
-
-            diagnostics.add_diagnostic(diagnostic);
+                diagnostics.throw(DuplicateSymbolDifferentKindError {
+                    name: name.clone(),
+                    new_kind: kind_desc.to_string(),
+                    original_kind: first_kind.to_string(),
+                    original_span: first.metadata().declaration_span().clone(),
+                    original_file_id: first_file_id,
+                    duplicate_span: child.metadata().declaration_span().clone(),
+                }, file_id);
+            }
         } else {
             members.insert(name, (child.clone(), kind_desc));
         }

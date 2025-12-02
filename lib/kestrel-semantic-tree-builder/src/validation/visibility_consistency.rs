@@ -19,6 +19,10 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
+use crate::diagnostics::{
+    AliasedTypeLessVisibleError, FieldTypeLessVisibleError,
+    ParameterTypeLessVisibleError, ReturnTypeLessVisibleError,
+};
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass that ensures visibility consistency
@@ -227,65 +231,28 @@ fn check_function_visibility(
             None => return,
         };
         // Check return type
-        if let Some((type_name, type_level)) =
+        if let Some((_type_name, type_level)) =
             find_less_visible_type(callable.return_type(), VisibilityLevel::Public)
         {
-            let message = if config.debug_mode {
-                format!(
-                    "[{}] public function '{}' exposes {} type '{}'",
-                    VisibilityConsistencyPass::NAME,
-                    name,
-                    type_level.name(),
-                    type_name
-                )
-            } else {
-                format!(
-                    "public function '{}' exposes {} type '{}'",
-                    name,
-                    type_level.name(),
-                    type_name
-                )
-            };
-
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(message)
-                .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
-                    .with_message("return type is less visible than function")]);
-
-            diagnostics.add_diagnostic(diagnostic);
+            diagnostics.throw(ReturnTypeLessVisibleError {
+                span: span.clone(),
+                function_name: name.clone(),
+                function_visibility: "public".to_string(),
+                return_type_visibility: type_level.name().to_string(),
+            }, file_id);
         }
 
         // Check parameter types
         for param in callable.parameters() {
-            if let Some((type_name, type_level)) =
+            if let Some((_type_name, type_level)) =
                 find_less_visible_type(&param.ty, VisibilityLevel::Public)
             {
-                let message = if config.debug_mode {
-                    format!(
-                        "[{}] public function '{}' exposes {} type '{}' in parameter",
-                        VisibilityConsistencyPass::NAME,
-                        name,
-                        type_level.name(),
-                        type_name
-                    )
-                } else {
-                    format!(
-                        "public function '{}' exposes {} type '{}' in parameter",
-                        name,
-                        type_level.name(),
-                        type_name
-                    )
-                };
-
-                let diagnostic = kestrel_reporting::Diagnostic::error()
-                    .with_message(message)
-                    .with_labels(vec![kestrel_reporting::Label::primary(
-                        file_id,
-                        span.clone(),
-                    )
-                    .with_message("parameter type is less visible than function")]);
-
-                diagnostics.add_diagnostic(diagnostic);
+                diagnostics.throw(ParameterTypeLessVisibleError {
+                    span: span.clone(),
+                    function_name: name.clone(),
+                    function_visibility: "public".to_string(),
+                    param_type_visibility: type_level.name().to_string(),
+                }, file_id);
             }
         }
     }
@@ -313,32 +280,15 @@ fn check_type_alias_visibility(
     });
 
     if let Some(typed) = typed {
-        if let Some((type_name, type_level)) =
+        if let Some((_type_name, type_level)) =
             find_less_visible_type(typed.resolved_ty(), VisibilityLevel::Public)
         {
-            let message = if config.debug_mode {
-                format!(
-                    "[{}] public type alias '{}' exposes {} type '{}'",
-                    VisibilityConsistencyPass::NAME,
-                    name,
-                    type_level.name(),
-                    type_name
-                )
-            } else {
-                format!(
-                    "public type alias '{}' exposes {} type '{}'",
-                    name,
-                    type_level.name(),
-                    type_name
-                )
-            };
-
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(message)
-                .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)
-                    .with_message("aliased type is less visible than alias")]);
-
-            diagnostics.add_diagnostic(diagnostic);
+            diagnostics.throw(AliasedTypeLessVisibleError {
+                span,
+                alias_name: name.clone(),
+                alias_visibility: "public".to_string(),
+                aliased_type_visibility: type_level.name().to_string(),
+            }, file_id);
         }
     }
 }
@@ -355,32 +305,15 @@ fn check_field_visibility(
 
     // Get TypedBehavior for the field type using the extension trait
     if let Some(typed) = symbol.typed_behavior() {
-        if let Some((type_name, type_level)) =
+        if let Some((_type_name, type_level)) =
             find_less_visible_type(typed.ty(), VisibilityLevel::Public)
         {
-            let message = if config.debug_mode {
-                format!(
-                    "[{}] public field '{}' exposes {} type '{}'",
-                    VisibilityConsistencyPass::NAME,
-                    name,
-                    type_level.name(),
-                    type_name
-                )
-            } else {
-                format!(
-                    "public field '{}' exposes {} type '{}'",
-                    name,
-                    type_level.name(),
-                    type_name
-                )
-            };
-
-            let diagnostic = kestrel_reporting::Diagnostic::error()
-                .with_message(message)
-                .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)
-                    .with_message("field type is less visible than field")]);
-
-            diagnostics.add_diagnostic(diagnostic);
+            diagnostics.throw(FieldTypeLessVisibleError {
+                span,
+                field_name: name.clone(),
+                field_visibility: "public".to_string(),
+                field_type_visibility: type_level.name().to_string(),
+            }, file_id);
         }
     }
 }

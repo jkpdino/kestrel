@@ -197,7 +197,7 @@ mod validation {
             struct Circle: Drawable { }
         "#,
         )
-        .expect(HasError("does not implement required method 'draw'"));
+        .expect(HasError("does not implement method 'draw'"));
     }
 
     #[test]
@@ -230,7 +230,7 @@ mod validation {
             }
         "#,
         )
-        .expect(HasError("does not implement required method 'equals'"));
+        .expect(HasError("does not implement method 'equals'"));
     }
 
     #[test]
@@ -267,7 +267,7 @@ mod validation {
             }
         "#,
         )
-        .expect(HasError("does not implement required method 'draw'"));
+        .expect(HasError("does not implement method 'draw'"));
     }
 
     #[test]
@@ -282,7 +282,7 @@ mod validation {
             }
         "#,
         )
-        .expect(HasError("does not implement required method 'hash'"));
+        .expect(HasError("method 'hash' has wrong return type"));
     }
 
     #[test]
@@ -297,7 +297,7 @@ mod validation {
             }
         "#,
         )
-        .expect(HasError("does not implement required method 'compare'"));
+        .expect(HasError("does not implement method 'compare'"));
     }
 
     #[test]
@@ -334,7 +334,7 @@ mod validation {
             }
         "#,
         )
-        .expect(HasError("does not implement required method 'onClick'"));
+        .expect(HasError("does not implement method 'onClick'"));
     }
 
     #[test]
@@ -375,6 +375,6 @@ mod validation {
             }
         "#,
         )
-        .expect(HasError("does not implement required method 'greet'"));
+        .expect(HasError("does not implement method 'greet'"));
     }
 }

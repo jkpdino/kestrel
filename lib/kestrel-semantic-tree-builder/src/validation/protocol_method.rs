@@ -12,6 +12,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
+use crate::diagnostics::ProtocolMethodHasBodyError;
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass that ensures protocol methods don't have bodies
@@ -82,23 +83,13 @@ fn check_protocol_methods(
                 let name = &child.metadata().name().value;
                 let span = child.metadata().declaration_span().clone();
                 let file_id = get_file_id_for_symbol(&child, diagnostics);
+                let protocol_name = protocol.metadata().name().value.clone();
 
-                let message = if config.debug_mode {
-                    format!(
-                        "[{}] protocol method '{}' cannot have a body",
-                        ProtocolMethodPass::NAME,
-                        name
-                    )
-                } else {
-                    format!("protocol method '{}' cannot have a body", name)
-                };
-
-                let diagnostic = kestrel_reporting::Diagnostic::error()
-                    .with_message(message)
-                    .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)
-                        .with_message("body not allowed in protocol method")]);
-
-                diagnostics.add_diagnostic(diagnostic);
+                diagnostics.throw(ProtocolMethodHasBodyError {
+                    span,
+                    method_name: name.clone(),
+                    protocol_name,
+                }, file_id);
             }
         }
     }

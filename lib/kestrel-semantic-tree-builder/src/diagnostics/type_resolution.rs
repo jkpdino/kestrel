@@ -1,0 +1,127 @@
+//! Type resolution errors.
+//!
+//! Errors related to resolving type paths and generic type instantiation.
+
+use kestrel_reporting::{Diagnostic, IntoDiagnostic, Label};
+use kestrel_span::Span;
+
+/// Error when a type cannot be found in scope.
+pub struct UnresolvedTypeError {
+    pub span: Span,
+    pub type_name: String,
+}
+
+impl IntoDiagnostic for UnresolvedTypeError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("cannot find type '{}' in this scope", self.type_name))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("not found")
+            ])
+    }
+}
+
+/// Error when a type name is ambiguous (multiple candidates in scope).
+pub struct AmbiguousTypeError {
+    pub span: Span,
+    pub type_name: String,
+    pub candidate_count: usize,
+}
+
+impl IntoDiagnostic for AmbiguousTypeError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("type '{}' is ambiguous", self.type_name))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!("{} types with this name in scope", self.candidate_count))
+            ])
+            .with_notes(vec![
+                "Use a fully qualified path to disambiguate.".to_string()
+            ])
+    }
+}
+
+/// Error when a symbol is not a type.
+pub struct NotATypeError {
+    pub span: Span,
+    pub name: String,
+}
+
+impl IntoDiagnostic for NotATypeError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("'{}' is not a type", self.name))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("not a type")
+            ])
+    }
+}
+
+/// Error when type arguments are provided to a non-generic type.
+pub struct NotGenericError {
+    pub span: Span,
+    pub type_name: String,
+}
+
+impl IntoDiagnostic for NotGenericError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("type '{}' does not accept type arguments", self.type_name))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message("not a generic type")
+            ])
+            .with_notes(vec![
+                format!("'{}' is not declared with type parameters", self.type_name)
+            ])
+    }
+}
+
+/// Error when too few type arguments are provided.
+pub struct TooFewTypeArgumentsError {
+    pub span: Span,
+    pub type_name: String,
+    pub min_expected: usize,
+    pub got: usize,
+}
+
+impl IntoDiagnostic for TooFewTypeArgumentsError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("too few type arguments for '{}'", self.type_name))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!(
+                        "expected at least {}, found {}",
+                        self.min_expected,
+                        self.got
+                    ))
+            ])
+    }
+}
+
+/// Error when too many type arguments are provided.
+pub struct TooManyTypeArgumentsError {
+    pub span: Span,
+    pub type_name: String,
+    pub max_expected: usize,
+    pub got: usize,
+}
+
+impl IntoDiagnostic for TooManyTypeArgumentsError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("too many type arguments for '{}'", self.type_name))
+            .with_labels(vec![
+                Label::primary(file_id, self.span.clone())
+                    .with_message(format!(
+                        "expected at most {}, found {}",
+                        self.max_expected,
+                        self.got
+                    ))
+            ])
+    }
+}

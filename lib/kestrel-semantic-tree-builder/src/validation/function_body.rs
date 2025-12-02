@@ -12,6 +12,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
+use crate::diagnostics::FunctionMissingBodyError;
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass that ensures functions have bodies (except in protocols)
@@ -70,22 +71,10 @@ fn validate_symbol(
                 let span = symbol.metadata().declaration_span().clone();
                 let file_id = get_file_id_for_symbol(symbol, diagnostics);
 
-                let message = if config.debug_mode {
-                    format!(
-                        "[{}] function '{}' requires a body",
-                        FunctionBodyPass::NAME,
-                        name
-                    )
-                } else {
-                    format!("function '{}' requires a body", name)
-                };
-
-                let diagnostic = kestrel_reporting::Diagnostic::error()
-                    .with_message(message)
-                    .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)
-                        .with_message("function declared without body")]);
-
-                diagnostics.add_diagnostic(diagnostic);
+                diagnostics.throw(FunctionMissingBodyError {
+                    span,
+                    function_name: name.clone(),
+                }, file_id);
             }
         }
     }

@@ -11,6 +11,7 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::queries::TypePathResolution;
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
@@ -186,40 +187,40 @@ fn resolve_type_bound(
                             // Valid protocol bound - nothing to do
                         }
                         TyKind::Struct { symbol, .. } => {
-                            let diagnostic = kestrel_reporting::Diagnostic::error()
-                                .with_message(format!("'{}' is not a protocol", symbol.metadata().name().value))
-                                .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)
-                                    .with_message("struct cannot be used as a bound")]);
-                            ctx.diagnostics.add_diagnostic(diagnostic);
+                            ctx.diagnostics.throw(NotAProtocolError {
+                                span,
+                                name: symbol.metadata().name().value.clone(),
+                                context: NotAProtocolContext::Bound,
+                            }, file_id);
                         }
                         TyKind::TypeAlias { symbol, .. } => {
-                            let diagnostic = kestrel_reporting::Diagnostic::error()
-                                .with_message(format!("'{}' is not a protocol", symbol.metadata().name().value))
-                                .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)
-                                    .with_message("type alias cannot be used as a bound")]);
-                            ctx.diagnostics.add_diagnostic(diagnostic);
+                            ctx.diagnostics.throw(NotAProtocolError {
+                                span,
+                                name: symbol.metadata().name().value.clone(),
+                                context: NotAProtocolContext::Bound,
+                            }, file_id);
                         }
                         _ => {
-                            let diagnostic = kestrel_reporting::Diagnostic::error()
-                                .with_message(format!("'{}' is not a protocol", bound_name))
-                                .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)
-                                    .with_message("not a protocol")]);
-                            ctx.diagnostics.add_diagnostic(diagnostic);
+                            ctx.diagnostics.throw(NotAProtocolError {
+                                span,
+                                name: bound_name.clone(),
+                                context: NotAProtocolContext::Bound,
+                            }, file_id);
                         }
                     }
                 }
                 TypePathResolution::NotFound { .. } => {
-                    let diagnostic = kestrel_reporting::Diagnostic::error()
-                        .with_message(format!("'{}' is not a protocol", bound_name))
-                        .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)
-                            .with_message("not found")]);
-                    ctx.diagnostics.add_diagnostic(diagnostic);
+                    ctx.diagnostics.throw(UnresolvedTypeError {
+                        span,
+                        type_name: bound_name.clone(),
+                    }, file_id);
                 }
                 TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
-                    let diagnostic = kestrel_reporting::Diagnostic::error()
-                        .with_message(format!("'{}' is not a protocol", bound_name))
-                        .with_labels(vec![kestrel_reporting::Label::primary(file_id, span)]);
-                    ctx.diagnostics.add_diagnostic(diagnostic);
+                    ctx.diagnostics.throw(NotAProtocolError {
+                        span,
+                        name: bound_name.clone(),
+                        context: NotAProtocolContext::Bound,
+                    }, file_id);
                 }
             }
         }
@@ -297,37 +298,37 @@ fn resolve_conformances(
                         resolved_conformances.push(resolved_ty);
                     }
                     TyKind::Struct { symbol, .. } => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("'{}' is not a protocol", symbol.metadata().name().value))
-                            .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
-                                .with_message("struct cannot be used as a conformance")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Conformance,
+                        }, file_id);
                         // Add error type as placeholder
                         resolved_conformances.push(Ty::error(span));
                     }
                     _ => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("'{}' is not a protocol", conformance_name))
-                            .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
-                                .with_message("not a protocol")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: conformance_name.clone(),
+                            context: NotAProtocolContext::Conformance,
+                        }, file_id);
                         resolved_conformances.push(Ty::error(span));
                     }
                 }
             }
             TypePathResolution::NotFound { .. } => {
-                let diagnostic = kestrel_reporting::Diagnostic::error()
-                    .with_message(format!("cannot find type '{}' in this scope", conformance_name))
-                    .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
-                        .with_message("not found")]);
-                ctx.diagnostics.add_diagnostic(diagnostic);
+                ctx.diagnostics.throw(UnresolvedTypeError {
+                    span: span.clone(),
+                    type_name: conformance_name.clone(),
+                }, file_id);
                 resolved_conformances.push(Ty::error(span));
             }
             TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
-                let diagnostic = kestrel_reporting::Diagnostic::error()
-                    .with_message(format!("'{}' is not a protocol", conformance_name))
-                    .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())]);
-                ctx.diagnostics.add_diagnostic(diagnostic);
+                ctx.diagnostics.throw(NotAProtocolError {
+                    span: span.clone(),
+                    name: conformance_name.clone(),
+                    context: NotAProtocolContext::Conformance,
+                }, file_id);
                 resolved_conformances.push(Ty::error(span));
             }
         }

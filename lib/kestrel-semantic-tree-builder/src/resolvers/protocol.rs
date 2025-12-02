@@ -11,6 +11,7 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
 use crate::queries::TypePathResolution;
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
@@ -191,36 +192,36 @@ fn resolve_inherited_protocols(
                         resolved_protocols.push(resolved_ty);
                     }
                     TyKind::Struct { symbol, .. } => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("'{}' is not a protocol", symbol.metadata().name().value))
-                            .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
-                                .with_message("struct cannot be inherited by a protocol")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: NotAProtocolContext::Inheritance,
+                        }, file_id);
                         resolved_protocols.push(Ty::error(span));
                     }
                     _ => {
-                        let diagnostic = kestrel_reporting::Diagnostic::error()
-                            .with_message(format!("'{}' is not a protocol", protocol_name))
-                            .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
-                                .with_message("not a protocol")]);
-                        ctx.diagnostics.add_diagnostic(diagnostic);
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: protocol_name.clone(),
+                            context: NotAProtocolContext::Inheritance,
+                        }, file_id);
                         resolved_protocols.push(Ty::error(span));
                     }
                 }
             }
             TypePathResolution::NotFound { .. } => {
-                let diagnostic = kestrel_reporting::Diagnostic::error()
-                    .with_message(format!("cannot find type '{}' in this scope", protocol_name))
-                    .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())
-                        .with_message("not found")]);
-                ctx.diagnostics.add_diagnostic(diagnostic);
+                ctx.diagnostics.throw(UnresolvedTypeError {
+                    span: span.clone(),
+                    type_name: protocol_name.clone(),
+                }, file_id);
                 resolved_protocols.push(Ty::error(span));
             }
             TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
-                let diagnostic = kestrel_reporting::Diagnostic::error()
-                    .with_message(format!("'{}' is not a protocol", protocol_name))
-                    .with_labels(vec![kestrel_reporting::Label::primary(file_id, span.clone())]);
-                ctx.diagnostics.add_diagnostic(diagnostic);
+                ctx.diagnostics.throw(NotAProtocolError {
+                    span: span.clone(),
+                    name: protocol_name.clone(),
+                    context: NotAProtocolContext::Inheritance,
+                }, file_id);
                 resolved_protocols.push(Ty::error(span));
             }
         }
