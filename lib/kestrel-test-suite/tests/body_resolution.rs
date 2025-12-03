@@ -645,3 +645,123 @@ func test(x: Int) -> Int {
         .expect(HasError("cannot access member on type"));
     }
 }
+
+mod self_parameter {
+    use super::*;
+
+    #[test]
+    fn instance_method_compiles() {
+        // Instance methods (non-static) should compile
+        Test::new(
+            r#"
+module Main
+
+struct Counter {
+    let value: Int
+
+    func getValue() -> Int {
+        42
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Counter").is(SymbolKind::Struct))
+        .expect(Symbol::new("getValue").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn mutating_method_compiles() {
+        // Mutating methods should compile
+        Test::new(
+            r#"
+module Main
+
+struct Counter {
+    var value: Int
+
+    mutating func increment() -> () {
+        ()
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Counter").is(SymbolKind::Struct))
+        .expect(Symbol::new("increment").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn consuming_method_compiles() {
+        // Consuming methods should compile
+        Test::new(
+            r#"
+module Main
+
+struct Container {
+    let item: Int
+
+    consuming func take() -> Int {
+        42
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Container").is(SymbolKind::Struct))
+        .expect(Symbol::new("take").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn static_method_no_self() {
+        // Static methods should not have self
+        Test::new(
+            r#"
+module Main
+
+struct Factory {
+    static func create() -> Int {
+        42
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Factory").is(SymbolKind::Struct))
+        .expect(Symbol::new("create").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn protocol_method_compiles() {
+        // Protocol methods should compile
+        Test::new(
+            r#"
+module Main
+
+protocol Printable {
+    func print() -> String
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Printable").is(SymbolKind::Protocol))
+        .expect(Symbol::new("print").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn mutating_protocol_method_compiles() {
+        // Mutating protocol methods should compile
+        Test::new(
+            r#"
+module Main
+
+protocol Resettable {
+    mutating func reset() -> ()
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Resettable").is(SymbolKind::Protocol))
+        .expect(Symbol::new("reset").is(SymbolKind::Function));
+    }
+}

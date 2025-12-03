@@ -113,6 +113,9 @@ pub enum Token {
     #[token("module")]
     Module,
 
+    #[token("mutating")]
+    Mutating,
+
     #[token("private")]
     Private,
 
@@ -140,6 +143,9 @@ pub enum Token {
     // ===== Statement Keywords =====
     #[token("as")]
     As,
+
+    #[token("consuming")]
+    Consuming,
 
     #[token("else")]
     Else,

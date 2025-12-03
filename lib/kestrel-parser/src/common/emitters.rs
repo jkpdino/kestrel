@@ -10,7 +10,7 @@ use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
     FieldDeclarationData, FunctionDeclarationData, ParameterData, ProtocolDeclarationData,
-    StructBodyItem, StructDeclarationData, TypeAliasDeclarationData,
+    ReceiverModifier, StructBodyItem, StructDeclarationData, TypeAliasDeclarationData,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -204,6 +204,16 @@ pub fn emit_function_declaration(sink: &mut EventSink, data: FunctionDeclaration
 
     emit_visibility(sink, data.visibility);
     emit_static_modifier(sink, data.is_static);
+
+    // Emit receiver modifier (mutating/consuming) if present
+    if let Some((modifier, span)) = data.receiver_modifier {
+        let kind = match modifier {
+            ReceiverModifier::Mutating => SyntaxKind::Mutating,
+            ReceiverModifier::Consuming => SyntaxKind::Consuming,
+        };
+        sink.add_token(kind, span);
+    }
+
     sink.add_token(SyntaxKind::Func, data.fn_span);
     emit_name(sink, data.name_span);
 

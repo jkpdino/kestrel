@@ -123,6 +123,7 @@ pub enum SyntaxKind {
     // Keywords
     And,
     As,
+    Consuming,
     Else,
     Fileprivate,
     Func,
@@ -131,6 +132,7 @@ pub enum SyntaxKind {
     Internal,
     Let,
     Module,
+    Mutating,
     Private,
     Protocol,
     Public,
@@ -195,6 +197,7 @@ impl From<Token> for SyntaxKind {
             // Keywords
             Token::And => SyntaxKind::And,
             Token::As => SyntaxKind::As,
+            Token::Consuming => SyntaxKind::Consuming,
             Token::Else => SyntaxKind::Else,
             Token::Fileprivate => SyntaxKind::Fileprivate,
             Token::Func => SyntaxKind::Func,
@@ -203,6 +206,7 @@ impl From<Token> for SyntaxKind {
             Token::Internal => SyntaxKind::Internal,
             Token::Let => SyntaxKind::Let,
             Token::Module => SyntaxKind::Module,
+            Token::Mutating => SyntaxKind::Mutating,
             Token::Private => SyntaxKind::Private,
             Token::Protocol => SyntaxKind::Protocol,
             Token::Public => SyntaxKind::Public,
@@ -311,6 +315,7 @@ impl Language for KestrelLanguage {
         const NULL: u16 = SyntaxKind::Null as u16;
         const AND: u16 = SyntaxKind::And as u16;
         const AS: u16 = SyntaxKind::As as u16;
+        const CONSUMING: u16 = SyntaxKind::Consuming as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
         const FUNC: u16 = SyntaxKind::Func as u16;
@@ -319,6 +324,7 @@ impl Language for KestrelLanguage {
         const INTERNAL: u16 = SyntaxKind::Internal as u16;
         const LET: u16 = SyntaxKind::Let as u16;
         const MODULE: u16 = SyntaxKind::Module as u16;
+        const MUTATING: u16 = SyntaxKind::Mutating as u16;
         const PRIVATE: u16 = SyntaxKind::Private as u16;
         const PROTOCOL: u16 = SyntaxKind::Protocol as u16;
         const PUBLIC: u16 = SyntaxKind::Public as u16;
@@ -417,6 +423,7 @@ impl Language for KestrelLanguage {
             NULL => SyntaxKind::Null,
             AND => SyntaxKind::And,
             AS => SyntaxKind::As,
+            CONSUMING => SyntaxKind::Consuming,
             ELSE => SyntaxKind::Else,
             FILEPRIVATE => SyntaxKind::Fileprivate,
             FUNC => SyntaxKind::Func,
@@ -425,6 +432,7 @@ impl Language for KestrelLanguage {
             INTERNAL => SyntaxKind::Internal,
             LET => SyntaxKind::Let,
             MODULE => SyntaxKind::Module,
+            MUTATING => SyntaxKind::Mutating,
             PRIVATE => SyntaxKind::Private,
             PROTOCOL => SyntaxKind::Protocol,
             PUBLIC => SyntaxKind::Public,

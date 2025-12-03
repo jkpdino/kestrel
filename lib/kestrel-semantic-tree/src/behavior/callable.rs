@@ -6,6 +6,29 @@ use semantic_tree::symbol::Symbol;
 
 use crate::{behavior::KestrelBehaviorKind, language::KestrelLanguage, ty::Ty};
 
+/// Describes how a method receives its instance (self).
+///
+/// This determines what operations are allowed on `self` within the method body
+/// and what constraints apply when calling the method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReceiverKind {
+    /// Immutable borrow of self (default for instance methods)
+    /// Syntax: `func method()`
+    Borrowing,
+
+    /// Mutable borrow of self
+    /// Syntax: `mutating func method()`
+    Mutating,
+
+    /// Takes ownership of self (moves it)
+    /// Syntax: `consuming func method()`
+    Consuming,
+
+    /// For initializers - self is being constructed
+    /// Syntax: `init()`
+    Initializing,
+}
+
 /// Represents a function parameter with optional label for overload resolution.
 ///
 /// Parameters support Swift-style labeled arguments:
@@ -224,6 +247,7 @@ impl CallableSignature {
 /// It provides:
 /// - Parameter information with labels for overload resolution
 /// - Return type for type checking
+/// - Receiver kind for instance methods
 /// - Signature generation for duplicate detection
 #[derive(Debug, Clone)]
 pub struct CallableBehavior {
@@ -231,6 +255,8 @@ pub struct CallableBehavior {
     parameters: Vec<CallableParameter>,
     /// The return type
     return_type: Ty,
+    /// The receiver kind (None for static/free functions, Some for instance methods)
+    receiver: Option<ReceiverKind>,
     /// The span covering the entire callable declaration
     span: Span,
 }
@@ -242,11 +268,27 @@ impl Behavior<KestrelLanguage> for CallableBehavior {
 }
 
 impl CallableBehavior {
-    /// Create a new CallableBehavior
+    /// Create a new CallableBehavior for a static/free function (no receiver)
     pub fn new(parameters: Vec<CallableParameter>, return_type: Ty, span: Span) -> Self {
         Self {
             parameters,
             return_type,
+            receiver: None,
+            span,
+        }
+    }
+
+    /// Create a new CallableBehavior with a receiver (instance method)
+    pub fn with_receiver(
+        parameters: Vec<CallableParameter>,
+        return_type: Ty,
+        receiver: ReceiverKind,
+        span: Span,
+    ) -> Self {
+        Self {
+            parameters,
+            return_type,
+            receiver: Some(receiver),
             span,
         }
     }
@@ -264,6 +306,21 @@ impl CallableBehavior {
     /// Get the span
     pub fn span(&self) -> &Span {
         &self.span
+    }
+
+    /// Get the receiver kind (None for static/free functions)
+    pub fn receiver(&self) -> Option<ReceiverKind> {
+        self.receiver
+    }
+
+    /// Check if this is an instance method (has a receiver)
+    pub fn is_instance_method(&self) -> bool {
+        self.receiver.is_some()
+    }
+
+    /// Check if this is a static/free function (no receiver)
+    pub fn is_static(&self) -> bool {
+        self.receiver.is_none()
     }
 
     /// Get the arity (number of parameters)

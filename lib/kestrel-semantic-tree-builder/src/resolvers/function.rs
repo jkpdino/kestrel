@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::{FunctionSymbol, Parameter};
@@ -134,10 +134,16 @@ impl Resolver for FunctionResolver {
         // Extract and resolve return type from syntax
         let resolved_return = resolve_return_type_from_syntax(syntax, source, symbol_id, context, file_id);
 
+        // Determine receiver kind for instance methods
+        let receiver_kind = determine_receiver_kind(syntax, symbol);
+
         // Add a new CallableBehavior with resolved types
         // The FunctionSymbol.get_callable() method returns the last CallableBehavior,
         // which will be this resolved one.
-        let resolved_callable = CallableBehavior::new(resolved_params.clone(), resolved_return, span);
+        let resolved_callable = match receiver_kind {
+            Some(kind) => CallableBehavior::with_receiver(resolved_params.clone(), resolved_return, kind, span),
+            None => CallableBehavior::new(resolved_params.clone(), resolved_return, span),
+        };
         symbol.metadata().add_behavior(resolved_callable);
 
         // Resolve function body if present
@@ -157,6 +163,7 @@ fn resolve_function_body(
     source: &str,
 ) {
     use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::symbol::function::FunctionSymbol;
     use crate::body_resolver::{BodyResolutionContext, resolve_function_body as resolve_body};
 
@@ -198,7 +205,29 @@ fn resolve_function_body(
 
     let mut local_scope = crate::local_scope::LocalScope::new(temp_func);
 
-    // Add parameters to local scope first
+    // Get receiver kind from CallableBehavior to determine if we need to inject `self`
+    let receiver_kind = symbol
+        .metadata()
+        .behaviors()
+        .iter()
+        .find(|b| matches!(b.kind(), KestrelBehaviorKind::Callable))
+        .and_then(|b| b.as_ref().downcast_ref::<CallableBehavior>())
+        .and_then(|cb| cb.receiver());
+
+    // If this is an instance method, inject `self` as the first local
+    if let Some(receiver) = receiver_kind {
+        if let Some(self_type) = get_self_type(symbol) {
+            let is_mutable = matches!(receiver, ReceiverKind::Mutating);
+            let self_span = symbol.metadata().span().start..symbol.metadata().span().start;
+
+            // Add self to local scope
+            local_scope.bind("self".to_string(), self_type.clone(), is_mutable, self_span.clone());
+            // Add to the actual function symbol
+            func_sym.add_local("self".to_string(), self_type, is_mutable, self_span);
+        }
+    }
+
+    // Add parameters to local scope
     for param in params {
         let param_ty = param.ty.clone();
         let param_name = param.bind_name.value.clone();
@@ -430,4 +459,70 @@ fn resolve_return_type_from_syntax(
     // No explicit return type - defaults to unit
     let fn_span = get_node_span(syntax, source);
     Ty::unit(fn_span.end..fn_span.end)
+}
+
+/// Get the type of `self` for an instance method
+///
+/// Returns the type of the containing struct or protocol.
+/// For now, we use `Self` type which will be resolved later.
+fn get_self_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
+    let parent = symbol.metadata().parent()?;
+    let parent_span = parent.metadata().span().clone();
+
+    match parent.metadata().kind() {
+        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => {
+            // Use Self type which refers to the containing type
+            // This will be resolved to the concrete type during type checking
+            Some(Ty::self_type(parent_span))
+        }
+        _ => None,
+    }
+}
+
+/// Determine the receiver kind for a function declaration
+///
+/// Returns:
+/// - `None` for static functions and free functions (not in a struct/protocol)
+/// - `Some(ReceiverKind)` for instance methods
+fn determine_receiver_kind(
+    syntax: &SyntaxNode,
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Option<ReceiverKind> {
+    // Check if this function is static
+    let is_static = syntax
+        .children()
+        .any(|child| child.kind() == SyntaxKind::StaticModifier);
+
+    if is_static {
+        return None; // Static functions have no receiver
+    }
+
+    // Check if the function is in a struct or protocol (instance method)
+    let parent_kind = symbol.metadata().parent().map(|p| p.metadata().kind());
+    let is_instance_method = matches!(
+        parent_kind,
+        Some(KestrelSymbolKind::Struct) | Some(KestrelSymbolKind::Protocol)
+    );
+
+    if !is_instance_method {
+        return None; // Free functions have no receiver
+    }
+
+    // Check for receiver modifier (mutating/consuming)
+    let has_mutating = syntax
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .any(|tok| tok.kind() == SyntaxKind::Mutating);
+
+    let has_consuming = syntax
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .any(|tok| tok.kind() == SyntaxKind::Consuming);
+
+    // Determine receiver kind
+    match (has_mutating, has_consuming) {
+        (true, _) => Some(ReceiverKind::Mutating),
+        (_, true) => Some(ReceiverKind::Consuming),
+        _ => Some(ReceiverKind::Borrowing), // Default for instance methods
+    }
 }

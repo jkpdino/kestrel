@@ -7,7 +7,7 @@ use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 
-use super::data::{ParameterData, FunctionDeclarationData, FieldDeclarationData};
+use super::data::{ParameterData, FunctionDeclarationData, FieldDeclarationData, ReceiverModifier};
 use crate::ty::{ty_parser, TyVariant};
 use crate::type_param::{type_parameter_list_parser, where_clause_parser};
 use crate::block::{code_block_parser, CodeBlockData};
@@ -182,6 +182,24 @@ pub fn static_parser() -> impl Parser<Token, Option<Span>, Error = Simple<Token>
         .or(empty().map(|_| None))
 }
 
+/// Parser for optional receiver modifier (mutating/consuming)
+///
+/// Parses an optional `mutating` or `consuming` keyword and returns the modifier with its span.
+///
+/// # Examples
+/// - `mutating func foo()` → `Some((ReceiverModifier::Mutating, span))`
+/// - `consuming func foo()` → `Some((ReceiverModifier::Consuming, span))`
+/// - `func foo()` → `None`
+pub fn receiver_modifier_parser() -> impl Parser<Token, Option<(ReceiverModifier, Span)>, Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Mutating)
+                .map_with_span(|_, span| Some((ReceiverModifier::Mutating, span)))
+                .or(just(Token::Consuming).map_with_span(|_, span| Some((ReceiverModifier::Consuming, span))))
+        )
+        .or(empty().map(|_| None))
+}
+
 /// Parser for let/var mutability keyword
 ///
 /// Parses either `let` or `var` and returns the span and mutability flag.
@@ -297,12 +315,13 @@ pub fn function_body_parser() -> impl Parser<Token, Option<CodeBlockData>, Error
 
 /// Parser for a function declaration
 ///
-/// Syntax: `(visibility)? (static)? fn name[T, U]?(params) (-> Type)? (where ...)? ({ })?`
+/// Syntax: `(visibility)? (static)? (mutating|consuming)? func name[T, U]?(params) (-> Type)? (where ...)? ({ })?`
 ///
 /// This is the single source of truth for function declaration parsing.
 pub fn function_declaration_parser_internal() -> impl Parser<Token, FunctionDeclarationData, Error = Simple<Token>> + Clone {
     visibility_parser_internal()
         .then(static_parser())
+        .then(receiver_modifier_parser())
         .then(token(Token::Func))
         .then(identifier())
         .then(type_parameter_list_parser().or_not())
@@ -312,10 +331,11 @@ pub fn function_declaration_parser_internal() -> impl Parser<Token, FunctionDecl
         .then(return_type_parser())
         .then(where_clause_parser().or_not())
         .then(function_body_parser())
-        .map(|((((((((((visibility, is_static), fn_span), name_span), type_params), lparen), parameters), rparen), return_type), where_clause), body)| {
+        .map(|(((((((((((visibility, is_static), receiver_modifier), fn_span), name_span), type_params), lparen), parameters), rparen), return_type), where_clause), body)| {
             FunctionDeclarationData {
                 visibility,
                 is_static,
+                receiver_modifier,
                 fn_span,
                 name_span,
                 type_params,

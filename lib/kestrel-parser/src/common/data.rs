@@ -33,6 +33,15 @@ pub struct ParameterData {
     pub ty: TyVariant,
 }
 
+/// Receiver modifier for instance methods
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiverModifier {
+    /// `mutating func` - method can mutate self
+    Mutating,
+    /// `consuming func` - method takes ownership of self
+    Consuming,
+}
+
 /// Raw parsed data for function declaration internals
 ///
 /// Used by both function declarations and protocol method declarations.
@@ -40,6 +49,8 @@ pub struct ParameterData {
 pub struct FunctionDeclarationData {
     pub visibility: Option<(Token, Span)>,
     pub is_static: Option<Span>,
+    /// Receiver modifier (mutating/consuming) with its span
+    pub receiver_modifier: Option<(ReceiverModifier, Span)>,
     pub fn_span: Span,
     pub name_span: Span,
     pub type_params: Option<(Span, Vec<TypeParameterData>, Span)>,
