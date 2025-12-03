@@ -18,6 +18,8 @@ pub struct MemberAccessBehavior {
     member_name: String,
     /// The type of the member when accessed
     member_type: Ty,
+    /// Whether the member is mutable (var vs let for fields)
+    member_mutable: bool,
 }
 
 impl Behavior<KestrelLanguage> for MemberAccessBehavior {
@@ -28,10 +30,11 @@ impl Behavior<KestrelLanguage> for MemberAccessBehavior {
 
 impl MemberAccessBehavior {
     /// Create a new MemberAccessBehavior for a field
-    pub fn new(member_name: String, member_type: Ty) -> Self {
+    pub fn new(member_name: String, member_type: Ty, member_mutable: bool) -> Self {
         MemberAccessBehavior {
             member_name,
             member_type,
+            member_mutable,
         }
     }
 
@@ -45,11 +48,23 @@ impl MemberAccessBehavior {
         &self.member_type
     }
 
+    /// Check if the member is mutable
+    pub fn is_mutable(&self) -> bool {
+        self.member_mutable
+    }
+
     /// Produce an expression for accessing this member on the given parent expression.
     ///
-    /// For a field, this produces `Expression::field_access(parent, field_name, field_type, span)`.
+    /// For a field, this produces `Expression::field_access(parent, field_name, field_mutable, field_type, span)`.
+    /// The resulting expression's mutability is: field_mutable AND parent.mutable
     pub fn access(&self, parent: Expression, span: Span) -> Expression {
-        Expression::field_access(parent, self.member_name.clone(), self.member_type.clone(), span)
+        Expression::field_access(
+            parent,
+            self.member_name.clone(),
+            self.member_mutable,
+            self.member_type.clone(),
+            span,
+        )
     }
 }
 
@@ -59,23 +74,70 @@ mod tests {
     use crate::ty::IntBits;
 
     #[test]
-    fn test_member_access_field() {
+    fn test_member_access_mutable_field() {
         let field_ty = Ty::int(IntBits::I64, 0..3);
-        let behavior = MemberAccessBehavior::new("x".to_string(), field_ty.clone());
+        let behavior = MemberAccessBehavior::new("x".to_string(), field_ty.clone(), true);
 
         assert_eq!(behavior.member_name(), "x");
         assert!(behavior.member_type().is_int());
+        assert!(behavior.is_mutable());
 
-        // Create a fake parent expression
-        let parent = Expression::integer(42, 0..2);
+        // Create a mutable parent expression (simulating a var binding)
+        let parent = Expression::local_ref(
+            crate::symbol::local::LocalId::new(0),
+            Ty::int(IntBits::I64, 0..1),
+            true, // mutable
+            0..2,
+        );
         let result = behavior.access(parent, 0..4);
 
-        // Result should be a field access
+        // Result should be a mutable field access
+        assert!(result.is_mutable());
         match &result.kind {
             crate::expr::ExprKind::FieldAccess { field, .. } => {
                 assert_eq!(field, "x");
             }
             _ => panic!("Expected FieldAccess"),
         }
+    }
+
+    #[test]
+    fn test_member_access_immutable_field() {
+        let field_ty = Ty::int(IntBits::I64, 0..3);
+        let behavior = MemberAccessBehavior::new("x".to_string(), field_ty.clone(), false);
+
+        assert!(!behavior.is_mutable());
+
+        // Even with mutable parent, immutable field = immutable access
+        let parent = Expression::local_ref(
+            crate::symbol::local::LocalId::new(0),
+            Ty::int(IntBits::I64, 0..1),
+            true, // mutable parent
+            0..2,
+        );
+        let result = behavior.access(parent, 0..4);
+
+        // Result should be immutable (field is let)
+        assert!(!result.is_mutable());
+    }
+
+    #[test]
+    fn test_member_access_mutable_field_immutable_parent() {
+        let field_ty = Ty::int(IntBits::I64, 0..3);
+        let behavior = MemberAccessBehavior::new("x".to_string(), field_ty.clone(), true);
+
+        assert!(behavior.is_mutable());
+
+        // Immutable parent, mutable field = immutable access
+        let parent = Expression::local_ref(
+            crate::symbol::local::LocalId::new(0),
+            Ty::int(IntBits::I64, 0..1),
+            false, // immutable parent
+            0..2,
+        );
+        let result = behavior.access(parent, 0..4);
+
+        // Result should be immutable (parent is let)
+        assert!(!result.is_mutable());
     }
 }

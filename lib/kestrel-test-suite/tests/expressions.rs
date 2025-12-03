@@ -80,9 +80,10 @@ mod expression_types {
 
         let local_id = LocalId(0);
         let ty = Ty::int(IntBits::I64, 0..3);
-        let local_ref = Expression::local_ref(local_id, ty, 0..1);
+        let local_ref = Expression::local_ref(local_id, ty, true, 0..1);
 
         assert!(matches!(local_ref.kind, ExprKind::LocalRef(id) if id == LocalId(0)));
+        assert!(local_ref.is_mutable());
     }
 
     #[test]
@@ -93,9 +94,10 @@ mod expression_types {
 
         let symbol_id = SymbolId::new();
         let ty = Ty::int(IntBits::I64, 0..3);
-        let symbol_ref = Expression::symbol_ref(symbol_id, ty, 0..5);
+        let symbol_ref = Expression::symbol_ref(symbol_id, ty, false, 0..5);
 
         assert!(matches!(symbol_ref.kind, ExprKind::SymbolRef(_)));
+        assert!(!symbol_ref.is_mutable());
     }
 
     #[test]

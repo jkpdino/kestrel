@@ -125,7 +125,12 @@
 - [x] Mutable Variables - `var x: Int = 42`
 - [x] Pattern-based bindings (Statement::Binding with Pattern)
 - [ ] Type Inference - `let x = 42` (infer Int) [Deferred]
-- [ ] Assignment Expressions - `x = 43`, `point.x = 10` (see Struct Operations)
+- [x] Assignment Expressions - `x = 43`, `point.x = 10`
+  - [x] Parser: `=` operator (lowest precedence, right-associative)
+  - [x] AST: `ExprKind::Assignment { target, value }`
+  - [x] Type: Returns `Never` (assignment as expression)
+  - [x] Validation: Mutability checking for variables and fields
+  - [x] Expression mutability tracking on all expressions
 
 ### Function Operations
 
@@ -167,9 +172,9 @@
   - [x] InitializerSymbol with CallableBehavior
   - [x] ReceiverKind::Initializing for self handling
   - [x] Explicit init suppresses implicit memberwise init
-  - [ ] Initializer body resolution (requires assignment expressions)
+  - [x] Initializer body resolution with field initialization verification
 - [x] Field Access - `point.x`, `point.y`
-- [ ] Assignment Expressions - `x = 5`, `point.x = 10`
+- [x] Field Assignment - `point.x = 10` (with mutability validation)
 
 ## Phase 4: Control Flow
 
@@ -224,15 +229,18 @@
 - Struct instantiation with implicit memberwise init
 - Struct initializer declarations (`init() {}`)
 - Diagnostics for struct instantiation errors
+- Assignment expressions (`x = 5`, `point.x = 10`)
+- Initializer body resolution with field initialization verification
+- Expression mutability tracking
 
 **Next Tasks**:
 
-1. Assignment expressions (`x = 5`, `point.x = 10`) - **Blocking**: init body tests
-2. Binary operators (`+`, `-`, `*`, `/`, etc.)
-3. Comparison operators (`==`, `!=`, `<`, `>`, etc.)
-4. Logical operators (`and`, `or`, `!`)
-5. If/else expressions
-6. Block expressions
+1. Binary operators (`+`, `-`, `*`, `/`, `%`)
+2. Comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`)
+3. Logical operators (`and`, `or`, `not`)
+4. If/else expressions
+5. While loops
+6. Return/break/continue
 
 ## Notes
 

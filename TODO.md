@@ -4,35 +4,10 @@ This file tracks immediate next steps and their dependencies.
 
 ## Current Priority: Binary Operators
 
-Assignment expressions are now implemented. Binary operators are next.
-
-### 1. Assignment Expressions
-**Status**: ✅ Complete
-
-**What's done**:
-- [x] Parser: `=` operator with expression on both sides (lowest precedence, right-associative)
-- [x] AST: `ExprKind::Assignment { target, value }`
-- [x] Type: Returns `Never` (assignment as expression, but unusable)
-- [x] Validation: `AssignmentValidationPass` checks LHS is mutable (`var`, not `let`)
-- [x] Validation: Errors for assigning to immutable variables
-- [x] Validation: `is_self_expr` implemented to recognize `self`
-- [x] Integration with initializer verification for `self.field = value`
-
-**Remaining work**:
-- [ ] Validate field mutability when assigning to `obj.field`
-
-**Design Decision**: Assignment is an expression with type `Never`.
-- `x = 5` works as a statement (Never value discarded)
-- `y = (x = 5)` is a type error (can't assign Never)
-- Right-associative, lowest precedence
-
----
-
 ## Operators
 
-### 2. Binary Operators
+### 1. Binary Operators
 **Status**: Not started
-**Depends on**: Nothing (can be done now)
 
 ```kestrel
 a + b
@@ -52,7 +27,7 @@ a % b
 - For now: Built-in operators on primitive types only
 - Later: Protocol-based overloading (`Addable`, `Comparable`, etc.)
 
-### 3. Comparison Operators
+### 2. Comparison Operators
 **Status**: Not started
 **Depends on**: Binary operator infrastructure
 
@@ -70,7 +45,7 @@ a >= b
 - [ ] Semantic: Result type is always `Bool`
 - [ ] Semantic: Operands must be comparable
 
-### 4. Logical Operators
+### 3. Logical Operators
 **Status**: Not started
 **Depends on**: Comparison operators (for useful conditions)
 
@@ -89,7 +64,7 @@ not a
 
 ## Control Flow
 
-### 5. If Expressions
+### 4. If Expressions
 **Status**: Not started
 **Depends on**: Comparison operators, logical operators
 
@@ -112,9 +87,9 @@ if condition {
 - Requires both branches, types must match
 - Recommendation: Expression (more powerful)
 
-### 6. While Loops
+### 5. While Loops
 **Status**: Not started
-**Depends on**: Comparison operators, assignment (for useful loops)
+**Depends on**: Comparison operators
 
 ```kestrel
 while condition {
@@ -127,7 +102,7 @@ while condition {
 - [ ] AST: `Statement::While { condition, body }`
 - [ ] Semantic: Condition must be `Bool`
 
-### 7. Return / Break / Continue
+### 6. Return / Break / Continue
 **Status**: Not started
 **Depends on**: Control flow (while, for)
 
@@ -147,7 +122,7 @@ continue
 
 ## Type System
 
-### 8. Type Checking
+### 7. Type Checking
 **Status**: Partial (some validation exists)
 **Depends on**: All expression types being resolvable
 
@@ -167,29 +142,24 @@ continue
 ## Suggested Implementation Order
 
 ```
-1. Assignment ────────────────────────────────────── ✅ DONE
-                                                   │
-2. Binary Operators ──┬─> 3. Comparison ──┬─> 4. Logical
+1. Binary Operators ──┬─> 2. Comparison ──┬─> 3. Logical
                       │                   │        │
-                      │                   └────────┴─> 5. If Expressions
+                      │                   └────────┴─> 4. If Expressions
                       │                                      │
-                      └─> 6. While Loops <───────────────────┘
+                      └─> 5. While Loops <───────────────────┘
                                │
-                               └─> 7. Return/Break/Continue
+                               └─> 6. Return/Break/Continue
 
-8. Type Checking (incremental, alongside each feature)
+7. Type Checking (incremental, alongside each feature)
 ```
 
-**Next batch** (can be parallelized):
+**Next**:
 1. Binary operators (+, -, *, /, %)
-2. LHS validation for assignment
-
-**After that**:
-3. Comparison operators
-4. Logical operators
+2. Comparison operators
+3. Logical operators
 
 **Then**:
-5. If expressions
-6. While loops
-7. Return/break/continue
+4. If expressions
+5. While loops
+6. Return/break/continue
 

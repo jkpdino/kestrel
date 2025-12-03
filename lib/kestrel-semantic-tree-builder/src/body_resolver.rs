@@ -796,7 +796,8 @@ fn resolve_overloaded_call(
             if let Some(callable) = get_callable_behavior(&symbol) {
                 if matches_signature(&callable, arguments.len(), arg_labels) {
                     let return_ty = callable.return_type().clone();
-                    let resolved_callee = Expression::symbol_ref(candidate_id, callee.ty.clone(), callee.span.clone());
+                    // Functions are not mutable lvalues
+                    let resolved_callee = Expression::symbol_ref(candidate_id, callee.ty.clone(), false, callee.span.clone());
                     return Expression::call(resolved_callee, arguments, return_ty, span);
                 }
             }
@@ -877,12 +878,15 @@ fn resolve_explicit_init_call(
         if let Some(callable) = get_callable_behavior(init_sym) {
             if matches_signature(&callable, arguments.len(), arg_labels) {
                 // Found matching initializer
-                // The return type is Self (the struct type)
-                let struct_ty = Ty::self_type(span.clone());
+                // The return type is the actual struct type
+                // Create a struct type from the struct symbol
+                // We use Ty::named which stores the symbol ID for lookup
+                let struct_ty = create_struct_type(&struct_symbol, span.clone());
 
                 // For explicit init, create a Call expression
+                // Initializers are not mutable lvalues
                 let init_id = init_sym.metadata().id();
-                let init_ref = Expression::symbol_ref(init_id, Ty::inferred(span.clone()), span.clone());
+                let init_ref = Expression::symbol_ref(init_id, Ty::inferred(span.clone()), false, span.clone());
                 return Expression::call(init_ref, arguments, struct_ty, span);
             }
         }
@@ -1005,8 +1009,8 @@ fn resolve_implicit_init(
     }
 
     // All checks passed - create ImplicitStructInit expression
-    // Use Ty::self_type for now - actual struct type resolution happens elsewhere
-    let struct_ty = Ty::self_type(span.clone());
+    // Create the actual struct type using the struct symbol
+    let struct_ty = create_struct_type(&struct_symbol, span.clone());
 
     Expression::implicit_struct_init(struct_ty, arguments, span)
 }
@@ -1213,6 +1217,24 @@ fn get_callable_return_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option
     get_callable_behavior(symbol).map(|c| c.return_type().clone())
 }
 
+/// Create a struct type from a struct symbol.
+///
+/// This function downcasts the symbol to StructSymbol and creates a Ty::struct.
+/// If the downcast fails (shouldn't happen for struct symbols), returns Ty::error.
+fn create_struct_type(struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>, span: Span) -> Ty {
+    // Clone the Arc and use downcast_arc from downcast-rs to convert
+    // Arc<dyn Symbol> to Arc<StructSymbol>
+    let sym_clone = Arc::clone(struct_symbol);
+
+    match sym_clone.downcast_arc::<StructSymbol>() {
+        Ok(struct_arc) => Ty::r#struct(struct_arc, span),
+        Err(_) => {
+            // This shouldn't happen if we're calling this on a struct symbol
+            Ty::error(span)
+        }
+    }
+}
+
 /// Resolve a path expression (variable reference, function reference, or member access)
 fn resolve_path_expression(
     node: &SyntaxNode,
@@ -1245,13 +1267,15 @@ fn resolve_path_expression(
 
     // First, check if it's a local variable
     if let Some(local_id) = ctx.local_scope.lookup(first_name) {
-        // Get the type from the local
-        let local_ty = ctx.local_scope.function()
-            .get_local(local_id)
+        // Get the type and mutability from the local
+        let local = ctx.local_scope.function().get_local(local_id);
+        let local_ty = local
+            .as_ref()
             .map(|l| l.ty().clone())
             .unwrap_or_else(|| Ty::error(span.clone()));
+        let is_mutable = local.as_ref().map(|l| l.is_mutable()).unwrap_or(false);
 
-        let base_expr = Expression::local_ref(local_id, local_ty, first_span);
+        let base_expr = Expression::local_ref(local_id, local_ty, is_mutable, first_span);
 
         // If there are more segments, they are member accesses
         if path_with_spans.len() == 1 {
@@ -1277,7 +1301,9 @@ fn resolve_path_expression(
     // Not a local - resolve as a value path (module path)
     match ctx.db.resolve_value_path(path.clone(), ctx.function_id) {
         ValuePathResolution::Symbol { symbol_id, ty } => {
-            Expression::symbol_ref(symbol_id, ty, span)
+            // For now, module-level symbols (functions) are not mutable lvalues
+            // TODO: Support module-level `var` declarations if/when added
+            Expression::symbol_ref(symbol_id, ty, false, span)
         }
         ValuePathResolution::Overloaded { candidates } => {
             Expression::overloaded_ref(candidates, span)

@@ -22,7 +22,7 @@ use kestrel_semantic_tree::symbol::local::LocalId;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
-use crate::diagnostics::{CannotAssignToExpressionError, CannotAssignToImmutableError};
+use crate::diagnostics::{CannotAssignToExpressionError, CannotAssignToImmutableError, CannotAssignToImmutableFieldError};
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass for assignment target validity
@@ -59,18 +59,7 @@ struct ValidationContext<'a> {
 }
 
 impl<'a> ValidationContext<'a> {
-    /// Look up a local by ID and check if it's mutable
-    fn is_local_mutable(&self, id: LocalId) -> Option<bool> {
-        if let Some(func) = self.function {
-            func.get_local(id).map(|l| l.is_mutable())
-        } else if let Some(init) = self.initializer {
-            init.get_local(id).map(|l| l.is_mutable())
-        } else {
-            None
-        }
-    }
-
-    /// Get the name of a local by ID
+    /// Get the name of a local by ID (for error messages)
     fn local_name(&self, id: LocalId) -> Option<String> {
         if let Some(func) = self.function {
             func.get_local(id).map(|l| l.name().to_string())
@@ -276,44 +265,40 @@ fn validate_assignment_target(
 ) {
     match &target.kind {
         ExprKind::LocalRef(local_id) => {
-            // Check if the local is mutable
-            if let Some(is_mutable) = ctx.is_local_mutable(*local_id) {
-                if !is_mutable {
-                    let name = ctx
-                        .local_name(*local_id)
-                        .unwrap_or_else(|| "<unknown>".to_string());
-                    diagnostics.throw(
-                        CannotAssignToImmutableError {
-                            span: target.span.clone(),
-                            variable_name: name,
-                        },
-                        ctx.file_id,
-                    );
-                }
+            // Use the expression's mutable field directly
+            if !target.is_mutable() {
+                let name = ctx
+                    .local_name(*local_id)
+                    .unwrap_or_else(|| "<unknown>".to_string());
+                diagnostics.throw(
+                    CannotAssignToImmutableError {
+                        span: target.span.clone(),
+                        variable_name: name,
+                    },
+                    ctx.file_id,
+                );
             }
         }
-        ExprKind::FieldAccess { object, field: _ } => {
-            // For field access, we need to check:
-            // 1. The field itself is mutable (var, not let)
-            // 2. The receiver is mutable (if not self in an initializer)
-            //
-            // We allow `self.field = value` in initializers regardless of field mutability
-            // (that's how fields get initialized)
-
-            // Check if this is a self.field access in an initializer
+        ExprKind::FieldAccess { object, field } => {
+            // Special case: `self.field = value` in initializers is always allowed
+            // (that's how fields get initialized, even `let` fields)
             let is_self_in_init = ctx.initializer.is_some() && is_self_expr(object);
 
-            if !is_self_in_init {
-                // Check if we can determine field mutability
-                // This would require looking up the field symbol through the type
-                // TODO: Look up field via object type and check is_mutable
+            if !is_self_in_init && !target.is_mutable() {
+                // Field access is immutable - either the field is `let` or the receiver is immutable
+                diagnostics.throw(
+                    CannotAssignToImmutableFieldError {
+                        span: target.span.clone(),
+                        field_name: field.clone(),
+                    },
+                    ctx.file_id,
+                );
             }
 
-            // Recursively validate the object expression (it doesn't need to be a valid lvalue,
-            // but we need to check any nested assignments within it)
+            // Recursively validate the object expression for any nested assignments
             validate_expression(object, ctx, diagnostics);
         }
-        // Invalid assignment targets
+        // Invalid assignment targets - not lvalues at all
         ExprKind::Literal(_)
         | ExprKind::Array(_)
         | ExprKind::Tuple(_)
@@ -357,11 +342,12 @@ mod tests {
 
     #[test]
     fn test_is_self_expr() {
-        // Create a LocalRef to local 0 (self)
+        // Create a LocalRef to local 0 (self) - self is always mutable in initializers
         let self_expr = Expression::new(
             ExprKind::LocalRef(LocalId::new(0)),
             kestrel_semantic_tree::ty::Ty::error(0..1),
             0..4,
+            true, // mutable
         );
         assert!(is_self_expr(&self_expr));
 
@@ -370,6 +356,7 @@ mod tests {
             ExprKind::LocalRef(LocalId::new(1)),
             kestrel_semantic_tree::ty::Ty::error(0..1),
             0..4,
+            false,
         );
         assert!(!is_self_expr(&other_expr));
 
@@ -385,10 +372,12 @@ mod tests {
             ExprKind::LocalRef(LocalId::new(0)),
             kestrel_semantic_tree::ty::Ty::error(0..1),
             0..4,
+            true, // self is mutable
         );
         let field_access = Expression::field_access(
             self_expr,
             "count".to_string(),
+            true, // field is mutable (var)
             kestrel_semantic_tree::ty::Ty::error(0..1),
             0..10,
         );
@@ -399,6 +388,8 @@ mod tests {
         } else {
             panic!("Expected FieldAccess");
         }
+        // Field access on mutable self with mutable field should be mutable
+        assert!(field_access.is_mutable());
     }
 
     #[test]
@@ -408,10 +399,12 @@ mod tests {
             ExprKind::LocalRef(LocalId::new(0)),
             kestrel_semantic_tree::ty::Ty::error(0..1),
             0..4,
+            true, // self is mutable
         );
         let field_access = Expression::field_access(
             self_expr,
             "count".to_string(),
+            true, // field is mutable (var)
             kestrel_semantic_tree::ty::Ty::error(0..1),
             0..10,
         );
@@ -429,5 +422,56 @@ mod tests {
         } else {
             panic!("Expected Assignment");
         }
+    }
+
+    #[test]
+    fn test_field_mutability_composition() {
+        // Mutable parent + mutable field = mutable
+        let mutable_parent = Expression::local_ref(
+            LocalId::new(0),
+            kestrel_semantic_tree::ty::Ty::error(0..1),
+            true,
+            0..4,
+        );
+        let access1 = Expression::field_access(
+            mutable_parent,
+            "x".to_string(),
+            true, // mutable field
+            kestrel_semantic_tree::ty::Ty::error(0..1),
+            0..6,
+        );
+        assert!(access1.is_mutable());
+
+        // Mutable parent + immutable field = immutable
+        let mutable_parent2 = Expression::local_ref(
+            LocalId::new(0),
+            kestrel_semantic_tree::ty::Ty::error(0..1),
+            true,
+            0..4,
+        );
+        let access2 = Expression::field_access(
+            mutable_parent2,
+            "x".to_string(),
+            false, // immutable field (let)
+            kestrel_semantic_tree::ty::Ty::error(0..1),
+            0..6,
+        );
+        assert!(!access2.is_mutable());
+
+        // Immutable parent + mutable field = immutable
+        let immutable_parent = Expression::local_ref(
+            LocalId::new(0),
+            kestrel_semantic_tree::ty::Ty::error(0..1),
+            false,
+            0..4,
+        );
+        let access3 = Expression::field_access(
+            immutable_parent,
+            "x".to_string(),
+            true, // mutable field
+            kestrel_semantic_tree::ty::Ty::error(0..1),
+            0..6,
+        );
+        assert!(!access3.is_mutable());
     }
 }

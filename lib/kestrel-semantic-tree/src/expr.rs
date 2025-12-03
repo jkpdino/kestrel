@@ -226,12 +226,30 @@ pub struct Expression {
     pub ty: Ty,
     /// The source span of this expression
     pub span: Span,
+    /// Whether this expression refers to a mutable location (lvalue).
+    ///
+    /// This is true for:
+    /// - LocalRef to a `var` variable
+    /// - FieldAccess where the field is `var` AND the object is mutable
+    /// - SymbolRef to a mutable module-level variable
+    ///
+    /// This is false for:
+    /// - All literals
+    /// - Call expressions (return values are not lvalues)
+    /// - LocalRef to a `let` variable
+    /// - FieldAccess where the field is `let` OR the object is immutable
+    pub mutable: bool,
 }
 
 impl Expression {
-    /// Create a new expression.
-    pub fn new(kind: ExprKind, ty: Ty, span: Span) -> Self {
-        Expression { kind, ty, span }
+    /// Create a new expression with explicit mutability.
+    pub fn new(kind: ExprKind, ty: Ty, span: Span, mutable: bool) -> Self {
+        Expression { kind, ty, span, mutable }
+    }
+
+    /// Create a new immutable expression (convenience for most cases).
+    pub fn new_immutable(kind: ExprKind, ty: Ty, span: Span) -> Self {
+        Expression { kind, ty, span, mutable: false }
     }
 
     /// Create a unit literal expression.
@@ -240,6 +258,7 @@ impl Expression {
             kind: ExprKind::Literal(LiteralValue::Unit),
             ty: Ty::unit(span.clone()),
             span,
+            mutable: false,
         }
     }
 
@@ -249,6 +268,7 @@ impl Expression {
             kind: ExprKind::Literal(LiteralValue::Integer(value)),
             ty: Ty::int(crate::ty::IntBits::I64, span.clone()),
             span,
+            mutable: false,
         }
     }
 
@@ -258,6 +278,7 @@ impl Expression {
             kind: ExprKind::Literal(LiteralValue::Float(value)),
             ty: Ty::float(crate::ty::FloatBits::F64, span.clone()),
             span,
+            mutable: false,
         }
     }
 
@@ -267,6 +288,7 @@ impl Expression {
             kind: ExprKind::Literal(LiteralValue::String(value)),
             ty: Ty::string(span.clone()),
             span,
+            mutable: false,
         }
     }
 
@@ -276,6 +298,7 @@ impl Expression {
             kind: ExprKind::Literal(LiteralValue::Bool(value)),
             ty: Ty::bool(span.clone()),
             span,
+            mutable: false,
         }
     }
 
@@ -286,6 +309,7 @@ impl Expression {
             kind: ExprKind::Array(elements),
             ty,
             span,
+            mutable: false,
         }
     }
 
@@ -297,59 +321,73 @@ impl Expression {
             kind: ExprKind::Tuple(elements),
             ty,
             span,
+            mutable: false,
         }
     }
 
     /// Create a grouping expression.
+    /// Preserves the mutability of the inner expression.
     pub fn grouping(inner: Expression, span: Span) -> Self {
         let ty = inner.ty.clone();
+        let mutable = inner.mutable;
         Expression {
             kind: ExprKind::Grouping(Box::new(inner)),
             ty,
             span,
+            mutable,
         }
     }
 
     /// Create a local variable reference expression.
-    pub fn local_ref(local_id: LocalId, ty: Ty, span: Span) -> Self {
+    /// Mutability must be provided by the caller (from the Local's is_mutable()).
+    pub fn local_ref(local_id: LocalId, ty: Ty, mutable: bool, span: Span) -> Self {
         Expression {
             kind: ExprKind::LocalRef(local_id),
             ty,
             span,
+            mutable,
         }
     }
 
     /// Create a symbol reference expression.
-    pub fn symbol_ref(symbol_id: SymbolId, ty: Ty, span: Span) -> Self {
+    /// Mutability must be provided by the caller (from the symbol's declaration).
+    pub fn symbol_ref(symbol_id: SymbolId, ty: Ty, mutable: bool, span: Span) -> Self {
         Expression {
             kind: ExprKind::SymbolRef(symbol_id),
             ty,
             span,
+            mutable,
         }
     }
 
     /// Create an overloaded function reference expression.
     /// Type is inferred later when call resolution disambiguates the overload.
+    /// Functions are not mutable lvalues.
     pub fn overloaded_ref(candidates: Vec<SymbolId>, span: Span) -> Self {
         Expression {
             kind: ExprKind::OverloadedRef(candidates),
             ty: Ty::inferred(span.clone()),
             span,
+            mutable: false,
         }
     }
 
     /// Create a type reference expression.
     /// Used when a path resolves to a type (e.g., struct name in `Point(x: 1, y: 2)`).
+    /// Types are not mutable lvalues.
     pub fn type_ref(symbol_id: SymbolId, ty: Ty, span: Span) -> Self {
         Expression {
             kind: ExprKind::TypeRef(symbol_id),
             ty,
             span,
+            mutable: false,
         }
     }
 
     /// Create a field access expression.
-    pub fn field_access(object: Expression, field: String, ty: Ty, span: Span) -> Self {
+    /// Mutability is computed as: field_mutable AND object.mutable
+    pub fn field_access(object: Expression, field: String, field_mutable: bool, ty: Ty, span: Span) -> Self {
+        let mutable = field_mutable && object.mutable;
         Expression {
             kind: ExprKind::FieldAccess {
                 object: Box::new(object),
@@ -357,11 +395,13 @@ impl Expression {
             },
             ty,
             span,
+            mutable,
         }
     }
 
     /// Create a method reference expression.
     /// Type is inferred later when call resolution happens.
+    /// Method references are not mutable lvalues.
     pub fn method_ref(
         receiver: Expression,
         candidates: Vec<SymbolId>,
@@ -376,10 +416,12 @@ impl Expression {
             },
             ty: Ty::inferred(span.clone()),
             span,
+            mutable: false,
         }
     }
 
     /// Create a call expression.
+    /// Return values are not mutable lvalues.
     pub fn call(callee: Expression, arguments: Vec<CallArgument>, return_ty: Ty, span: Span) -> Self {
         Expression {
             kind: ExprKind::Call {
@@ -388,10 +430,12 @@ impl Expression {
             },
             ty: return_ty,
             span,
+            mutable: false,
         }
     }
 
     /// Create a primitive method call expression.
+    /// Return values are not mutable lvalues.
     pub fn primitive_method_call(
         receiver: Expression,
         method: PrimitiveMethod,
@@ -407,6 +451,7 @@ impl Expression {
             },
             ty: return_ty,
             span,
+            mutable: false,
         }
     }
 
@@ -416,12 +461,14 @@ impl Expression {
             kind: ExprKind::Error,
             ty: Ty::error(span.clone()),
             span,
+            mutable: false,
         }
     }
 
     /// Create an implicit struct initialization expression.
     ///
     /// Used when calling a struct type without explicit initializers.
+    /// Struct initialization results are not mutable lvalues.
     pub fn implicit_struct_init(struct_type: Ty, arguments: Vec<CallArgument>, span: Span) -> Self {
         Expression {
             kind: ExprKind::ImplicitStructInit {
@@ -430,6 +477,7 @@ impl Expression {
             },
             ty: struct_type,
             span,
+            mutable: false,
         }
     }
 
@@ -437,6 +485,7 @@ impl Expression {
     ///
     /// The type of an assignment expression is Never, meaning the value
     /// cannot be used. This prevents chaining like `x = y = z`.
+    /// Assignments are not mutable lvalues.
     pub fn assignment(target: Expression, value: Expression, span: Span) -> Self {
         Expression {
             kind: ExprKind::Assignment {
@@ -445,7 +494,13 @@ impl Expression {
             },
             ty: Ty::never(span.clone()),
             span,
+            mutable: false,
         }
+    }
+
+    /// Check if this expression refers to a mutable location.
+    pub fn is_mutable(&self) -> bool {
+        self.mutable
     }
 
     /// Check if this is a literal expression.

@@ -118,7 +118,15 @@ impl Resolver for FieldResolver {
 
         // Add a MemberAccessBehavior so this field can be accessed via dot notation
         let field_name = symbol.metadata().name().value.clone();
-        let member_access_behavior = MemberAccessBehavior::new(field_name, resolved_type);
+
+        // Get mutability from the FieldSymbol
+        let is_mutable = symbol
+            .as_ref()
+            .downcast_ref::<FieldSymbol>()
+            .map(|f| f.is_mutable())
+            .unwrap_or(false);
+
+        let member_access_behavior = MemberAccessBehavior::new(field_name, resolved_type, is_mutable);
         symbol.metadata().add_behavior(member_access_behavior);
     }
 }
