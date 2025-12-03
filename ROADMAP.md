@@ -133,12 +133,23 @@
 - [x] Calling overloaded functions (by arity + labels)
 - [x] Method Calls - `obj.method(args)`
 - [x] Primitive Method Calls - `5.toString()`, `"hello".length()`
+- [x] Self Parameter Handling - Methods get `self` automatically
+  - [x] ReceiverKind enum (Borrowing, Mutating, Consuming, Initializing)
+  - [x] `mutating func` and `consuming func` syntax
+  - [x] Auto-injection of `self` local in instance methods
+  - [x] Self type resolution for member access
+  - [x] Error for `self` in static methods and free functions
+- [x] Call validation
+  - [x] Error for undefined functions
+  - [x] Error for wrong arity in calls
+  - [x] Error for wrong labels in calls
+  - [x] Error for calling instance method on type name
 - [ ] First-class Function References - Functions as values (overloaded names error for now)
-- [ ] Self Parameter Handling - Methods get `self` automatically
 
 ### Expressions
 
 - [x] Member Access - `struct.field` (via MemberAccessBehavior)
+- [x] Chained Member Access - `obj.method().field` (parser fix for postfix member access)
 - [ ] Binary Operators - `+`, `-`, `*`, `/`, `%`
 - [ ] Comparison Operators - `==`, `!=`, `<`, `>`, `<=`, `>=`
 - [ ] Logical Operators - `and`, `or`, `!`
@@ -190,6 +201,7 @@
 **Progress**: Phase 1 & 2 complete. Phase 3 partially complete.
 
 **Completed in Phase 3**:
+
 - Literals (all types)
 - Path resolution
 - Variable declarations (let/var with Pattern-based bindings)
@@ -197,14 +209,19 @@
 - Method calls on structs
 - Primitive method calls
 - Member/field access
+- Self parameter handling (`self` injection, `mutating`/`consuming` modifiers)
+- Call validation (undefined functions, arity, labels, instance vs static)
+- Chained member access (`obj.method().field`)
 
 **Next Tasks**:
+
 1. Binary operators (`+`, `-`, `*`, `/`, etc.)
 2. Comparison operators (`==`, `!=`, `<`, `>`, etc.)
-3. If/else expressions
-4. Struct instantiation
-5. Block expressions
-6. Self parameter handling for methods
+3. Logical operators (`and`, `or`, `!`)
+4. If/else expressions
+5. Struct instantiation
+6. Block expressions
+7. Variable reassignment
 
 ## Notes
 
