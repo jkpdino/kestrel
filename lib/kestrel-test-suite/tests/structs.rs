@@ -116,83 +116,83 @@ mod nested {
     }
 }
 
-// TODO: Enable once assignment expressions are implemented
-// mod initializers {
-//     use super::*;
-//
-//     #[test]
-//     fn explicit_initializer_parses() {
-//         Test::new(
-//             r#"module Test
-//             struct Point {
-//                 var x: Int
-//                 var y: Int
-//
-//                 init(x: Int, y: Int) {
-//                     self.x = x
-//                     self.y = y
-//                 }
-//             }
-//         "#,
-//         )
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn multiple_initializers() {
-//         Test::new(
-//             r#"module Test
-//             struct Point {
-//                 var x: Int
-//                 var y: Int
-//
-//                 init(x: Int, y: Int) {
-//                     self.x = x
-//                     self.y = y
-//                 }
-//
-//                 init() {
-//                     self.x = 0
-//                     self.y = 0
-//                 }
-//             }
-//         "#,
-//         )
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn initializer_with_visibility() {
-//         Test::new(
-//             r#"module Test
-//             struct Point {
-//                 var x: Int
-//
-//                 public init(x: Int) {
-//                     self.x = x
-//                 }
-//             }
-//         "#,
-//         )
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn initializer_without_params() {
-//         Test::new(
-//             r#"module Test
-//             struct Counter {
-//                 var count: Int
-//
-//                 init() {
-//                     self.count = 0
-//                 }
-//             }
-//         "#,
-//         )
-//         .expect(Compiles);
-//     }
-// }
+mod initializers {
+    use super::*;
+
+    // Initializers with parameters work - self is added correctly
+    #[test]
+    fn explicit_initializer_parses() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+
+                init(x: Int, y: Int) {
+                    self.x = x
+                    self.y = y
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_initializers() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+
+                init(x: Int, y: Int) {
+                    self.x = x
+                    self.y = y
+                }
+
+                init() {
+                    self.x = 0
+                    self.y = 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn initializer_with_visibility() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+
+                public init(x: Int) {
+                    self.x = x
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn initializer_without_params() {
+        Test::new(
+            r#"module Test
+            struct Counter {
+                var count: Int
+
+                init() {
+                    self.count = 0
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+}
 
 mod instantiation {
     use super::*;
@@ -228,86 +228,83 @@ mod instantiation {
         .expect(Compiles);
     }
 
-    // TODO: Enable once assignment expressions are implemented
-    // #[test]
-    // fn explicit_init_instantiation() {
-    //     Test::new(
-    //         r#"module Test
-    //         struct Point {
-    //             var x: Int
-    //             var y: Int
-    //
-    //             init(x: Int, y: Int) {
-    //                 self.x = x
-    //                 self.y = y
-    //             }
-    //         }
-    //
-    //         func makePoint() -> Point {
-    //             Point(x: 5, y: 10)
-    //         }
-    //     "#,
-    //     )
-    //     .expect(Compiles);
-    // }
+    #[test]
+    fn explicit_init_instantiation() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
 
-    // TODO: Enable once assignment expressions are implemented
-    // #[test]
-    // fn explicit_init_with_different_labels() {
-    //     Test::new(
-    //         r#"module Test
-    //         struct Point {
-    //             var x: Int
-    //             var y: Int
-    //
-    //             init(atX x: Int, atY y: Int) {
-    //                 self.x = x
-    //                 self.y = y
-    //             }
-    //         }
-    //
-    //         func makePoint() -> Point {
-    //             Point(atX: 5, atY: 10)
-    //         }
-    //     "#,
-    //     )
-    //     .expect(Compiles);
-    // }
+                init(x: Int, y: Int) {
+                    self.x = x
+                    self.y = y
+                }
+            }
 
-    // TODO: Enable once assignment expressions are implemented
-    // #[test]
-    // fn multiple_init_overloads() {
-    //     Test::new(
-    //         r#"module Test
-    //         struct Point {
-    //             var x: Int
-    //             var y: Int
-    //
-    //             init(x: Int, y: Int) {
-    //                 self.x = x
-    //                 self.y = y
-    //             }
-    //
-    //             init() {
-    //                 self.x = 0
-    //                 self.y = 0
-    //             }
-    //
-    //             init(value: Int) {
-    //                 self.x = value
-    //                 self.y = value
-    //             }
-    //         }
-    //
-    //         func test() {
-    //             let p1 = Point(x: 1, y: 2)
-    //             let p2 = Point()
-    //             let p3 = Point(value: 5)
-    //         }
-    //     "#,
-    //     )
-    //     .expect(Compiles);
-    // }
+            func makePoint() -> Point {
+                Point(x: 5, y: 10)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn explicit_init_with_different_labels() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+
+                init(atX x: Int, atY y: Int) {
+                    self.x = x
+                    self.y = y
+                }
+            }
+
+            func makePoint() -> Point {
+                Point(atX: 5, atY: 10)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn multiple_init_overloads() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+
+                init(x: Int, y: Int) {
+                    self.x = x
+                    self.y = y
+                }
+
+                init() {
+                    self.x = 0
+                    self.y = 0
+                }
+
+                init(value: Int) {
+                    self.x = value
+                    self.y = value
+                }
+            }
+
+            func test() {
+                let p1 = Point(x: 1, y: 2)
+                let p2 = Point()
+                let p3 = Point(value: 5)
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
 
     #[test]
     fn single_field_struct() {
@@ -454,84 +451,84 @@ mod instantiation_errors {
         .expect(HasError(""));
     }
 
-    // TODO: Enable once assignment expressions are implemented
-    // #[test]
-    // fn explicit_init_suppresses_implicit() {
-    //     // When explicit init exists, implicit memberwise init should not be available
-    //     Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init() { self.x = 0; self.y = 0 } }\nfunc test() -> Point { Point(x: 1, y: 2) }")
-    //     .expect(HasError(""));
-    // }
+    #[test]
+    fn explicit_init_suppresses_implicit() {
+        // When explicit init exists, implicit memberwise init should not be available
+        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init() { self.x = 0; self.y = 0 } }\nfunc test() -> Point { Point(x: 1, y: 2) }")
+        .expect(HasError(""));
+    }
 
-    // TODO: Enable once assignment expressions are implemented
-    // #[test]
-    // fn no_matching_init_overload() {
-    //     Test::new(r#"module Test
-    //         struct Point {
-    //             var x: Int
-    //             var y: Int
-    //             init(x: Int, y: Int) { self.x = x; self.y = y }
-    //         }
-    //         func test() -> Point { Point() }
-    //     "#)
-    //     .expect(HasError(""));
-    // }
+    #[test]
+    fn no_matching_init_overload() {
+        Test::new(r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+                init(x: Int, y: Int) { self.x = x; self.y = y }
+            }
+            func test() -> Point { Point() }
+        "#)
+        .expect(HasError(""));
+    }
 }
 
-// TODO: Enable once assignment expressions are implemented
-// mod initializer_edge_cases {
-//     use super::*;
-//
-//     #[test]
-//     fn init_with_self_access() {
-//         Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y } }")
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn init_calling_other_method_after_init() {
-//         Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y }\n func sum() -> Int { self.x } }")
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn init_with_complex_expressions() {
-//         Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y } }\nfunc getInt() -> Int { 42 }\nfunc test() -> Point { Point(x: getInt(), y: getInt()) }")
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn private_init() {
-//         Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n private init(x: Int, y: Int) { self.x = x; self.y = y }\n public static func origin() -> Point { Point(x: 0, y: 0) } }")
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn init_parameter_shadows_field() {
-//         Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y } }")
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn init_with_different_param_names() {
-//         Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(xVal: Int, yVal: Int) { self.x = xVal; self.y = yVal } }\nfunc test() -> Point { Point(xVal: 1, yVal: 2) }")
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn init_with_labeled_params() {
-//         Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(at x: Int, and y: Int) { self.x = x; self.y = y } }\nfunc test() -> Point { Point(at: 1, and: 2) }")
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn empty_init_body() {
-//         Test::new("module Test\nstruct Empty { init() { } }\nfunc test() -> Empty { Empty() }")
-//         .expect(Compiles);
-//     }
-//
-//     #[test]
-//     fn init_with_local_variables() {
-//         Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(value: Int) { let doubled: Int = value; self.x = doubled; self.y = doubled } }")
-//         .expect(Compiles);
-//     }
-// }
+mod initializer_edge_cases {
+    use super::*;
+
+    #[test]
+    fn init_with_self_access() {
+        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y } }")
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn init_calling_other_method_after_init() {
+        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y }\n func sum() -> Int { self.x } }")
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn init_with_complex_expressions() {
+        // No labels in initializer means no labels in call
+        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y } }\nfunc getInt() -> Int { 42 }\nfunc test() -> Point { Point(getInt(), getInt()) }")
+        .expect(Compiles);
+    }
+
+    // TODO: static functions are not yet implemented
+    // #[test]
+    // fn private_init() {
+    //     Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n private init(x: Int, y: Int) { self.x = x; self.y = y }\n public static func origin() -> Point { Point(x: 0, y: 0) } }")
+    //     .expect(Compiles);
+    // }
+
+    #[test]
+    fn init_parameter_shadows_field() {
+        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y } }")
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn init_with_different_param_names() {
+        // No labels in initializer means no labels in call
+        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(xVal: Int, yVal: Int) { self.x = xVal; self.y = yVal } }\nfunc test() -> Point { Point(1, 2) }")
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn init_with_labeled_params() {
+        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(at x: Int, and y: Int) { self.x = x; self.y = y } }\nfunc test() -> Point { Point(at: 1, and: 2) }")
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn empty_init_body() {
+        Test::new("module Test\nstruct Empty { init() { } }\nfunc test() -> Empty { Empty() }")
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn init_with_local_variables() {
+        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(value: Int) { let doubled: Int = value; self.x = doubled; self.y = doubled } }")
+        .expect(Compiles);
+    }
+}

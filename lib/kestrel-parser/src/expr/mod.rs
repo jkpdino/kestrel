@@ -95,6 +95,11 @@ impl Expression {
     pub fn is_call(&self) -> bool {
         self.kind() == SyntaxKind::ExprCall
     }
+
+    /// Check if this is an assignment expression
+    pub fn is_assignment(&self) -> bool {
+        self.kind() == SyntaxKind::ExprAssignment
+    }
 }
 
 /// A call argument with optional label
@@ -146,6 +151,12 @@ pub enum ExprVariant {
         arguments: Vec<CallArg>,
         commas: Vec<Span>,
         rparen: Span,
+    },
+    /// Assignment expression: lhs = rhs
+    Assignment {
+        lhs: Box<ExprVariant>,
+        equals: Span,
+        rhs: Box<ExprVariant>,
     },
 }
 
@@ -458,9 +469,31 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             .then(expr.clone())
             .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
 
-        // Combine all expression parsers
+        // Non-assignment expression (unary or postfix)
         // Order matters: try unary first to handle -42, then postfix expressions
-        unary.or(postfix)
+        let non_assignment = unary.or(postfix);
+
+        // Assignment expression: lhs = rhs
+        // Assignment is right-associative, so rhs recursively parses as expr (which includes assignment)
+        // This gives us: a = b = c parses as a = (b = c)
+        // Assignment has lowest precedence
+        non_assignment.clone()
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Equals).map_with_span(|_, span| span))
+                    .then(expr.clone())
+                    .or_not()
+            )
+            .map(|(lhs, rhs_opt)| {
+                match rhs_opt {
+                    Some((equals, rhs)) => ExprVariant::Assignment {
+                        lhs: Box::new(lhs),
+                        equals,
+                        rhs: Box::new(rhs),
+                    },
+                    None => lhs,
+                }
+            })
     })
 }
 
@@ -530,6 +563,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::Call { callee, lparen, arguments, commas, rparen } => {
             emit_call_expr(sink, callee, lparen.clone(), arguments, commas, rparen.clone());
+        }
+        ExprVariant::Assignment { lhs, equals, rhs } => {
+            emit_assignment_expr(sink, lhs, equals.clone(), rhs);
         }
     }
 }
@@ -746,6 +782,17 @@ fn emit_call_expr(
     sink.finish_node(); // ArgumentList
 
     sink.finish_node(); // ExprCall
+    sink.finish_node(); // Expression
+}
+
+/// Emit events for an assignment expression
+fn emit_assignment_expr(sink: &mut EventSink, lhs: &ExprVariant, equals: Span, rhs: &ExprVariant) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprAssignment);
+    emit_expr_variant(sink, lhs);
+    sink.add_token(SyntaxKind::Equals, equals);
+    emit_expr_variant(sink, rhs);
+    sink.finish_node(); // ExprAssignment
     sink.finish_node(); // Expression
 }
 
@@ -1218,5 +1265,58 @@ mod tests {
         let source = "foo((1, 2), [3, 4])";
         let expr = parse_expr_from_source(source);
         assert!(expr.is_call());
+    }
+
+    // ===== Assignment Expression Tests =====
+
+    #[test]
+    fn test_assignment_simple() {
+        let source = "x = 5";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_assignment());
+    }
+
+    #[test]
+    fn test_assignment_to_path() {
+        let source = "point.x = 10";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_assignment());
+    }
+
+    #[test]
+    fn test_assignment_with_expression_rhs() {
+        let source = "x = foo()";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_assignment());
+    }
+
+    #[test]
+    fn test_assignment_chain() {
+        // a = b = c should parse as a = (b = c)
+        let source = "a = b = c";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_assignment());
+    }
+
+    #[test]
+    fn test_assignment_with_complex_rhs() {
+        let source = "result = obj.method(1, 2)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_assignment());
+    }
+
+    #[test]
+    fn test_assignment_with_array_rhs() {
+        let source = "arr = [1, 2, 3]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_assignment());
+    }
+
+    #[test]
+    fn test_non_assignment_still_works() {
+        // Verify that expressions without = still work
+        let source = "foo.bar";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_path());
     }
 }

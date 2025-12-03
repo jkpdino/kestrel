@@ -125,6 +125,12 @@ fn validate_initializer(
         analyze_statement(stmt, &mut ctx);
     }
 
+    // Also analyze the yield expression if present
+    // (This handles cases where the last expression doesn't have a semicolon)
+    if let Some(ref yield_expr) = body.yield_expr {
+        analyze_expression(yield_expr, &mut ctx, false);
+    }
+
     // Check that all fields are initialized
     let uninitialized: Vec<&String> = ctx
         .fields
@@ -348,15 +354,29 @@ fn analyze_expression(
                 analyze_expression(&arg.value, ctx, false);
             }
         }
+        ExprKind::Assignment { target, value } => {
+            // Check if this is `self.field = value`
+            if let ExprKind::FieldAccess { object, field } = &target.kind {
+                if is_self_expr(object) {
+                    // This is assigning to a field on self - mark it as initialized
+                    ctx.assigned_fields.insert(field.clone());
+                }
+            }
+            // Analyze the target (but as an assignment target)
+            analyze_expression(target, ctx, true);
+            // Analyze the value being assigned
+            analyze_expression(value, ctx, false);
+        }
         ExprKind::Error => {}
     }
 }
 
 /// Check if an expression is a reference to `self`
-fn is_self_expr(_expr: &Expression) -> bool {
-    // TODO: This needs to check if the expression is a LocalRef to the `self` local
-    // For now, we can't reliably detect this without more context
-    false
+///
+/// In initializers and instance methods, `self` is always local 0.
+fn is_self_expr(expr: &Expression) -> bool {
+    use crate::validation::assignment_validation::is_self_expr as check_self;
+    check_self(expr)
 }
 
 /// Check if a field is mutable (var vs let)

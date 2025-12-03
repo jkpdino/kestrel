@@ -377,6 +377,9 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
                 format!("{}({})", format_type_simple(struct_type), args.join(", "))
             }
             ExprKind::TypeRef(id) => format!("type_{:?}", id),
+            ExprKind::Assignment { target, value } => {
+                format!("{} = {}", format_expr_value(target), format_expr_value(value))
+            }
             ExprKind::Error => "<error>".to_string(),
         }
     }

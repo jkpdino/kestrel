@@ -296,6 +296,7 @@ fn is_expression_kind(kind: SyntaxKind) -> bool {
         | SyntaxKind::ExprUnary
         | SyntaxKind::ExprNull
         | SyntaxKind::ExprCall
+        | SyntaxKind::ExprAssignment
     )
 }
 
@@ -367,6 +368,10 @@ pub fn resolve_expression(
 
         SyntaxKind::ExprCall => {
             resolve_call_expression(expr_node, ctx)
+        }
+
+        SyntaxKind::ExprAssignment => {
+            resolve_assignment_expression(expr_node, ctx)
         }
 
         _ => Expression::error(span),
@@ -482,6 +487,38 @@ fn resolve_grouping_expression(
     }
 
     Expression::error(span)
+}
+
+/// Resolve an assignment expression: target = value
+fn resolve_assignment_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // Find the LHS and RHS expressions
+    // ExprAssignment contains: Expression, Equals token, Expression
+    let mut expr_children = node.children()
+        .filter(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()));
+
+    let lhs_node = match expr_children.next() {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    let rhs_node = match expr_children.next() {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    // Resolve both sides
+    let target = resolve_expression(&lhs_node, ctx);
+    let value = resolve_expression(&rhs_node, ctx);
+
+    // TODO: Validate that target is assignable (var, not let; field on mutable receiver)
+    // TODO: Type check that value type is compatible with target type
+
+    Expression::assignment(target, value, span)
 }
 
 /// Resolve a call expression: callee(arg1, arg2, ...)

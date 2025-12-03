@@ -304,6 +304,7 @@ fn resolve_single_parameter(
         (label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0], source))), bind_name)
     } else {
         // One name: no label, it's the bind_name
+        // (In Kestrel, no label means no external label)
         let bind_name = Spanned::new(
             extract_identifier_from_name(&name_nodes[0])?,
             get_name_span(&name_nodes[0], source),

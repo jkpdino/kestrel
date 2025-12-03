@@ -109,6 +109,7 @@ pub enum SyntaxKind {
     ExprUnary,           // -expr, !expr
     ExprNull,            // null
     ExprCall,            // foo(1, 2) or expr(args)
+    ExprAssignment,      // lhs = rhs
     ArgumentList,        // (arg1, label: arg2, ...)
     Argument,            // Single argument: expr or label: expr
 
@@ -309,6 +310,7 @@ impl Language for KestrelLanguage {
         const EXPR_UNARY: u16 = SyntaxKind::ExprUnary as u16;
         const EXPR_NULL: u16 = SyntaxKind::ExprNull as u16;
         const EXPR_CALL: u16 = SyntaxKind::ExprCall as u16;
+        const EXPR_ASSIGNMENT: u16 = SyntaxKind::ExprAssignment as u16;
         const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
         const ARGUMENT: u16 = SyntaxKind::Argument as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
@@ -419,6 +421,7 @@ impl Language for KestrelLanguage {
             EXPR_UNARY => SyntaxKind::ExprUnary,
             EXPR_NULL => SyntaxKind::ExprNull,
             EXPR_CALL => SyntaxKind::ExprCall,
+            EXPR_ASSIGNMENT => SyntaxKind::ExprAssignment,
             ARGUMENT_LIST => SyntaxKind::ArgumentList,
             ARGUMENT => SyntaxKind::Argument,
             IDENTIFIER => SyntaxKind::Identifier,

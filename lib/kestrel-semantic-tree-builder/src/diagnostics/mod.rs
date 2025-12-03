@@ -10,21 +10,24 @@
 //! - `declaration` - Duplicate symbols and missing body errors
 //! - `member_access` - Member access errors
 //! - `call` - Function and method call errors
+//! - `assignment` - Assignment validation errors
 
-mod module;
-mod type_resolution;
-mod protocol;
-mod visibility;
+mod assignment;
+mod call;
 mod declaration;
 mod member_access;
-mod call;
+mod module;
+mod protocol;
 mod struct_init;
+mod type_resolution;
+mod visibility;
 
-pub use module::*;
-pub use type_resolution::*;
-pub use protocol::*;
-pub use visibility::*;
+pub use assignment::*;
+pub use call::*;
 pub use declaration::*;
 pub use member_access::*;
-pub use call::*;
+pub use module::*;
+pub use protocol::*;
 pub use struct_init::*;
+pub use type_resolution::*;
+pub use visibility::*;

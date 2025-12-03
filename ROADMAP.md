@@ -125,7 +125,7 @@
 - [x] Mutable Variables - `var x: Int = 42`
 - [x] Pattern-based bindings (Statement::Binding with Pattern)
 - [ ] Type Inference - `let x = 42` (infer Int) [Deferred]
-- [ ] Variable Reassignment - `x = 43`
+- [ ] Assignment Expressions - `x = 43`, `point.x = 10` (see Struct Operations)
 
 ### Function Operations
 
@@ -157,10 +157,19 @@
 
 ### Struct Operations
 
-- [ ] Struct Instantiation - `Point(x: 10, y: 20)`
-- [ ] Struct Initializers - `init() {}`
+- [x] Struct Instantiation - `Point(x: 10, y: 20)`
+  - [x] Implicit memberwise initializer (generated from fields)
+  - [x] Labeled argument matching (field names in declaration order)
+  - [x] TypeRef expression for struct names as callees
+  - [x] Diagnostics for arity/label mismatches
+- [x] Struct Initializers - `init() {}`
+  - [x] Parser support for initializer declarations
+  - [x] InitializerSymbol with CallableBehavior
+  - [x] ReceiverKind::Initializing for self handling
+  - [x] Explicit init suppresses implicit memberwise init
+  - [ ] Initializer body resolution (requires assignment expressions)
 - [x] Field Access - `point.x`, `point.y`
-- [ ] Struct Field Assignment - `point.x = 5`
+- [ ] Assignment Expressions - `x = 5`, `point.x = 10`
 
 ## Phase 4: Control Flow
 
@@ -212,16 +221,18 @@
 - Self parameter handling (`self` injection, `mutating`/`consuming` modifiers)
 - Call validation (undefined functions, arity, labels, instance vs static)
 - Chained member access (`obj.method().field`)
+- Struct instantiation with implicit memberwise init
+- Struct initializer declarations (`init() {}`)
+- Diagnostics for struct instantiation errors
 
 **Next Tasks**:
 
-1. Binary operators (`+`, `-`, `*`, `/`, etc.)
-2. Comparison operators (`==`, `!=`, `<`, `>`, etc.)
-3. Logical operators (`and`, `or`, `!`)
-4. If/else expressions
-5. Struct instantiation
+1. Assignment expressions (`x = 5`, `point.x = 10`) - **Blocking**: init body tests
+2. Binary operators (`+`, `-`, `*`, `/`, etc.)
+3. Comparison operators (`==`, `!=`, `<`, `>`, etc.)
+4. Logical operators (`and`, `or`, `!`)
+5. If/else expressions
 6. Block expressions
-7. Variable reassignment
 
 ## Notes
 

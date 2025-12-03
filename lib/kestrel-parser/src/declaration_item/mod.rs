@@ -366,4 +366,30 @@ mod tests {
         assert!(has_field, "Should have FieldDeclaration in syntax tree");
         assert!(has_function, "Should have FunctionDeclaration in syntax tree");
     }
+
+    #[test]
+    fn test_struct_with_two_fields_and_initializer() {
+        let source = "module Test\nstruct Point { var x: Int var y: Int init() {} }";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+
+        let mut sink = EventSink::new();
+        parse_source_file(source, tokens.into_iter(), &mut sink);
+
+        let events = sink.events();
+        let field_count = events.iter().filter(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::FieldDeclaration)
+        }).count();
+        let has_init = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::InitializerDeclaration)
+        });
+        let has_struct = events.iter().any(|e| {
+            matches!(e, crate::event::Event::StartNode(kind) if *kind == SyntaxKind::StructDeclaration)
+        });
+        assert!(has_struct, "Should have StructDeclaration in syntax tree");
+        assert_eq!(field_count, 2, "Should have 2 FieldDeclarations in syntax tree");
+        assert!(has_init, "Should have InitializerDeclaration in syntax tree");
+    }
 }

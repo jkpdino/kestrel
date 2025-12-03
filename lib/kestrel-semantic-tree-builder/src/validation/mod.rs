@@ -7,6 +7,7 @@
 //!
 //! The batched approach is more efficient for large codebases.
 
+mod assignment_validation;
 mod conformance;
 mod duplicate_symbol;
 mod function_body;
@@ -27,6 +28,7 @@ use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
 
+pub use assignment_validation::AssignmentValidationPass;
 pub use conformance::ConformancePass;
 pub use duplicate_symbol::DuplicateSymbolPass;
 pub use function_body::FunctionBodyPass;
@@ -113,6 +115,7 @@ impl ValidationRunner {
             Box::new(ImportValidationPass),
             Box::new(ConformancePass),
             Box::new(InitializerVerificationPass),
+            Box::new(AssignmentValidationPass),
         ];
 
         Self { passes }

@@ -300,4 +300,24 @@ mod tests {
         assert!(has_child(&decl, SyntaxKind::ConformanceList));
         assert!(has_child(&decl, SyntaxKind::WhereClause));
     }
+
+    #[test]
+    fn test_struct_with_field_and_initializer() {
+        // This tests the bug: struct with 2+ fields and an initializer fails to parse
+        let decl = parse("struct Point { var x: Int var y: Int init() { } }");
+        let children = decl.children();
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[2].kind(), SyntaxKind::InitializerDeclaration);
+    }
+
+    #[test]
+    fn test_struct_with_single_field_and_initializer() {
+        let decl = parse("struct Wrapper { var value: Int init() { } }");
+        let children = decl.children();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::InitializerDeclaration);
+    }
 }

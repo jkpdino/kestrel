@@ -200,6 +200,13 @@ pub enum ExprKind {
         arguments: Vec<CallArgument>,
     },
 
+    /// Assignment expression: target = value
+    /// Type is Never (assignment doesn't produce a usable value)
+    Assignment {
+        target: Box<Expression>,
+        value: Box<Expression>,
+    },
+
     // Future: If, While, Block, BinaryOp, UnaryOp, etc.
 
     /// Error expression (poison value).
@@ -422,6 +429,21 @@ impl Expression {
                 arguments,
             },
             ty: struct_type,
+            span,
+        }
+    }
+
+    /// Create an assignment expression.
+    ///
+    /// The type of an assignment expression is Never, meaning the value
+    /// cannot be used. This prevents chaining like `x = y = z`.
+    pub fn assignment(target: Expression, value: Expression, span: Span) -> Self {
+        Expression {
+            kind: ExprKind::Assignment {
+                target: Box::new(target),
+                value: Box::new(value),
+            },
+            ty: Ty::never(span.clone()),
             span,
         }
     }
