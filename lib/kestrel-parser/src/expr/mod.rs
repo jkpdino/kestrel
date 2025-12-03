@@ -129,8 +129,14 @@ pub enum ExprVariant {
     Tuple(Span, Vec<ExprVariant>, Vec<Span>, Span), // (lparen, elements, commas, rparen)
     /// Grouping expression: (expr)
     Grouping(Span, Box<ExprVariant>, Span), // (lparen, inner, rparen)
-    /// Path expression: a.b.c
+    /// Path expression: a.b.c (used for initial path parsing, will be converted to MemberAccess chain)
     Path(Vec<Span>, Vec<Span>), // (segments, dots)
+    /// Member access expression: base.member
+    MemberAccess {
+        base: Box<ExprVariant>,
+        dot: Span,
+        member: Span,
+    },
     /// Unary expression: -expr, !expr
     Unary(Token, Span, Box<ExprVariant>), // (operator_token, operator_span, operand)
     /// Call expression: callee(args)
@@ -405,19 +411,41 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                         })
                 )
             )
-            .map(|(lparen, (arguments, commas, rparen))| (lparen, arguments, commas, rparen));
+            .map(|(lparen, (arguments, commas, rparen))| PostfixOp::Call { lparen, arguments, commas, rparen });
 
-        // Postfix call: expr(args) - can be chained: foo()()
+        // Member access: .identifier
+        let member_access = skip_trivia()
+            .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
+            .then(skip_trivia().ignore_then(filter_map(|span, token| match token {
+                Token::Identifier => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            })))
+            .map(|(dot, member)| PostfixOp::MemberAccess { dot, member });
+
+        // Postfix operations: can be call (args) or member access .identifier
+        // These can be chained: a.b().c.d()
+        let postfix_op = arg_list.or(member_access);
+
+        // Postfix expression: primary followed by zero or more postfix operations
         let postfix = primary.clone()
-            .then(arg_list.repeated())
-            .map(|(base, calls)| {
-                calls.into_iter().fold(base, |callee, (lparen, arguments, commas, rparen)| {
-                    ExprVariant::Call {
-                        callee: Box::new(callee),
-                        lparen,
-                        arguments,
-                        commas,
-                        rparen,
+            .then(postfix_op.repeated())
+            .map(|(base, ops)| {
+                ops.into_iter().fold(base, |acc, op| match op {
+                    PostfixOp::Call { lparen, arguments, commas, rparen } => {
+                        ExprVariant::Call {
+                            callee: Box::new(acc),
+                            lparen,
+                            arguments,
+                            commas,
+                            rparen,
+                        }
+                    }
+                    PostfixOp::MemberAccess { dot, member } => {
+                        ExprVariant::MemberAccess {
+                            base: Box::new(acc),
+                            dot,
+                            member,
+                        }
                     }
                 })
             });
@@ -442,6 +470,23 @@ enum ParenContent {
     Unit(Span),
     Grouping(ExprVariant, Span),
     Tuple(Vec<ExprVariant>, Vec<Span>, Span),
+}
+
+/// Helper enum for postfix operations (calls and member access)
+#[derive(Debug, Clone)]
+enum PostfixOp {
+    /// Function call: (args)
+    Call {
+        lparen: Span,
+        arguments: Vec<CallArg>,
+        commas: Vec<Span>,
+        rparen: Span,
+    },
+    /// Member access: .identifier
+    MemberAccess {
+        dot: Span,
+        member: Span,
+    },
 }
 
 /// Emit events for any expression variant
@@ -476,6 +521,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::Path(segments, dots) => {
             emit_path_expr(sink, segments, dots);
+        }
+        ExprVariant::MemberAccess { base, dot, member } => {
+            emit_member_access_expr(sink, base, dot.clone(), member.clone());
         }
         ExprVariant::Unary(tok, span, operand) => {
             emit_unary_expr(sink, tok.clone(), span.clone(), operand);
@@ -599,6 +647,50 @@ fn emit_path_expr(sink: &mut EventSink, segments: &[Span], dots: &[Span]) {
     }
     sink.finish_node();
     sink.finish_node();
+}
+
+/// Emit events for a member access expression
+/// Member access is represented using ExprPath for consistency with existing AST structure
+fn emit_member_access_expr(sink: &mut EventSink, base: &ExprVariant, dot: Span, member: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprPath);
+    // Emit the base expression first (unwrapped from Expression wrapper)
+    emit_expr_variant_inner(sink, base);
+    // Then emit the dot and member
+    sink.add_token(SyntaxKind::Dot, dot);
+    sink.add_token(SyntaxKind::Identifier, member);
+    sink.finish_node();
+    sink.finish_node();
+}
+
+/// Helper to emit expression variant without the Expression wrapper
+/// Used for member access where we need to chain path segments
+fn emit_expr_variant_inner(sink: &mut EventSink, variant: &ExprVariant) {
+    match variant {
+        ExprVariant::Path(segments, dots) => {
+            // Emit path segments directly without Expression wrapper
+            for (i, segment) in segments.iter().enumerate() {
+                sink.add_token(SyntaxKind::Identifier, segment.clone());
+                if i < dots.len() {
+                    sink.add_token(SyntaxKind::Dot, dots[i].clone());
+                }
+            }
+        }
+        ExprVariant::MemberAccess { base, dot, member } => {
+            // Recursively emit base, then dot and member
+            emit_expr_variant_inner(sink, base);
+            sink.add_token(SyntaxKind::Dot, dot.clone());
+            sink.add_token(SyntaxKind::Identifier, member.clone());
+        }
+        ExprVariant::Call { .. } => {
+            // For calls, we need the full expression wrapper for the callee
+            emit_expr_variant(sink, variant);
+        }
+        _ => {
+            // For other expressions, emit with wrapper
+            emit_expr_variant(sink, variant);
+        }
+    }
 }
 
 /// Emit events for a unary expression

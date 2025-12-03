@@ -769,7 +769,7 @@ fn resolve_member_call(
     }
 
     // Get container from type
-    let container = match get_type_container(base_ty) {
+    let container = match get_type_container(base_ty, ctx) {
         Some(c) => c,
         None => {
             // Report error: cannot call method on this type
@@ -1003,7 +1003,7 @@ fn resolve_member_access(
     }
 
     // 2. Get container from base type
-    let container = match get_type_container(base_ty) {
+    let container = match get_type_container(base_ty, ctx) {
         Some(c) => c,
         None => {
             // Type doesn't support member access (e.g., Int, Bool, etc.)
@@ -1104,10 +1104,20 @@ fn resolve_member_access(
 }
 
 /// Get the container symbol from a type (for member lookup)
-fn get_type_container(ty: &Ty) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+fn get_type_container(ty: &Ty, ctx: &BodyResolutionContext) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
     match ty.kind() {
         TyKind::Struct { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
         TyKind::Protocol { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        TyKind::SelfType => {
+            // Resolve Self to the containing struct/protocol
+            // Get the function symbol, then its parent (which should be the struct/protocol)
+            let function = ctx.db.symbol_by_id(ctx.function_id)?;
+            let parent = function.metadata().parent()?;
+            match parent.metadata().kind() {
+                KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol => Some(parent),
+                _ => None,
+            }
+        }
         // TODO: Handle other types that can have members
         _ => None,
     }
