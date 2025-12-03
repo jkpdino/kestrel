@@ -23,9 +23,10 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
-    CannotAccessMemberOnTypeError, MemberNotAccessibleError, MemberNotVisibleError,
-    NoMatchingMethodError, NoMatchingOverloadError, NoSuchMemberError, NoSuchMethodError,
-    OverloadDescription, PrimitiveMethodNotCallableError,
+    CannotAccessMemberOnTypeError, InstanceMethodOnTypeError, MemberNotAccessibleError,
+    MemberNotVisibleError, NoMatchingMethodError, NoMatchingOverloadError, NoSuchMemberError,
+    NoSuchMethodError, OverloadDescription, PrimitiveMethodNotCallableError,
+    SelfOutsideInstanceMethodError, UndefinedNameError,
 };
 use crate::local_scope::LocalScope;
 use crate::path_resolver::is_visible_from;
@@ -638,17 +639,99 @@ fn resolve_single_function_call(
     callee: Expression,
     arguments: Vec<CallArgument>,
     span: Span,
-    ctx: &BodyResolutionContext,
+    ctx: &mut BodyResolutionContext,
 ) -> Expression {
-    // Get the function symbol to find return type
-    let return_ty = if let Some(symbol) = ctx.db.symbol_by_id(symbol_id) {
-        get_callable_return_type(&symbol)
-            .unwrap_or_else(|| Ty::error(span.clone()))
-    } else {
-        Ty::error(span.clone())
+    // Get the function symbol
+    let Some(symbol) = ctx.db.symbol_by_id(symbol_id) else {
+        return Expression::error(span);
     };
 
+    // Get the callable behavior
+    let Some(callable) = get_callable_behavior(&symbol) else {
+        return Expression::error(span);
+    };
+
+    // Check if this is an instance method being called without an instance
+    // This happens when we have Type.instanceMethod() instead of instance.instanceMethod()
+    if callable.is_instance_method() {
+        // Get the parent type name for the error message
+        let type_name = symbol
+            .metadata()
+            .parent()
+            .map(|p| p.metadata().name().value.clone())
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let method_name = symbol.metadata().name().value.clone();
+
+        let error = InstanceMethodOnTypeError {
+            span: span.clone(),
+            type_name,
+            method_name,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Check arity and labels
+    let arg_labels: Vec<Option<String>> = arguments.iter()
+        .map(|a| a.label.clone())
+        .collect();
+
+    if !matches_signature(&callable, arguments.len(), &arg_labels) {
+        // Report error - wrong arity or labels
+        let function_name = symbol.metadata().name().value.clone();
+        let available_overloads = vec![collect_single_overload_description(&symbol)];
+
+        let error = NoMatchingOverloadError {
+            call_span: span.clone(),
+            name: function_name,
+            provided_labels: arg_labels,
+            provided_arity: arguments.len(),
+            available_overloads,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    let return_ty = callable.return_type().clone();
     Expression::call(callee, arguments, return_ty, span)
+}
+
+/// Collect a single overload description from a symbol.
+fn collect_single_overload_description(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> OverloadDescription {
+    let name = symbol.metadata().name().value.clone();
+    let callable = get_callable_behavior(symbol);
+
+    match callable {
+        Some(cb) => {
+            let labels: Vec<Option<String>> = cb
+                .parameters()
+                .iter()
+                .map(|p| p.external_label().map(|s| s.to_string()))
+                .collect();
+            let param_types: Vec<String> = cb
+                .parameters()
+                .iter()
+                .map(|p| format_type(&p.ty))
+                .collect();
+
+            OverloadDescription {
+                name,
+                labels,
+                param_types,
+                definition_span: Some(symbol.metadata().name().span.clone()),
+                definition_file_id: None,
+            }
+        }
+        None => OverloadDescription {
+            name,
+            labels: vec![],
+            param_types: vec![],
+            definition_span: Some(symbol.metadata().name().span.clone()),
+            definition_file_id: None,
+        },
+    }
 }
 
 /// Resolve an overloaded function call by matching arity + labels
@@ -899,6 +982,17 @@ fn resolve_path_expression(
 ) -> Expression {
     let span = get_node_span(node, ctx.source);
 
+    // Check for nested expression inside the path (happens with member access on call expressions)
+    // e.g., `obj.method().field` is parsed as ExprPath containing ExprCall
+    if let Some(nested_expr) = find_nested_expression(node) {
+        let base = resolve_expression(&nested_expr, ctx);
+        let trailing_members = extract_trailing_identifiers(node, ctx.source);
+        if trailing_members.is_empty() {
+            return base;
+        }
+        return resolve_member_chain(base, &trailing_members, ctx);
+    }
+
     // Extract the path segments with their spans
     let path_with_spans = extract_path_segments_with_spans(node, ctx.source);
 
@@ -908,16 +1002,17 @@ fn resolve_path_expression(
 
     // Extract just the names for lookups
     let path: Vec<String> = path_with_spans.iter().map(|(name, _)| name.clone()).collect();
+    let first_name = &path[0];
+    let first_span = path_with_spans[0].1.clone();
 
     // First, check if it's a local variable
-    if let Some(local_id) = ctx.local_scope.lookup(&path[0]) {
+    if let Some(local_id) = ctx.local_scope.lookup(first_name) {
         // Get the type from the local
         let local_ty = ctx.local_scope.function()
             .get_local(local_id)
             .map(|l| l.ty().clone())
             .unwrap_or_else(|| Ty::error(span.clone()));
 
-        let first_span = path_with_spans[0].1.clone();
         let base_expr = Expression::local_ref(local_id, local_ty, first_span);
 
         // If there are more segments, they are member accesses
@@ -926,6 +1021,19 @@ fn resolve_path_expression(
         } else {
             return resolve_member_chain(base_expr, &path_with_spans[1..], ctx);
         }
+    }
+
+    // Check if this is 'self' being used outside an instance method
+    if first_name == "self" {
+        // 'self' was not found in local scope, which means we're not in an instance method
+        let context = get_function_context(ctx);
+        let error = SelfOutsideInstanceMethodError {
+            span: first_span.clone(),
+            context,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
     }
 
     // Not a local - resolve as a value path (module path)
@@ -937,12 +1045,22 @@ fn resolve_path_expression(
             Expression::overloaded_ref(candidates, span)
         }
         ValuePathResolution::NotFound { segment, index } => {
-            // TODO: Report error diagnostic
-            let _ = (segment, index);
+            // Report undefined name error
+            let error_span = if index < path_with_spans.len() {
+                path_with_spans[index].1.clone()
+            } else {
+                first_span.clone()
+            };
+            let error = UndefinedNameError {
+                span: error_span,
+                name: segment,
+            };
+            ctx.diagnostics
+                .add_diagnostic(error.into_diagnostic(ctx.file_id));
             Expression::error(span)
         }
         ValuePathResolution::Ambiguous { segment, index, candidates } => {
-            // TODO: Report error diagnostic
+            // TODO: Report ambiguous name diagnostic
             let _ = (segment, index, candidates);
             Expression::error(span)
         }
@@ -950,6 +1068,30 @@ fn resolve_path_expression(
             // TODO: Report error diagnostic
             let _ = symbol_id;
             Expression::error(span)
+        }
+    }
+}
+
+/// Get a description of the function context for error messages.
+///
+/// Returns descriptions like "static method", "free function", etc.
+fn get_function_context(ctx: &BodyResolutionContext) -> String {
+    let Some(function) = ctx.db.symbol_by_id(ctx.function_id) else {
+        return "this context".to_string();
+    };
+
+    // Check if the function is in a struct or protocol
+    let parent = function.metadata().parent();
+    match parent.as_ref().map(|p| p.metadata().kind()) {
+        Some(KestrelSymbolKind::Struct) | Some(KestrelSymbolKind::Protocol) => {
+            // It's a method - check if static
+            // We can check by looking for 'self' in local scope, but we already know
+            // 'self' wasn't found, so this must be a static method
+            "static method".to_string()
+        }
+        _ => {
+            // Not in a struct/protocol, so it's a free function
+            "free function".to_string()
         }
     }
 }
@@ -1232,6 +1374,64 @@ fn extract_path_element_name_with_span(element: &SyntaxNode, _source: &str) -> O
             let range = t.text_range();
             (t.text().to_string(), range.start().into()..range.end().into())
         })
+}
+
+/// Find a nested expression inside a path node
+///
+/// This handles the case where member access on a call expression is emitted as
+/// an ExprPath containing an Expression/ExprCall child.
+/// e.g., `obj.method().field` is parsed as ExprPath containing ExprCall
+fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
+    // We're looking inside an ExprPath node. Normally it contains only identifiers and dots.
+    // But when member access is on a call expression, the parser emits the call inside the ExprPath.
+    // We need to find such nested call expressions.
+
+    for child in node.children() {
+        // Look for Expression wrapper containing a non-path expression
+        if child.kind() == SyntaxKind::Expression {
+            // Check if this Expression contains an ExprCall or other complex (non-path) expression
+            for inner in child.children() {
+                // Only return if it's a complex expression type, not just another path
+                if inner.kind() == SyntaxKind::ExprCall {
+                    return Some(child);
+                }
+            }
+        }
+        // Also check for direct ExprCall nodes
+        if child.kind() == SyntaxKind::ExprCall {
+            return Some(child);
+        }
+    }
+    None
+}
+
+/// Extract trailing identifier tokens after a nested expression in a path
+///
+/// When a path contains a nested expression (e.g., from member access on a call),
+/// this extracts the identifiers that appear after the expression.
+fn extract_trailing_identifiers(node: &SyntaxNode, _source: &str) -> Vec<(String, Span)> {
+    let mut identifiers = Vec::new();
+    let mut found_expression = false;
+
+    for elem in node.children_with_tokens() {
+        if let Some(child) = elem.as_node() {
+            // Mark when we see the nested expression
+            if child.kind() == SyntaxKind::Expression || is_expression_kind(child.kind()) {
+                found_expression = true;
+            }
+        } else if let Some(token) = elem.as_token() {
+            // Only collect identifiers after the expression
+            if found_expression && token.kind() == SyntaxKind::Identifier {
+                let range = token.text_range();
+                identifiers.push((
+                    token.text().to_string(),
+                    range.start().into()..range.end().into(),
+                ));
+            }
+        }
+    }
+
+    identifiers
 }
 
 /// Resolve a function's body and attach ExecutableBehavior to the symbol

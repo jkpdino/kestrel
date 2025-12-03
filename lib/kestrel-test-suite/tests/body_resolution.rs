@@ -813,9 +813,7 @@ struct Rectangle {
 
     #[test]
     fn self_in_static_method_error() {
-        // BUG FOUND: Using self in a static method should be an error, but the
-        // compiler currently allows it (silently resolving to nothing or error type)
-        // This test documents the expected behavior - it currently PASSES but SHOULD FAIL
+        // Using self in a static method should be an error
         Test::new(
             r#"
 module Main
@@ -824,40 +822,32 @@ struct Calculator {
     let value: Int
 
     static func compute() -> Int {
-        42
+        self.value
     }
 }
 "#,
         )
-        .expect(Compiles);
-        // TODO: Once bug is fixed, change to:
-        // .expect(HasError("self"));
-        // with code: self.value in the body
+        .expect(HasError("cannot use 'self' in static method"));
     }
 
     #[test]
     fn self_in_free_function_error() {
-        // BUG FOUND: Using self in a free function should be an error, but the
-        // compiler doesn't catch this. The path `self` resolves silently to nothing.
-        // This test documents the current (buggy) behavior.
+        // Using self in a free function should be an error
         Test::new(
             r#"
 module Main
 
 func freeFunc() -> Int {
-    42
+    self.x
 }
 "#,
         )
-        .expect(Compiles);
-        // TODO: Once bug is fixed, change to:
-        // .expect(HasError("self"));
-        // with code: self.x in the body
+        .expect(HasError("cannot use 'self' in free function"));
     }
 
     #[test]
     fn self_in_module_function_error() {
-        // BUG FOUND: Same issue - `self` in a module-level function is not an error
+        // Using self in a module-level function should be an error
         Test::new(
             r#"
 module Main
@@ -867,14 +857,11 @@ struct Point {
 }
 
 func notAMethod() -> Int {
-    42
+    self.x
 }
 "#,
         )
-        .expect(Compiles);
-        // TODO: Once bug is fixed, change to:
-        // .expect(HasError("self"));
-        // with code: self.x in the body
+        .expect(HasError("cannot use 'self' in free function"));
     }
 
     // === Method Calls on Instances ===
@@ -1792,15 +1779,12 @@ func test() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
-        // TODO: Once arity checking is fixed, change to:
-        // .expect(HasError("arity")); // or similar
+        .expect(HasError("no matching overload"));
     }
 
     #[test]
     fn call_undefined_function_error() {
-        // BUG FOUND: Calling undefined function silently compiles (no error)
-        // This should error but currently doesn't
+        // Calling undefined function should produce an error
         Test::new(
             r#"
 module Main
@@ -1810,15 +1794,12 @@ func test() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
-        // TODO: Once undefined function checking is fixed, change to:
-        // .expect(HasError("undefined")); // or similar
+        .expect(HasError("undefined name"));
     }
 
     #[test]
     fn call_with_wrong_label_error() {
-        // BUG FOUND: Wrong label silently compiles (no error)
-        // This should error but currently doesn't
+        // Using wrong label should produce an error
         Test::new(
             r#"
 module Main
@@ -1832,9 +1813,7 @@ func test() -> String {
 }
 "#,
         )
-        .expect(Compiles);
-        // TODO: Once label checking is fixed, change to:
-        // .expect(HasError("label")); // or similar
+        .expect(HasError("no matching overload"));
     }
 
     // === Return Type Propagation ===
@@ -2110,8 +2089,7 @@ func test(b: B) -> Int {
 
     #[test]
     fn call_instance_method_on_type_error() {
-        // BUG FOUND: Calling instance method on type name should error,
-        // but currently silently compiles
+        // Calling instance method on type name should error
         Test::new(
             r#"
 module Main
@@ -2129,9 +2107,7 @@ func test() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
-        // TODO: Once this is fixed, change to:
-        // .expect(HasError("instance method")); // or similar
+        .expect(HasError("instance method"));
     }
 
     // === Method Visibility ===

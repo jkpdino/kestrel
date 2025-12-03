@@ -242,3 +242,66 @@ impl IntoDiagnostic for NoSuchMethodError {
                 .with_message("method not found")])
     }
 }
+
+/// Error when 'self' is used outside of an instance method.
+pub struct SelfOutsideInstanceMethodError {
+    /// Span of the 'self' reference
+    pub span: Span,
+    /// Context description (e.g., "static method", "free function")
+    pub context: String,
+}
+
+impl IntoDiagnostic for SelfOutsideInstanceMethodError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("cannot use 'self' in {}", self.context))
+            .with_labels(vec![Label::primary(file_id, self.span.clone())
+                .with_message("'self' is only available in instance methods")])
+            .with_notes(vec![
+                "'self' is implicitly defined only in non-static methods of structs and protocols".to_string(),
+            ])
+    }
+}
+
+/// Error when an undefined name is referenced.
+pub struct UndefinedNameError {
+    /// Span of the undefined name
+    pub span: Span,
+    /// The name that was not found
+    pub name: String,
+}
+
+impl IntoDiagnostic for UndefinedNameError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!("undefined name '{}'", self.name))
+            .with_labels(vec![Label::primary(file_id, self.span.clone())
+                .with_message("not found in this scope")])
+    }
+}
+
+/// Error when calling an instance method on a type instead of an instance.
+pub struct InstanceMethodOnTypeError {
+    /// Span of the call expression
+    pub span: Span,
+    /// The type name
+    pub type_name: String,
+    /// The method name
+    pub method_name: String,
+}
+
+impl IntoDiagnostic for InstanceMethodOnTypeError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "cannot call instance method '{}' on type '{}'",
+                self.method_name, self.type_name
+            ))
+            .with_labels(vec![Label::primary(file_id, self.span.clone())
+                .with_message("instance method requires an instance")])
+            .with_notes(vec![format!(
+                "call this method on an instance of '{}', not the type itself",
+                self.type_name
+            )])
+    }
+}
