@@ -1,6 +1,7 @@
 pub mod field;
 pub mod function;
 pub mod import;
+pub mod initializer;
 pub mod kind;
 pub mod local;
 pub mod module;

@@ -39,6 +39,8 @@ pub struct SemanticTree {
     symbol_table: SymbolTable<KestrelLanguage>,
     /// Maps symbol IDs to their original syntax nodes for the bind phase
     syntax_map: SyntaxMap,
+    /// Source code by file name, stored during build phase for use in bind phase
+    sources: resolver::SourceMap,
 }
 
 impl SemanticTree {
@@ -47,8 +49,9 @@ impl SemanticTree {
         let root: Arc<dyn Symbol<KestrelLanguage>> = Arc::new(RootSymbol::new(0..0));
         let symbol_table = SymbolTable::new();
         let syntax_map = SyntaxMap::new();
+        let sources = resolver::SourceMap::new();
 
-        SemanticTree { root, symbol_table, syntax_map }
+        SemanticTree { root, symbol_table, syntax_map, sources }
     }
 
     /// Get the root symbol
@@ -83,6 +86,16 @@ impl SemanticTree {
     /// Get a mutable reference to the syntax map (for build phase)
     pub(crate) fn syntax_map_mut(&mut self) -> &mut SyntaxMap {
         &mut self.syntax_map
+    }
+
+    /// Get the source map (for bind phase)
+    pub(crate) fn sources(&self) -> &resolver::SourceMap {
+        &self.sources
+    }
+
+    /// Get a mutable reference to the source map (for build phase)
+    pub(crate) fn sources_mut(&mut self) -> &mut resolver::SourceMap {
+        &mut self.sources
     }
 }
 
@@ -355,6 +368,9 @@ pub fn add_file_to_tree(
     for symbol in created_symbols {
         add_symbol_to_table(&symbol, tree.symbol_table_mut());
     }
+
+    // Step 5: Store source code for the bind phase
+    tree.sources_mut().insert(file_name.to_string(), source.to_string());
 }
 
 /// Recursively add a symbol and all its children to the symbol table
@@ -462,10 +478,8 @@ pub fn bind_tree_with_config(
     // Create cycle detector for type alias resolution
     let mut type_alias_cycle_detector: CycleDetector<SymbolId> = CycleDetector::new();
 
-    // Empty maps for now - in the future, these would be populated during build phase
-    // TODO: Populate function_bodies during build phase for body resolution
+    // Function bodies map (currently unused, could be populated during build phase)
     let function_bodies = resolver::FunctionBodyMap::new();
-    let sources = resolver::SourceMap::new();
 
     // Walk all symbols and call bind_declaration
     // Note: file_id is determined per-symbol based on parent SourceFile
@@ -477,7 +491,7 @@ pub fn bind_tree_with_config(
         0,
         &mut type_alias_cycle_detector,
         &function_bodies,
-        &sources,
+        tree.sources(),
         tree.syntax_map(),
     );
 
@@ -606,6 +620,7 @@ fn bind_symbol(
     // Map symbol kind to syntax kind for resolver lookup
     let syntax_kind = match kind {
         KestrelSymbolKind::Import => Some(SyntaxKind::ImportDeclaration),
+        KestrelSymbolKind::Initializer => Some(SyntaxKind::InitializerDeclaration),
         KestrelSymbolKind::Protocol => Some(SyntaxKind::ProtocolDeclaration),
         KestrelSymbolKind::Struct => Some(SyntaxKind::StructDeclaration),
         KestrelSymbolKind::Field => Some(SyntaxKind::FieldDeclaration),

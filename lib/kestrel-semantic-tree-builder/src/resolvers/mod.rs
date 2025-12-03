@@ -1,6 +1,7 @@
 mod field;
 mod function;
 mod import;
+mod initializer;
 mod module;
 mod protocol;
 mod r#struct;
@@ -11,6 +12,7 @@ pub mod type_parameter;
 pub use field::FieldResolver;
 pub use function::FunctionResolver;
 pub use import::ImportResolver;
+pub use initializer::InitializerResolver;
 pub use module::ModuleResolver;
 pub use protocol::ProtocolResolver;
 pub use r#struct::StructResolver;

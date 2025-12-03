@@ -148,6 +148,9 @@ pub enum ExprKind {
     /// Overloaded function reference (pending call resolution).
     /// Stores candidates that will be disambiguated by call arguments.
     OverloadedRef(Vec<SymbolId>),
+    /// Reference to a type (struct, protocol, etc.) - used in call expressions.
+    /// When calling a type name like `Point(x: 1, y: 2)`, this represents the struct.
+    TypeRef(SymbolId),
 
     // Member access
     /// Field access: `obj.field`
@@ -180,6 +183,20 @@ pub enum ExprKind {
     PrimitiveMethodCall {
         receiver: Box<Expression>,
         method: PrimitiveMethod,
+        arguments: Vec<CallArgument>,
+    },
+
+    /// Implicit struct initialization: `Point(x: 1, y: 2)` when no explicit init exists.
+    /// The compiler generates a memberwise initializer that assigns each argument to
+    /// the corresponding field in declaration order.
+    ///
+    /// This is used when:
+    /// - The struct has no explicit initializers
+    /// - All fields are visible from the call site
+    ImplicitStructInit {
+        /// The struct type being initialized
+        struct_type: Ty,
+        /// Arguments matching struct fields in declaration order
         arguments: Vec<CallArgument>,
     },
 
@@ -314,6 +331,16 @@ impl Expression {
         }
     }
 
+    /// Create a type reference expression.
+    /// Used when a path resolves to a type (e.g., struct name in `Point(x: 1, y: 2)`).
+    pub fn type_ref(symbol_id: SymbolId, ty: Ty, span: Span) -> Self {
+        Expression {
+            kind: ExprKind::TypeRef(symbol_id),
+            ty,
+            span,
+        }
+    }
+
     /// Create a field access expression.
     pub fn field_access(object: Expression, field: String, ty: Ty, span: Span) -> Self {
         Expression {
@@ -381,6 +408,20 @@ impl Expression {
         Expression {
             kind: ExprKind::Error,
             ty: Ty::error(span.clone()),
+            span,
+        }
+    }
+
+    /// Create an implicit struct initialization expression.
+    ///
+    /// Used when calling a struct type without explicit initializers.
+    pub fn implicit_struct_init(struct_type: Ty, arguments: Vec<CallArgument>, span: Span) -> Self {
+        Expression {
+            kind: ExprKind::ImplicitStructInit {
+                struct_type: struct_type.clone(),
+                arguments,
+            },
+            ty: struct_type,
             span,
         }
     }

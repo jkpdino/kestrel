@@ -317,4 +317,49 @@ public struct B {}
         // This test primarily documents that span tracking infrastructure is in place
         assert_eq!(result.tree.kind(), kestrel_syntax_tree::SyntaxKind::SourceFile);
     }
+
+    #[test]
+    fn test_module_then_struct() {
+        let source = "module Test\nstruct Empty {}";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
+
+        let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(result.tree.children().count(), 2, "Should have 2 children (module + struct)");
+    }
+
+    #[test]
+    fn test_module_then_struct_with_indentation() {
+        let source = "module Test\n            struct Empty {}";
+        let tokens: Vec<_> = lex(source)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
+
+        let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+
+        assert!(result.errors.is_empty(), "Should have no errors");
+        assert_eq!(result.tree.children().count(), 2, "Should have 2 children (module + struct)");
+    }
+
+    // TODO: Enable once assignment expressions are implemented
+    // #[test]
+    // fn test_init_with_assignment() {
+    //     let source = r#"module Test
+    // struct Point { init() { self.x = 1 } }
+    // func test() {}
+    //         "#;
+    //     let tokens: Vec<_> = lex(source)
+    //         .filter_map(|t| t.ok())
+    //         .map(|spanned| (spanned.value, spanned.span))
+    //         .collect();
+    //
+    //     let result = Parser::parse(source, tokens.into_iter(), parse_source_file);
+    //
+    //     assert!(result.tree.children().count() >= 3, "Should have 3 children: module, struct, func");
+    // }
 }

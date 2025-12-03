@@ -13,6 +13,7 @@ use crate::common::{
     visibility_parser_internal, token, identifier,
     module_declaration_parser_internal, import_declaration_parser_internal,
     function_declaration_parser_internal, field_declaration_parser_internal,
+    initializer_declaration_parser_internal,
     emit_struct_declaration,
     StructDeclarationData, StructBodyItem,
 };
@@ -69,7 +70,7 @@ impl StructDeclaration {
             .map(|tok| tok.kind())
     }
 
-    /// Get child declaration items (nested structs, imports, modules, fields, functions)
+    /// Get child declaration items (nested structs, imports, modules, fields, functions, initializers)
     pub fn children(&self) -> Vec<SyntaxNode> {
         self.syntax
             .children()
@@ -84,6 +85,7 @@ impl StructDeclaration {
                                 | SyntaxKind::ModuleDeclaration
                                 | SyntaxKind::FieldDeclaration
                                 | SyntaxKind::FunctionDeclaration
+                                | SyntaxKind::InitializerDeclaration
                         )
                     })
                     .collect()
@@ -94,7 +96,7 @@ impl StructDeclaration {
 
 /// Internal parser for struct body items
 ///
-/// Struct bodies can contain: fields, functions, nested structs, modules, and imports.
+/// Struct bodies can contain: fields, functions, initializers, nested structs, modules, and imports.
 fn struct_body_item_parser_internal(
     struct_parser: impl Parser<Token, StructDeclarationData, Error = Simple<Token>> + Clone
 ) -> impl Parser<Token, StructBodyItem, Error = Simple<Token>> + Clone {
@@ -106,6 +108,8 @@ fn struct_body_item_parser_internal(
 
     let nested_struct_parser = struct_parser.map(StructBodyItem::Struct);
 
+    let initializer_parser = initializer_declaration_parser_internal().map(StructBodyItem::Initializer);
+
     let function_parser = function_declaration_parser_internal().map(StructBodyItem::Function);
 
     let field_parser = field_declaration_parser_internal().map(StructBodyItem::Field);
@@ -113,6 +117,7 @@ fn struct_body_item_parser_internal(
     module_parser
         .or(import_parser)
         .or(nested_struct_parser)
+        .or(initializer_parser)
         .or(function_parser)
         .or(field_parser)
 }

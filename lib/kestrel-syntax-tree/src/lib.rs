@@ -52,6 +52,7 @@ pub enum SyntaxKind {
     AliasedType,
     FieldDeclaration,
     FunctionDeclaration,
+    InitializerDeclaration,
     FunctionBody,
     ParameterList,
     Parameter,
@@ -129,6 +130,7 @@ pub enum SyntaxKind {
     Func,
     If,
     Import,
+    Init,
     Internal,
     Let,
     Module,
@@ -203,6 +205,7 @@ impl From<Token> for SyntaxKind {
             Token::Func => SyntaxKind::Func,
             Token::If => SyntaxKind::If,
             Token::Import => SyntaxKind::Import,
+            Token::Init => SyntaxKind::Init,
             Token::Internal => SyntaxKind::Internal,
             Token::Let => SyntaxKind::Let,
             Token::Module => SyntaxKind::Module,
@@ -263,6 +266,7 @@ impl Language for KestrelLanguage {
         const ALIASED_TYPE: u16 = SyntaxKind::AliasedType as u16;
         const FIELD_DECLARATION: u16 = SyntaxKind::FieldDeclaration as u16;
         const FUNCTION_DECLARATION: u16 = SyntaxKind::FunctionDeclaration as u16;
+        const INITIALIZER_DECLARATION: u16 = SyntaxKind::InitializerDeclaration as u16;
         const FUNCTION_BODY: u16 = SyntaxKind::FunctionBody as u16;
         const PARAMETER_LIST: u16 = SyntaxKind::ParameterList as u16;
         const PARAMETER: u16 = SyntaxKind::Parameter as u16;
@@ -321,6 +325,7 @@ impl Language for KestrelLanguage {
         const FUNC: u16 = SyntaxKind::Func as u16;
         const IF: u16 = SyntaxKind::If as u16;
         const IMPORT: u16 = SyntaxKind::Import as u16;
+        const INIT: u16 = SyntaxKind::Init as u16;
         const INTERNAL: u16 = SyntaxKind::Internal as u16;
         const LET: u16 = SyntaxKind::Let as u16;
         const MODULE: u16 = SyntaxKind::Module as u16;
@@ -371,6 +376,7 @@ impl Language for KestrelLanguage {
             ALIASED_TYPE => SyntaxKind::AliasedType,
             FIELD_DECLARATION => SyntaxKind::FieldDeclaration,
             FUNCTION_DECLARATION => SyntaxKind::FunctionDeclaration,
+            INITIALIZER_DECLARATION => SyntaxKind::InitializerDeclaration,
             FUNCTION_BODY => SyntaxKind::FunctionBody,
             PARAMETER_LIST => SyntaxKind::ParameterList,
             PARAMETER => SyntaxKind::Parameter,
@@ -429,6 +435,7 @@ impl Language for KestrelLanguage {
             FUNC => SyntaxKind::Func,
             IF => SyntaxKind::If,
             IMPORT => SyntaxKind::Import,
+            INIT => SyntaxKind::Init,
             INTERNAL => SyntaxKind::Internal,
             LET => SyntaxKind::Let,
             MODULE => SyntaxKind::Module,

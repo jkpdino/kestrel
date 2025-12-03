@@ -9,8 +9,9 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
-    FieldDeclarationData, FunctionDeclarationData, ParameterData, ProtocolDeclarationData,
-    ReceiverModifier, StructBodyItem, StructDeclarationData, TypeAliasDeclarationData,
+    FieldDeclarationData, FunctionDeclarationData, InitializerDeclarationData, ParameterData,
+    ProtocolDeclarationData, ReceiverModifier, StructBodyItem, StructDeclarationData,
+    TypeAliasDeclarationData,
 };
 use crate::block::emit_code_block;
 use crate::event::EventSink;
@@ -260,6 +261,20 @@ pub fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) 
     sink.finish_node();
 }
 
+/// Emit events for an initializer declaration
+///
+/// This is the single source of truth for initializer declaration emission.
+pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDeclarationData) {
+    sink.start_node(SyntaxKind::InitializerDeclaration);
+
+    emit_visibility(sink, data.visibility);
+    sink.add_token(SyntaxKind::Init, data.init_span);
+    emit_parameter_list(sink, data.lparen, data.parameters, data.rparen);
+    emit_function_body(sink, &data.body);
+
+    sink.finish_node();
+}
+
 /// Emit events for a struct declaration
 ///
 /// This is the single source of truth for struct declaration emission.
@@ -300,6 +315,7 @@ fn emit_struct_body_item(sink: &mut EventSink, item: StructBodyItem) {
     match item {
         StructBodyItem::Field(data) => emit_field_declaration(sink, data),
         StructBodyItem::Function(data) => emit_function_declaration(sink, data),
+        StructBodyItem::Initializer(data) => emit_initializer_declaration(sink, data),
         StructBodyItem::Struct(data) => emit_struct_declaration(sink, data),
         StructBodyItem::Module(module_span, path_segments) => {
             emit_module_declaration(sink, module_span, &path_segments);

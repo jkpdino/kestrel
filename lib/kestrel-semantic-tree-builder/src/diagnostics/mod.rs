@@ -18,6 +18,7 @@ mod visibility;
 mod declaration;
 mod member_access;
 mod call;
+mod struct_init;
 
 pub use module::*;
 pub use type_resolution::*;
@@ -26,3 +27,4 @@ pub use visibility::*;
 pub use declaration::*;
 pub use member_access::*;
 pub use call::*;
+pub use struct_init::*;

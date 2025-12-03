@@ -7,7 +7,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::resolvers::{FieldResolver, FunctionResolver, ImportResolver, ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver};
+use crate::resolvers::{FieldResolver, FunctionResolver, ImportResolver, InitializerResolver, ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver};
 
 /// Storage for function body syntax nodes, keyed by function SymbolId
 pub type FunctionBodyMap = HashMap<SymbolId, SyntaxNode>;
@@ -143,6 +143,10 @@ impl ResolverRegistry {
         resolvers.insert(
             SyntaxKind::FunctionDeclaration,
             Box::new(FunctionResolver),
+        );
+        resolvers.insert(
+            SyntaxKind::InitializerDeclaration,
+            Box::new(InitializerResolver),
         );
 
         // Register terminal resolvers (separate instances for each)

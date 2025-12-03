@@ -364,6 +364,19 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
                     .collect();
                 format!("{}.{}({})", format_expr_value(receiver), method.name(), args.join(", "))
             }
+            ExprKind::ImplicitStructInit { struct_type, arguments } => {
+                let args: Vec<String> = arguments.iter()
+                    .map(|a| {
+                        if let Some(ref label) = a.label {
+                            format!("{}: {}", label, format_expr_value(&a.value))
+                        } else {
+                            format_expr_value(&a.value)
+                        }
+                    })
+                    .collect();
+                format!("{}({})", format_type_simple(struct_type), args.join(", "))
+            }
+            ExprKind::TypeRef(id) => format!("type_{:?}", id),
             ExprKind::Error => "<error>".to_string(),
         }
     }

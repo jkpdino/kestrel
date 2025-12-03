@@ -12,6 +12,7 @@ mod duplicate_symbol;
 mod function_body;
 mod generics;
 mod imports;
+mod initializer_verification;
 mod protocol_method;
 mod static_context;
 mod type_alias_cycles;
@@ -31,6 +32,7 @@ pub use duplicate_symbol::DuplicateSymbolPass;
 pub use function_body::FunctionBodyPass;
 pub use generics::GenericsPass;
 pub use imports::ImportValidationPass;
+pub use initializer_verification::InitializerVerificationPass;
 pub use protocol_method::ProtocolMethodPass;
 pub use static_context::StaticContextPass;
 pub use type_alias_cycles::TypeAliasCyclePass;
@@ -110,6 +112,7 @@ impl ValidationRunner {
             Box::new(TypeAliasCyclePass),
             Box::new(ImportValidationPass),
             Box::new(ConformancePass),
+            Box::new(InitializerVerificationPass),
         ];
 
         Self { passes }

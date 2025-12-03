@@ -74,6 +74,19 @@ pub struct FieldDeclarationData {
     pub ty: TyVariant,
 }
 
+/// Raw parsed data for initializer declaration internals
+///
+/// Initializer syntax: `(visibility)? init(params) { body }`
+#[derive(Debug, Clone)]
+pub struct InitializerDeclarationData {
+    pub visibility: Option<(Token, Span)>,
+    pub init_span: Span,
+    pub lparen: Span,
+    pub parameters: Vec<ParameterData>,
+    pub rparen: Span,
+    pub body: CodeBlockData,
+}
+
 /// Raw parsed data for a conformance list (: Proto1, Proto2)
 #[derive(Debug, Clone)]
 pub struct ConformanceListData {
@@ -100,6 +113,7 @@ pub struct StructDeclarationData {
 pub enum StructBodyItem {
     Field(FieldDeclarationData),
     Function(FunctionDeclarationData),
+    Initializer(InitializerDeclarationData),
     Struct(StructDeclarationData),
     Module(Span, Vec<Span>), // module_span, path_segments
     Import(Span, Vec<Span>, Option<Span>, Option<Vec<(Span, Option<Span>)>>), // import_span, path, alias, items

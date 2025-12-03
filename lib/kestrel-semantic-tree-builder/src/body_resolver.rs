@@ -15,18 +15,23 @@ use kestrel_semantic_tree::expr::{CallArgument, Expression, ExprKind, PrimitiveM
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::pattern::{Mutability, Pattern};
 use kestrel_semantic_tree::stmt::Statement;
+use kestrel_semantic_tree::symbol::field::FieldSymbol;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::symbol::initializer::InitializerSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
-    CannotAccessMemberOnTypeError, InstanceMethodOnTypeError, MemberNotAccessibleError,
-    MemberNotVisibleError, NoMatchingMethodError, NoMatchingOverloadError, NoSuchMemberError,
-    NoSuchMethodError, OverloadDescription, PrimitiveMethodNotCallableError,
-    SelfOutsideInstanceMethodError, UndefinedNameError,
+    CannotAccessMemberOnTypeError, ExplicitInitSuppressesImplicitError,
+    FieldNotVisibleForInitError, ImplicitInitArityError, ImplicitInitLabelError,
+    InstanceMethodOnTypeError, MemberNotAccessibleError, MemberNotVisibleError,
+    NoMatchingInitializerError, NoMatchingMethodError, NoMatchingOverloadError,
+    NoSuchMemberError, NoSuchMethodError, OverloadDescription,
+    PrimitiveMethodNotCallableError, SelfOutsideInstanceMethodError, UndefinedNameError,
 };
 use crate::local_scope::LocalScope;
 use crate::path_resolver::is_visible_from;
@@ -610,6 +615,11 @@ fn resolve_call(
             resolve_member_call(object, field, arguments, arg_labels, span, ctx)
         }
 
+        // Type reference - struct instantiation
+        ExprKind::TypeRef(symbol_id) => {
+            resolve_struct_instantiation(symbol_id, arguments, arg_labels, span, ctx)
+        }
+
         // Local variable reference - could be calling a function stored in a variable
         ExprKind::LocalRef(_local_id) => {
             // Check if the type is callable
@@ -771,6 +781,197 @@ fn resolve_overloaded_call(
         .add_diagnostic(error.into_diagnostic(ctx.file_id));
 
     Expression::error(span)
+}
+
+/// Resolve struct instantiation: `StructName(x: 1, y: 2)`
+///
+/// This handles both explicit initializers and implicit memberwise initialization.
+fn resolve_struct_instantiation(
+    symbol_id: SymbolId,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Get the struct symbol
+    let Some(symbol) = ctx.db.symbol_by_id(symbol_id) else {
+        return Expression::error(span);
+    };
+
+    // Verify it's a struct
+    if symbol.metadata().kind() != KestrelSymbolKind::Struct {
+        // Not a struct - cannot instantiate
+        // TODO: Add proper error diagnostic
+        return Expression::error(span);
+    }
+
+    let Some(struct_sym) = symbol.as_ref().downcast_ref::<StructSymbol>() else {
+        return Expression::error(span);
+    };
+
+    // Check for explicit initializers
+    let explicit_inits: Vec<Arc<dyn Symbol<KestrelLanguage>>> = symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Initializer)
+        .collect();
+
+    if !explicit_inits.is_empty() {
+        // Has explicit initializers - find matching one
+        return resolve_explicit_init_call(&explicit_inits, arguments, arg_labels, span, symbol.clone(), ctx);
+    }
+
+    // No explicit initializers - try implicit memberwise init
+    resolve_implicit_init(symbol_id, arguments, arg_labels, span, symbol.clone(), ctx)
+}
+
+/// Resolve a call to an explicit initializer
+fn resolve_explicit_init_call(
+    initializers: &[Arc<dyn Symbol<KestrelLanguage>>],
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    struct_symbol: Arc<dyn Symbol<KestrelLanguage>>,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Find matching initializer by arity and labels
+    for init_sym in initializers {
+        if let Some(callable) = get_callable_behavior(init_sym) {
+            if matches_signature(&callable, arguments.len(), arg_labels) {
+                // Found matching initializer
+                // The return type is Self (the struct type)
+                let struct_ty = Ty::self_type(span.clone());
+
+                // For explicit init, create a Call expression
+                let init_id = init_sym.metadata().id();
+                let init_ref = Expression::symbol_ref(init_id, Ty::inferred(span.clone()), span.clone());
+                return Expression::call(init_ref, arguments, struct_ty, span);
+            }
+        }
+    }
+
+    // No matching initializer found - report error
+    let struct_name = struct_symbol.metadata().name().value.clone();
+
+    // Build list of available initializers for the error message
+    let available_initializers: Vec<OverloadDescription> = initializers
+        .iter()
+        .filter_map(|init| {
+            let callable = get_callable_behavior(init)?;
+            let labels: Vec<Option<String>> = callable
+                .parameters()
+                .iter()
+                .map(|p| p.label.as_ref().map(|l| l.value.clone()))
+                .collect();
+            let param_types: Vec<String> = callable
+                .parameters()
+                .iter()
+                .map(|p| format_type(&p.ty))
+                .collect();
+            Some(OverloadDescription {
+                name: struct_name.clone(),
+                labels,
+                param_types,
+                definition_span: Some(init.metadata().span().clone()),
+                definition_file_id: Some(ctx.file_id),
+            })
+        })
+        .collect();
+
+    let error = NoMatchingInitializerError {
+        span: span.clone(),
+        struct_name,
+        provided_labels: arg_labels.to_vec(),
+        provided_arity: arguments.len(),
+        available_initializers,
+    };
+    ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+
+    Expression::error(span)
+}
+
+/// Resolve implicit memberwise initialization
+///
+/// The struct must not have any explicit initializers and all fields must be visible.
+fn resolve_implicit_init(
+    _struct_symbol_id: SymbolId,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    struct_symbol: Arc<dyn Symbol<KestrelLanguage>>,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let struct_name = struct_symbol.metadata().name().value.clone();
+
+    // Collect fields in declaration order
+    let fields: Vec<Arc<dyn Symbol<KestrelLanguage>>> = struct_symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| c.metadata().kind() == KestrelSymbolKind::Field)
+        .collect();
+
+    let field_names: Vec<String> = fields
+        .iter()
+        .map(|f| f.metadata().name().value.clone())
+        .collect();
+
+    // Check visibility of all fields
+    let context_sym = ctx.db.symbol_by_id(ctx.function_id);
+    for field in &fields {
+        if let Some(ref ctx_sym) = context_sym {
+            if !is_visible_from(field, ctx_sym) {
+                // Field is not visible - cannot use implicit init
+                let error = FieldNotVisibleForInitError {
+                    span: span.clone(),
+                    struct_name: struct_name.clone(),
+                    field_name: field.metadata().name().value.clone(),
+                    field_visibility: "private".to_string(), // TODO: Get actual visibility
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+                return Expression::error(span);
+            }
+        }
+    }
+
+    // Validate arguments match fields in order
+    if arguments.len() != fields.len() {
+        let error = ImplicitInitArityError {
+            span: span.clone(),
+            struct_name,
+            expected: fields.len(),
+            provided: arguments.len(),
+            field_names,
+        };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Check that labels match field names
+    for (i, (field, _arg)) in fields.iter().zip(arguments.iter()).enumerate() {
+        let field_name = field.metadata().name().value.clone();
+        let expected_label = Some(field_name.clone());
+        let provided_label = arg_labels.get(i).cloned().flatten();
+
+        if arg_labels.get(i) != Some(&expected_label) {
+            let error = ImplicitInitLabelError {
+                span: span.clone(),
+                struct_name: struct_name.clone(),
+                arg_index: i,
+                provided_label,
+                expected_label: field_name,
+            };
+            ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+            return Expression::error(span);
+        }
+    }
+
+    // All checks passed - create ImplicitStructInit expression
+    // Use Ty::self_type for now - actual struct type resolution happens elsewhere
+    let struct_ty = Ty::self_type(span.clone());
+
+    Expression::implicit_struct_init(struct_ty, arguments, span)
 }
 
 /// Resolve a method call from a MethodRef expression
@@ -1065,9 +1266,9 @@ fn resolve_path_expression(
             Expression::error(span)
         }
         ValuePathResolution::NotAValue { symbol_id } => {
-            // TODO: Report error diagnostic
-            let _ = symbol_id;
-            Expression::error(span)
+            // This is a type reference (e.g., struct name) - may be used for initialization
+            // The actual type resolution happens during call resolution
+            Expression::type_ref(symbol_id, Ty::inferred(span.clone()), span)
         }
     }
 }
@@ -1299,6 +1500,7 @@ fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
         KestrelSymbolKind::Field => "field".to_string(),
         KestrelSymbolKind::Function => "function".to_string(),
         KestrelSymbolKind::Import => "import".to_string(),
+        KestrelSymbolKind::Initializer => "initializer".to_string(),
         KestrelSymbolKind::Module => "module".to_string(),
         KestrelSymbolKind::Protocol => "protocol".to_string(),
         KestrelSymbolKind::SourceFile => "source file".to_string(),

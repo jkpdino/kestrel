@@ -104,6 +104,9 @@ pub enum Token {
     #[token("import")]
     Import,
 
+    #[token("init")]
+    Init,
+
     #[token("internal")]
     Internal,
 

@@ -7,7 +7,7 @@ use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 
-use super::data::{ParameterData, FunctionDeclarationData, FieldDeclarationData, ReceiverModifier};
+use super::data::{ParameterData, FunctionDeclarationData, FieldDeclarationData, InitializerDeclarationData, ReceiverModifier};
 use crate::ty::{ty_parser, TyVariant};
 use crate::type_param::{type_parameter_list_parser, where_clause_parser};
 use crate::block::{code_block_parser, CodeBlockData};
@@ -370,6 +370,30 @@ pub fn field_declaration_parser_internal() -> impl Parser<Token, FieldDeclaratio
                 name_span,
                 colon_span,
                 ty,
+            }
+        })
+}
+
+/// Parser for an initializer declaration
+///
+/// Syntax: `(visibility)? init(params) { body }`
+///
+/// This is the single source of truth for initializer declaration parsing.
+pub fn initializer_declaration_parser_internal() -> impl Parser<Token, InitializerDeclarationData, Error = Simple<Token>> + Clone {
+    visibility_parser_internal()
+        .then(token(Token::Init))
+        .then(token(Token::LParen))
+        .then(parameter_list_parser())
+        .then(token(Token::RParen))
+        .then(code_block_parser())
+        .map(|(((((visibility, init_span), lparen), parameters), rparen), body)| {
+            InitializerDeclarationData {
+                visibility,
+                init_span,
+                lparen,
+                parameters,
+                rparen,
+                body,
             }
         })
 }
