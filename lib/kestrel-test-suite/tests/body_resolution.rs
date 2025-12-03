@@ -540,4 +540,74 @@ func example(p: Point) -> Int {
         )
         .expect(Compiles);
     }
+
+    #[test]
+    fn nonexistent_field_error() {
+        Test::new(
+            r#"
+module Main
+
+struct Point {
+    let x: Int
+    let y: Int
+}
+
+func getZ(p: Point) -> Int {
+    p.z
+}
+"#,
+        )
+        .expect(HasError("no member 'z' on type 'Point'"));
+    }
+
+    #[test]
+    fn member_access_on_primitive_error() {
+        Test::new(
+            r#"
+module Main
+
+func test(x: Int) -> Int {
+    x.foo
+}
+"#,
+        )
+        .expect(HasError("cannot access member on type"));
+    }
+
+    #[test]
+    fn private_field_access_error() {
+        Test::new(
+            r#"
+module Main
+
+struct Secret {
+    private let hidden: Int
+}
+
+func peek(s: Secret) -> Int {
+    s.hidden
+}
+"#,
+        )
+        .expect(HasError("is private"));
+    }
+
+    #[test]
+    fn public_field_access_succeeds() {
+        Test::new(
+            r#"
+module Main
+
+struct Point {
+    pub let x: Int
+    pub let y: Int
+}
+
+func getX(p: Point) -> Int {
+    p.x
+}
+"#,
+        )
+        .expect(Compiles);
+    }
 }

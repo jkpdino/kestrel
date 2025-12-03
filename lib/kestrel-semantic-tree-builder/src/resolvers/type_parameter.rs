@@ -265,6 +265,7 @@ fn parse_type_bound(
 ///
 /// Returns a list of Ty representing the protocols to conform to or inherit from.
 /// These are unresolved path types that will be resolved during type resolution.
+#[allow(dead_code)]
 pub fn extract_conformances(syntax: &SyntaxNode, source: &str) -> Vec<Ty> {
     let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {
         Some(node) => node,

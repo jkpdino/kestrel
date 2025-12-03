@@ -260,6 +260,7 @@ pub fn resolve_module_path(
 }
 
 /// Resolve a type path to a Type
+#[allow(dead_code)]
 pub fn resolve_type_path(
     db: &dyn Db,
     path: Vec<String>,
@@ -269,6 +270,7 @@ pub fn resolve_type_path(
 }
 
 /// Resolve a value path to a symbol with ValueBehavior
+#[allow(dead_code)]
 pub fn resolve_value_path(
     db: &dyn Db,
     path: Vec<String>,

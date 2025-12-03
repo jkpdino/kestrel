@@ -413,18 +413,18 @@ fn main() -> ExitCode {
 
     match cli.command {
         Some(Commands::Check { files }) => {
-            let all_files: Vec<_> = files.iter().chain(cli.files.iter()).cloned().collect();
-            run_check(&all_files, cli.tree, cli.symbols, cli.verbose)
+            // Use subcommand files only (cli.files is redundant due to global arg)
+            run_check(&files, cli.tree, cli.symbols, cli.verbose)
         }
         Some(Commands::Parse { files }) => {
-            let all_files: Vec<_> = files.iter().chain(cli.files.iter()).cloned().collect();
-            run_parse(&all_files, cli.tree)
+            // Use subcommand files only
+            run_parse(&files, cli.tree)
         }
         Some(Commands::Run { file }) => {
             run_program(&file, cli.verbose)
         }
         None => {
-            // Default: check files if provided
+            // No subcommand: use global files
             if cli.files.is_empty() {
                 eprintln!("error: no input files");
                 eprintln!("Run 'kestrel --help' for usage.");

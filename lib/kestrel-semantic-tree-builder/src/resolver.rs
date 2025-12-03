@@ -61,6 +61,7 @@ pub struct BindingContext<'a> {
     /// Cycle detector for type alias resolution
     pub type_alias_cycle_detector: &'a mut CycleDetector<SymbolId>,
     /// Function body syntax nodes, keyed by function SymbolId
+    #[allow(dead_code)]
     pub function_bodies: &'a FunctionBodyMap,
     /// Source code by file name
     pub sources: &'a SourceMap,
@@ -96,6 +97,7 @@ impl BindingContext<'_> {
     }
 
     /// Get the source code for a symbol's file
+    #[allow(dead_code)]
     pub fn source_for_symbol(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<&str> {
         self.source_file_name(symbol)
             .and_then(|name| self.sources.get(&name))

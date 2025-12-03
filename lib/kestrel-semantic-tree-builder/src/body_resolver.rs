@@ -6,19 +6,27 @@
 
 use std::sync::Arc;
 
-use kestrel_reporting::DiagnosticContext;
+use kestrel_reporting::{DiagnosticContext, IntoDiagnostic};
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
+use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::expr::Expression;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::pattern::{Mutability, Pattern};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::diagnostics::{
+    CannotAccessMemberOnTypeError, MemberNotAccessibleError, MemberNotVisibleError,
+    NoSuchMemberError,
+};
 use crate::local_scope::LocalScope;
+use crate::path_resolver::is_visible_from;
 use crate::queries::{Db, ValuePathResolution};
 use crate::utils::get_node_span;
 
@@ -463,19 +471,22 @@ fn resolve_grouping_expression(
     Expression::error(span)
 }
 
-/// Resolve a path expression (variable reference, function reference, or field access)
+/// Resolve a path expression (variable reference, function reference, or member access)
 fn resolve_path_expression(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
     let span = get_node_span(node, ctx.source);
 
-    // Extract the path segments
-    let path = extract_path_segments(node);
+    // Extract the path segments with their spans
+    let path_with_spans = extract_path_segments_with_spans(node, ctx.source);
 
-    if path.is_empty() {
+    if path_with_spans.is_empty() {
         return Expression::error(span);
     }
+
+    // Extract just the names for lookups
+    let path: Vec<String> = path_with_spans.iter().map(|(name, _)| name.clone()).collect();
 
     // First, check if it's a local variable
     if let Some(local_id) = ctx.local_scope.lookup(&path[0]) {
@@ -485,13 +496,14 @@ fn resolve_path_expression(
             .map(|l| l.ty().clone())
             .unwrap_or_else(|| Ty::error(span.clone()));
 
-        let base_expr = Expression::local_ref(local_id, local_ty, span.clone());
+        let first_span = path_with_spans[0].1.clone();
+        let base_expr = Expression::local_ref(local_id, local_ty, first_span);
 
-        // If there are more segments, they are field accesses
-        if path.len() == 1 {
+        // If there are more segments, they are member accesses
+        if path_with_spans.len() == 1 {
             return base_expr;
         } else {
-            return resolve_field_chain(base_expr, &path[1..], span, ctx);
+            return resolve_member_chain(base_expr, &path_with_spans[1..], ctx);
         }
     }
 
@@ -521,57 +533,177 @@ fn resolve_path_expression(
     }
 }
 
-/// Resolve a chain of field accesses: obj.field1.field2.field3
-fn resolve_field_chain(
+/// Resolve a chain of member accesses: obj.field1.field2.field3
+fn resolve_member_chain(
     base: Expression,
-    fields: &[String],
-    span: Span,
-    ctx: &BodyResolutionContext,
+    members: &[(String, Span)],
+    ctx: &mut BodyResolutionContext,
 ) -> Expression {
     let mut current = base;
 
-    for field_name in fields {
-        let field_ty = lookup_field_type(&current.ty, field_name, ctx);
-        current = Expression::field_access(current, field_name.clone(), field_ty, span.clone());
+    for (member_name, member_span) in members {
+        current = resolve_member_access(current, member_name, member_span.clone(), ctx);
     }
 
     current
 }
 
-/// Look up a field's type on a given type
-fn lookup_field_type(ty: &Ty, field_name: &str, _ctx: &BodyResolutionContext) -> Ty {
-    use kestrel_semantic_tree::ty::TyKind;
-    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
-    use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+/// Resolve a single member access: base.member
+///
+/// This function:
+/// 1. Gets the container type from the base expression
+/// 2. Finds a child symbol with the given name
+/// 3. Checks visibility
+/// 4. Uses MemberAccessBehavior to produce the result expression
+fn resolve_member_access(
+    base: Expression,
+    member_name: &str,
+    member_span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let base_span = base.span.clone();
+    let base_ty = &base.ty;
+    let full_span = base_span.start..member_span.end;
 
-    match ty.kind() {
-        TyKind::Struct { symbol, .. } => {
-            // Look through struct's children to find the field
-            for child in symbol.metadata().children() {
-                if child.metadata().kind() == KestrelSymbolKind::Field {
-                    if child.metadata().name().value == field_name {
-                        // Get the type from TypedBehavior (set during bind phase)
-                        for behavior in child.metadata().behaviors() {
-                            if behavior.kind() == KestrelBehaviorKind::Typed {
-                                if let Some(typed) = behavior.as_ref().downcast_ref::<TypedBehavior>() {
-                                    return typed.ty().clone();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            // Field not found
-            Ty::error(ty.span().clone())
+    // 1. Get container from base type
+    let container = match get_type_container(base_ty) {
+        Some(c) => c,
+        None => {
+            // Type doesn't support member access (e.g., Int, Bool, etc.)
+            let error = CannotAccessMemberOnTypeError {
+                span: full_span.clone(),
+                base_type: format_type(base_ty),
+            };
+            ctx.diagnostics
+                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            return Expression::error(full_span);
         }
-        // TODO: Handle tuple field access (e.g., tuple.0, tuple.1)
-        _ => Ty::error(ty.span().clone()),
+    };
+
+    // 2. Find child with that name
+    let member = container
+        .metadata()
+        .children()
+        .into_iter()
+        .find(|c| c.metadata().name().value == member_name);
+
+    let member = match member {
+        Some(m) => m,
+        None => {
+            let error = NoSuchMemberError {
+                member_span,
+                member_name: member_name.to_string(),
+                base_span,
+                base_type: format_type(base_ty),
+            };
+            ctx.diagnostics
+                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            return Expression::error(full_span);
+        }
+    };
+
+    // 3. Check visibility
+    let context_symbol = ctx.db.symbol_by_id(ctx.function_id);
+    if let Some(ref context_sym) = context_symbol {
+        if !is_visible_from(&member, context_sym) {
+            use kestrel_semantic_tree::behavior::visibility::Visibility;
+            use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+
+            let visibility = member
+                .visibility_behavior()
+                .and_then(|v| v.visibility().cloned())
+                .unwrap_or(Visibility::Internal);
+
+            let error = MemberNotVisibleError {
+                member_span,
+                member_name: member_name.to_string(),
+                base_span,
+                base_type: format_type(base_ty),
+                visibility: visibility.to_string(),
+            };
+            ctx.diagnostics
+                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            return Expression::error(full_span);
+        }
+    }
+
+    // 4. Get MemberAccessBehavior and produce expression
+    for behavior in member.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::MemberAccess {
+            if let Some(access) = behavior.as_ref().downcast_ref::<MemberAccessBehavior>() {
+                return access.access(base, full_span);
+            }
+        }
+    }
+
+    // Member exists but doesn't have MemberAccessBehavior (e.g., type alias, nested type)
+    let error = MemberNotAccessibleError {
+        member_span,
+        member_name: member_name.to_string(),
+        base_span,
+        base_type: format_type(base_ty),
+        member_kind: format_symbol_kind(member.metadata().kind()),
+    };
+    ctx.diagnostics
+        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+    Expression::error(full_span)
+}
+
+/// Get the container symbol from a type (for member lookup)
+fn get_type_container(ty: &Ty) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+    match ty.kind() {
+        TyKind::Struct { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        TyKind::Protocol { symbol, .. } => Some(symbol.clone() as Arc<dyn Symbol<KestrelLanguage>>),
+        // TODO: Handle other types that can have members
+        _ => None,
     }
 }
 
-/// Extract path segments from a path expression node
-fn extract_path_segments(node: &SyntaxNode) -> Vec<String> {
+/// Format a type for error messages
+fn format_type(ty: &Ty) -> String {
+    match ty.kind() {
+        TyKind::Unit => "()".to_string(),
+        TyKind::Never => "!".to_string(),
+        TyKind::Bool => "Bool".to_string(),
+        TyKind::String => "String".to_string(),
+        TyKind::Int(bits) => format!("{:?}", bits),
+        TyKind::Float(bits) => format!("{:?}", bits),
+        TyKind::Tuple(elements) => {
+            let items: Vec<_> = elements.iter().map(format_type).collect();
+            format!("({})", items.join(", "))
+        }
+        TyKind::Array(elem) => format!("[{}]", format_type(elem)),
+        TyKind::Function { params, return_type } => {
+            let params_str: Vec<_> = params.iter().map(format_type).collect();
+            format!("({}) -> {}", params_str.join(", "), format_type(return_type))
+        }
+        TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::TypeParameter(param) => param.metadata().name().value.clone(),
+        TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
+        TyKind::SelfType => "Self".to_string(),
+        TyKind::Inferred => "_".to_string(),
+        TyKind::Error => "<error>".to_string(),
+    }
+}
+
+/// Format a symbol kind for error messages
+fn format_symbol_kind(kind: KestrelSymbolKind) -> String {
+    match kind {
+        KestrelSymbolKind::Field => "field".to_string(),
+        KestrelSymbolKind::Function => "function".to_string(),
+        KestrelSymbolKind::Import => "import".to_string(),
+        KestrelSymbolKind::Module => "module".to_string(),
+        KestrelSymbolKind::Protocol => "protocol".to_string(),
+        KestrelSymbolKind::SourceFile => "source file".to_string(),
+        KestrelSymbolKind::Struct => "struct".to_string(),
+        KestrelSymbolKind::TypeAlias => "type alias".to_string(),
+        KestrelSymbolKind::TypeParameter => "type parameter".to_string(),
+    }
+}
+
+/// Extract path segments with their spans from a path expression node
+fn extract_path_segments_with_spans(node: &SyntaxNode, source: &str) -> Vec<(String, Span)> {
     let mut segments = Vec::new();
 
     // ExprPath may contain Path or direct PathElements
@@ -579,8 +711,8 @@ fn extract_path_segments(node: &SyntaxNode) -> Vec<String> {
         // Path contains PathElements
         for element in path_node.children() {
             if element.kind() == SyntaxKind::PathElement {
-                if let Some(name) = extract_path_element_name(&element) {
-                    segments.push(name);
+                if let Some((name, span)) = extract_path_element_name_with_span(&element, source) {
+                    segments.push((name, span));
                 }
             }
         }
@@ -588,8 +720,8 @@ fn extract_path_segments(node: &SyntaxNode) -> Vec<String> {
         // Direct identifiers
         for child in node.children() {
             if child.kind() == SyntaxKind::PathElement {
-                if let Some(name) = extract_path_element_name(&child) {
-                    segments.push(name);
+                if let Some((name, span)) = extract_path_element_name_with_span(&child, source) {
+                    segments.push((name, span));
                 }
             }
         }
@@ -599,7 +731,11 @@ fn extract_path_segments(node: &SyntaxNode) -> Vec<String> {
             for elem in node.children_with_tokens() {
                 if let Some(token) = elem.as_token() {
                     if token.kind() == SyntaxKind::Identifier {
-                        segments.push(token.text().to_string());
+                        let span = token.text_range();
+                        segments.push((
+                            token.text().to_string(),
+                            span.start().into()..span.end().into(),
+                        ));
                     }
                 }
             }
@@ -609,21 +745,29 @@ fn extract_path_segments(node: &SyntaxNode) -> Vec<String> {
     segments
 }
 
-/// Extract the name from a PathElement node
-fn extract_path_element_name(element: &SyntaxNode) -> Option<String> {
+/// Extract the name and span from a PathElement node
+fn extract_path_element_name_with_span(element: &SyntaxNode, _source: &str) -> Option<(String, Span)> {
     // PathElement contains Name or Identifier
     if let Some(name_node) = element.children().find(|c| c.kind() == SyntaxKind::Name) {
-        return name_node.children_with_tokens()
+        return name_node
+            .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == SyntaxKind::Identifier)
-            .map(|t| t.text().to_string());
+            .map(|t| {
+                let range = t.text_range();
+                (t.text().to_string(), range.start().into()..range.end().into())
+            });
     }
 
     // Direct Identifier token
-    element.children_with_tokens()
+    element
+        .children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::Identifier)
-        .map(|t| t.text().to_string())
+        .map(|t| {
+            let range = t.text_range();
+            (t.text().to_string(), range.start().into()..range.end().into())
+        })
 }
 
 /// Resolve a function's body and attach ExecutableBehavior to the symbol

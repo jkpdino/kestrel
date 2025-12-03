@@ -2,6 +2,7 @@ pub mod callable;
 pub mod conformances;
 pub mod executable;
 pub mod function_data;
+pub mod member_access;
 pub mod typed;
 pub mod valued;
 pub mod visibility;
@@ -13,6 +14,7 @@ pub enum KestrelBehaviorKind {
     Executable,
     FunctionData,
     ImportData,
+    MemberAccess,
     Typed,
     TypeAliasTyped,
     Valued,

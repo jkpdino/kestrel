@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -112,8 +113,13 @@ impl Resolver for FieldResolver {
         let resolved_type = resolve_field_type_from_syntax(syntax, source_file.as_deref(), symbol_id, context, file_id);
 
         // Add a TypedBehavior with the resolved type
-        let typed_behavior = TypedBehavior::new(resolved_type, span);
+        let typed_behavior = TypedBehavior::new(resolved_type.clone(), span);
         symbol.metadata().add_behavior(typed_behavior);
+
+        // Add a MemberAccessBehavior so this field can be accessed via dot notation
+        let field_name = symbol.metadata().name().value.clone();
+        let member_access_behavior = MemberAccessBehavior::new(field_name, resolved_type);
+        symbol.metadata().add_behavior(member_access_behavior);
     }
 }
 

@@ -859,6 +859,14 @@ fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
                             format!("{:?}", b.kind())
                         }
                     }
+                    KestrelBehaviorKind::MemberAccess => {
+                        use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
+                        if let Some(ma) = b.as_ref().downcast_ref::<MemberAccessBehavior>() {
+                            format!("MemberAccess({})", ma.member_name())
+                        } else {
+                            format!("{:?}", b.kind())
+                        }
+                    }
                 }
             })
             .collect();
