@@ -10,6 +10,103 @@ use semantic_tree::symbol::SymbolId;
 use crate::symbol::local::LocalId;
 use crate::ty::Ty;
 
+/// A call argument with optional label.
+///
+/// Supports Swift-style labeled arguments:
+/// - `foo(42)` → label = None
+/// - `foo(x: 42)` → label = Some("x")
+#[derive(Debug, Clone)]
+pub struct CallArgument {
+    /// Optional label for the argument
+    pub label: Option<String>,
+    /// The argument value expression
+    pub value: Expression,
+    /// The span of the entire argument (including label if present)
+    pub span: Span,
+}
+
+impl CallArgument {
+    /// Create an unlabeled argument.
+    pub fn unlabeled(value: Expression, span: Span) -> Self {
+        Self {
+            label: None,
+            value,
+            span,
+        }
+    }
+
+    /// Create a labeled argument.
+    pub fn labeled(label: String, value: Expression, span: Span) -> Self {
+        Self {
+            label: Some(label),
+            value,
+            span,
+        }
+    }
+}
+
+/// Built-in methods on primitive types.
+///
+/// These methods have no symbol representation - the compiler has
+/// built-in knowledge of their signatures and semantics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrimitiveMethod {
+    // Int methods
+    /// Int.toString() -> String
+    IntToString,
+    /// Int.abs() -> Int
+    IntAbs,
+
+    // String methods
+    /// String.length() -> Int
+    StringLength,
+    /// String.isEmpty() -> Bool
+    StringIsEmpty,
+
+    // Future: more methods as needed
+}
+
+impl PrimitiveMethod {
+    /// Get the return type of this primitive method.
+    pub fn return_type(&self, span: Span) -> Ty {
+        use crate::ty::IntBits;
+        match self {
+            PrimitiveMethod::IntToString => Ty::string(span),
+            PrimitiveMethod::IntAbs => Ty::int(IntBits::I64, span),
+            PrimitiveMethod::StringLength => Ty::int(IntBits::I64, span),
+            PrimitiveMethod::StringIsEmpty => Ty::bool(span),
+        }
+    }
+
+    /// Get the method name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            PrimitiveMethod::IntToString => "toString",
+            PrimitiveMethod::IntAbs => "abs",
+            PrimitiveMethod::StringLength => "length",
+            PrimitiveMethod::StringIsEmpty => "isEmpty",
+        }
+    }
+
+    /// Look up a method on a primitive type.
+    pub fn lookup(ty: &Ty, name: &str) -> Option<PrimitiveMethod> {
+        use crate::ty::TyKind;
+        match ty.kind() {
+            TyKind::Int(_) => match name {
+                "toString" => Some(PrimitiveMethod::IntToString),
+                "abs" => Some(PrimitiveMethod::IntAbs),
+                _ => None,
+            },
+            TyKind::String => match name {
+                "length" => Some(PrimitiveMethod::StringLength),
+                "isEmpty" => Some(PrimitiveMethod::StringIsEmpty),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 /// Represents a literal value in an expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralValue {
@@ -60,7 +157,33 @@ pub enum ExprKind {
         field: String,
     },
 
-    // Future: If, While, Block, Call, BinaryOp, UnaryOp, etc.
+    // Method references
+    /// Method reference: `receiver.method`
+    /// Represents a method lookup on a receiver before being called.
+    /// The candidates list may have multiple entries for overloaded methods.
+    MethodRef {
+        receiver: Box<Expression>,
+        candidates: Vec<SymbolId>,
+        method_name: String,
+    },
+
+    // Calls
+    /// Function or method call: `foo(1, 2)` or `obj.method(1, 2)`
+    /// The callee can be SymbolRef, MethodRef, OverloadedRef, or any callable expression.
+    Call {
+        callee: Box<Expression>,
+        arguments: Vec<CallArgument>,
+    },
+
+    /// Primitive method call: `5.toString()`, `"hello".length()`
+    /// No symbol exists - compiler has built-in knowledge.
+    PrimitiveMethodCall {
+        receiver: Box<Expression>,
+        method: PrimitiveMethod,
+        arguments: Vec<CallArgument>,
+    },
+
+    // Future: If, While, Block, BinaryOp, UnaryOp, etc.
 
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
@@ -199,6 +322,56 @@ impl Expression {
                 field,
             },
             ty,
+            span,
+        }
+    }
+
+    /// Create a method reference expression.
+    /// Type is inferred later when call resolution happens.
+    pub fn method_ref(
+        receiver: Expression,
+        candidates: Vec<SymbolId>,
+        method_name: String,
+        span: Span,
+    ) -> Self {
+        Expression {
+            kind: ExprKind::MethodRef {
+                receiver: Box::new(receiver),
+                candidates,
+                method_name,
+            },
+            ty: Ty::inferred(span.clone()),
+            span,
+        }
+    }
+
+    /// Create a call expression.
+    pub fn call(callee: Expression, arguments: Vec<CallArgument>, return_ty: Ty, span: Span) -> Self {
+        Expression {
+            kind: ExprKind::Call {
+                callee: Box::new(callee),
+                arguments,
+            },
+            ty: return_ty,
+            span,
+        }
+    }
+
+    /// Create a primitive method call expression.
+    pub fn primitive_method_call(
+        receiver: Expression,
+        method: PrimitiveMethod,
+        arguments: Vec<CallArgument>,
+        span: Span,
+    ) -> Self {
+        let return_ty = method.return_type(span.clone());
+        Expression {
+            kind: ExprKind::PrimitiveMethodCall {
+                receiver: Box::new(receiver),
+                method,
+                arguments,
+            },
+            ty: return_ty,
             span,
         }
     }

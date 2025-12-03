@@ -10,7 +10,8 @@ use kestrel_reporting::{DiagnosticContext, IntoDiagnostic};
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
-use kestrel_semantic_tree::expr::Expression;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::expr::{CallArgument, Expression, ExprKind, PrimitiveMethod};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::pattern::{Mutability, Pattern};
 use kestrel_semantic_tree::stmt::Statement;
@@ -23,7 +24,8 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
     CannotAccessMemberOnTypeError, MemberNotAccessibleError, MemberNotVisibleError,
-    NoSuchMemberError,
+    NoMatchingMethodError, NoMatchingOverloadError, NoSuchMemberError, NoSuchMethodError,
+    OverloadDescription, PrimitiveMethodNotCallableError,
 };
 use crate::local_scope::LocalScope;
 use crate::path_resolver::is_visible_from;
@@ -287,6 +289,7 @@ fn is_expression_kind(kind: SyntaxKind) -> bool {
         | SyntaxKind::ExprPath
         | SyntaxKind::ExprUnary
         | SyntaxKind::ExprNull
+        | SyntaxKind::ExprCall
     )
 }
 
@@ -354,6 +357,10 @@ pub fn resolve_expression(
         SyntaxKind::ExprNull => {
             // TODO: Handle null properly with optional types
             Expression::error(span)
+        }
+
+        SyntaxKind::ExprCall => {
+            resolve_call_expression(expr_node, ctx)
         }
 
         _ => Expression::error(span),
@@ -471,6 +478,420 @@ fn resolve_grouping_expression(
     Expression::error(span)
 }
 
+/// Resolve a call expression: callee(arg1, arg2, ...)
+fn resolve_call_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // Find the callee expression (first child that's an Expression)
+    let callee_node = match node.children().find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind())) {
+        Some(n) => n,
+        None => return Expression::error(span.clone()),
+    };
+
+    // Find the argument list
+    let arg_list_node = node.children().find(|c| c.kind() == SyntaxKind::ArgumentList);
+
+    // Resolve callee first
+    let callee = resolve_expression(&callee_node, ctx);
+
+    // Parse arguments
+    let arguments = if let Some(arg_list) = arg_list_node {
+        resolve_argument_list(&arg_list, ctx)
+    } else {
+        vec![]
+    };
+
+    // Get labels for overload resolution (owned strings)
+    let arg_labels: Vec<Option<String>> = arguments.iter()
+        .map(|a| a.label.clone())
+        .collect();
+
+    // Now resolve based on callee type
+    resolve_call(callee, arguments, &arg_labels, span, ctx)
+}
+
+/// Resolve an argument list node into CallArguments
+fn resolve_argument_list(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Vec<CallArgument> {
+    let mut arguments = Vec::new();
+
+    for child in node.children() {
+        if child.kind() == SyntaxKind::Argument {
+            if let Some(arg) = resolve_argument(&child, ctx) {
+                arguments.push(arg);
+            }
+        }
+    }
+
+    arguments
+}
+
+/// Resolve a single argument node
+fn resolve_argument(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<CallArgument> {
+    let span = get_node_span(node, ctx.source);
+
+    // Check for label (Identifier followed by Colon)
+    let mut label = None;
+    let mut has_colon = false;
+
+    for elem in node.children_with_tokens() {
+        if let Some(token) = elem.as_token() {
+            if token.kind() == SyntaxKind::Identifier && !has_colon {
+                // This might be a label
+                label = Some(token.text().to_string());
+            } else if token.kind() == SyntaxKind::Colon {
+                has_colon = true;
+            }
+        }
+    }
+
+    // If we found a colon, the identifier was a label; otherwise it wasn't
+    if !has_colon {
+        label = None;
+    }
+
+    // Find the value expression
+    let value_node = node.children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))?;
+
+    let value = resolve_expression(&value_node, ctx);
+
+    Some(CallArgument::unlabeled(value, span))
+        .map(|mut arg| {
+            if let Some(l) = label {
+                arg.label = Some(l);
+            }
+            arg
+        })
+}
+
+/// Resolve a call with the given callee and arguments
+fn resolve_call(
+    callee: Expression,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Clone callee.kind to avoid borrow issues
+    let callee_kind = callee.kind.clone();
+    let callee_ty = callee.ty.clone();
+
+    match callee_kind {
+        // Direct function reference
+        ExprKind::SymbolRef(symbol_id) => {
+            resolve_single_function_call(symbol_id, callee, arguments, span, ctx)
+        }
+
+        // Overloaded function reference - need to pick one
+        ExprKind::OverloadedRef(ref candidates) => {
+            resolve_overloaded_call(candidates, callee, arguments, arg_labels, span, ctx)
+        }
+
+        // Method reference (from member access on a type)
+        ExprKind::MethodRef { ref receiver, ref candidates, ref method_name } => {
+            resolve_method_call(receiver, candidates, method_name, arguments, arg_labels, span, ctx)
+        }
+
+        // Field access - might be method call on struct
+        ExprKind::FieldAccess { ref object, ref field } => {
+            // This could be:
+            // 1. A field with callable type (first-class function)
+            // 2. A method call
+            resolve_member_call(object, field, arguments, arg_labels, span, ctx)
+        }
+
+        // Local variable reference - could be calling a function stored in a variable
+        ExprKind::LocalRef(_local_id) => {
+            // Check if the type is callable
+            if let TyKind::Function { return_type, .. } = callee_ty.kind() {
+                Expression::call(callee, arguments, (**return_type).clone(), span)
+            } else {
+                // TODO: Report error: trying to call non-callable
+                Expression::error(span)
+            }
+        }
+
+        // Any other expression - check if callable type
+        _ => {
+            if let TyKind::Function { return_type, .. } = callee_ty.kind() {
+                Expression::call(callee, arguments, (**return_type).clone(), span)
+            } else {
+                // TODO: Report error: expression is not callable
+                Expression::error(span)
+            }
+        }
+    }
+}
+
+/// Resolve a call to a single function (not overloaded)
+fn resolve_single_function_call(
+    symbol_id: SymbolId,
+    callee: Expression,
+    arguments: Vec<CallArgument>,
+    span: Span,
+    ctx: &BodyResolutionContext,
+) -> Expression {
+    // Get the function symbol to find return type
+    let return_ty = if let Some(symbol) = ctx.db.symbol_by_id(symbol_id) {
+        get_callable_return_type(&symbol)
+            .unwrap_or_else(|| Ty::error(span.clone()))
+    } else {
+        Ty::error(span.clone())
+    };
+
+    Expression::call(callee, arguments, return_ty, span)
+}
+
+/// Resolve an overloaded function call by matching arity + labels
+fn resolve_overloaded_call(
+    candidates: &[SymbolId],
+    callee: Expression,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Find the matching overload
+    for &candidate_id in candidates {
+        if let Some(symbol) = ctx.db.symbol_by_id(candidate_id) {
+            if let Some(callable) = get_callable_behavior(&symbol) {
+                if matches_signature(&callable, arguments.len(), arg_labels) {
+                    let return_ty = callable.return_type().clone();
+                    let resolved_callee = Expression::symbol_ref(candidate_id, callee.ty.clone(), callee.span.clone());
+                    return Expression::call(resolved_callee, arguments, return_ty, span);
+                }
+            }
+        }
+    }
+
+    // No match found - collect overload info for error message
+    let function_name = get_function_name_from_candidates(candidates, ctx.db);
+    let available_overloads = collect_overload_descriptions(candidates, ctx.db);
+
+    let error = NoMatchingOverloadError {
+        call_span: span.clone(),
+        name: function_name,
+        provided_labels: arg_labels.to_vec(),
+        provided_arity: arguments.len(),
+        available_overloads,
+    };
+    ctx.diagnostics
+        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+
+    Expression::error(span)
+}
+
+/// Resolve a method call from a MethodRef expression
+fn resolve_method_call(
+    receiver: &Expression,
+    candidates: &[SymbolId],
+    method_name: &str,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    // Find matching overload
+    for &candidate_id in candidates {
+        if let Some(symbol) = ctx.db.symbol_by_id(candidate_id) {
+            if let Some(callable) = get_callable_behavior(&symbol) {
+                if matches_signature(&callable, arguments.len(), arg_labels) {
+                    // Check visibility
+                    if let Some(context_sym) = ctx.db.symbol_by_id(ctx.function_id) {
+                        if !is_visible_from(&symbol, &context_sym) {
+                            // TODO: Report error: method not visible
+                            continue;
+                        }
+                    }
+
+                    let return_ty = callable.return_type().clone();
+
+                    // Create method ref and then call
+                    let method_ref = Expression::method_ref(
+                        receiver.clone(),
+                        vec![candidate_id],
+                        method_name.to_string(),
+                        span.clone(),
+                    );
+
+                    return Expression::call(method_ref, arguments, return_ty, span);
+                }
+            }
+        }
+    }
+
+    // No matching method found - collect overload info for error message
+    let receiver_type = format_type(&receiver.ty);
+    let available_overloads = collect_overload_descriptions(candidates, ctx.db);
+
+    let error = NoMatchingMethodError {
+        call_span: span.clone(),
+        method_name: method_name.to_string(),
+        receiver_type,
+        provided_labels: arg_labels.to_vec(),
+        provided_arity: arguments.len(),
+        available_overloads,
+    };
+    ctx.diagnostics
+        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+
+    Expression::error(span)
+}
+
+/// Resolve a member call from a FieldAccess expression: obj.method(args)
+fn resolve_member_call(
+    object: &Expression,
+    member_name: &str,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let base_ty = &object.ty;
+
+    // First check for primitive method
+    if let Some(primitive_method) = PrimitiveMethod::lookup(base_ty, member_name) {
+        return Expression::primitive_method_call(
+            object.clone(),
+            primitive_method,
+            arguments,
+            span,
+        );
+    }
+
+    // Get container from type
+    let container = match get_type_container(base_ty) {
+        Some(c) => c,
+        None => {
+            // Report error: cannot call method on this type
+            let error = NoSuchMethodError {
+                call_span: span.clone(),
+                method_name: member_name.to_string(),
+                receiver_type: format_type(base_ty),
+            };
+            ctx.diagnostics
+                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            return Expression::error(span);
+        }
+    };
+
+    // Find method(s) with this name
+    let methods: Vec<Arc<dyn Symbol<KestrelLanguage>>> = container
+        .metadata()
+        .children()
+        .into_iter()
+        .filter(|c| {
+            c.metadata().kind() == KestrelSymbolKind::Function
+                && c.metadata().name().value == member_name
+        })
+        .collect();
+
+    if methods.is_empty() {
+        // Report error: no such method
+        let error = NoSuchMethodError {
+            call_span: span.clone(),
+            method_name: member_name.to_string(),
+            receiver_type: format_type(base_ty),
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Find matching overload
+    for method in &methods {
+        if let Some(callable) = get_callable_behavior(method) {
+            if matches_signature(&callable, arguments.len(), arg_labels) {
+                // Check visibility
+                if let Some(context_sym) = ctx.db.symbol_by_id(ctx.function_id) {
+                    if !is_visible_from(method, &context_sym) {
+                        // TODO: Report error: method not visible
+                        continue;
+                    }
+                }
+
+                let return_ty = callable.return_type().clone();
+                let method_id = method.metadata().id();
+
+                // Create method ref and then call
+                let method_ref = Expression::method_ref(
+                    object.clone(),
+                    vec![method_id],
+                    member_name.to_string(),
+                    span.clone(),
+                );
+
+                return Expression::call(method_ref, arguments, return_ty, span);
+            }
+        }
+    }
+
+    // No matching method found - collect overload info for error message
+    let receiver_type = format_type(base_ty);
+    let method_ids: Vec<SymbolId> = methods.iter().map(|m| m.metadata().id()).collect();
+    let available_overloads = collect_overload_descriptions(&method_ids, ctx.db);
+
+    let error = NoMatchingMethodError {
+        call_span: span.clone(),
+        method_name: member_name.to_string(),
+        receiver_type,
+        provided_labels: arg_labels.to_vec(),
+        provided_arity: arguments.len(),
+        available_overloads,
+    };
+    ctx.diagnostics
+        .add_diagnostic(error.into_diagnostic(ctx.file_id));
+
+    Expression::error(span)
+}
+
+/// Check if a callable signature matches the given arity and labels
+fn matches_signature(callable: &CallableBehavior, arity: usize, labels: &[Option<String>]) -> bool {
+    let params = callable.parameters();
+
+    // Check arity
+    if params.len() != arity {
+        return false;
+    }
+
+    // Check labels match
+    for (param, label) in params.iter().zip(labels.iter()) {
+        let param_label = param.external_label();
+        let label_ref = label.as_deref();
+        if param_label != label_ref {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Get the CallableBehavior from a symbol if it has one
+fn get_callable_behavior(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<CallableBehavior> {
+    for behavior in symbol.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::Callable {
+            if let Some(callable) = behavior.as_ref().downcast_ref::<CallableBehavior>() {
+                return Some(callable.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Get the return type from a callable symbol
+fn get_callable_return_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
+    get_callable_behavior(symbol).map(|c| c.return_type().clone())
+}
+
 /// Resolve a path expression (variable reference, function reference, or member access)
 fn resolve_path_expression(
     node: &SyntaxNode,
@@ -551,10 +972,11 @@ fn resolve_member_chain(
 /// Resolve a single member access: base.member
 ///
 /// This function:
-/// 1. Gets the container type from the base expression
-/// 2. Finds a child symbol with the given name
-/// 3. Checks visibility
-/// 4. Uses MemberAccessBehavior to produce the result expression
+/// 1. Checks for primitive methods on primitive types
+/// 2. Gets the container type from the base expression
+/// 3. Finds a child symbol with the given name
+/// 4. Checks visibility
+/// 5. Uses MemberAccessBehavior to produce the result expression
 fn resolve_member_access(
     base: Expression,
     member_name: &str,
@@ -565,7 +987,22 @@ fn resolve_member_access(
     let base_ty = &base.ty;
     let full_span = base_span.start..member_span.end;
 
-    // 1. Get container from base type
+    // 1. Check for primitive method (e.g., 5.toString, "hello".length)
+    // Primitive methods can only be called, not used as first-class values
+    if let Some(primitive_method) = PrimitiveMethod::lookup(base_ty, member_name) {
+        // Primitive methods cannot be used as first-class values.
+        // Report an error - they must be called directly.
+        let error = PrimitiveMethodNotCallableError {
+            span: full_span.clone(),
+            method_name: primitive_method.name().to_string(),
+            receiver_type: format_type(base_ty),
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(full_span);
+    }
+
+    // 2. Get container from base type
     let container = match get_type_container(base_ty) {
         Some(c) => c,
         None => {
@@ -634,6 +1071,23 @@ fn resolve_member_access(
                 return access.access(base, full_span);
             }
         }
+    }
+
+    // 5. If it's a function, create a MethodRef (for method calls like obj.method())
+    if member.metadata().kind() == KestrelSymbolKind::Function {
+        // Find all methods with this name (for overloads)
+        let candidates: Vec<SymbolId> = container
+            .metadata()
+            .children()
+            .into_iter()
+            .filter(|c| {
+                c.metadata().kind() == KestrelSymbolKind::Function
+                    && c.metadata().name().value == member_name
+            })
+            .map(|c| c.metadata().id())
+            .collect();
+
+        return Expression::method_ref(base, candidates, member_name.to_string(), full_span);
     }
 
     // Member exists but doesn't have MemberAccessBehavior (e.g., type alias, nested type)
@@ -876,6 +1330,49 @@ fn create_local_scope_from_dyn(symbol: Arc<dyn Symbol<KestrelLanguage>>) -> Loca
     ));
 
     LocalScope::new(dummy_func)
+}
+
+/// Get the function name from a list of candidate symbol IDs.
+fn get_function_name_from_candidates(candidates: &[SymbolId], db: &dyn Db) -> String {
+    for &candidate_id in candidates {
+        if let Some(symbol) = db.symbol_by_id(candidate_id) {
+            return symbol.metadata().name().value.clone();
+        }
+    }
+    "<unknown>".to_string()
+}
+
+/// Collect overload descriptions from a list of candidate symbol IDs.
+fn collect_overload_descriptions(candidates: &[SymbolId], db: &dyn Db) -> Vec<OverloadDescription> {
+    let mut descriptions = Vec::new();
+
+    for &candidate_id in candidates {
+        if let Some(symbol) = db.symbol_by_id(candidate_id) {
+            if let Some(callable) = get_callable_behavior(&symbol) {
+                let name = symbol.metadata().name().value.clone();
+                let labels: Vec<Option<String>> = callable
+                    .parameters()
+                    .iter()
+                    .map(|p| p.external_label().map(|s| s.to_string()))
+                    .collect();
+                let param_types: Vec<String> = callable
+                    .parameters()
+                    .iter()
+                    .map(|p| format_type(&p.ty))
+                    .collect();
+
+                descriptions.push(OverloadDescription {
+                    name,
+                    labels,
+                    param_types,
+                    definition_span: Some(symbol.metadata().name().span.clone()),
+                    definition_file_id: None, // TODO: Get file ID from symbol
+                });
+            }
+        }
+    }
+
+    descriptions
 }
 
 #[cfg(test)]

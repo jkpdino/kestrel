@@ -611,3 +611,37 @@ func getX(p: Point) -> Int {
         .expect(Compiles);
     }
 }
+
+mod primitive_methods {
+    use super::*;
+
+    #[test]
+    fn primitive_method_not_callable_error() {
+        // Primitive methods cannot be used as first-class values
+        Test::new(
+            r#"
+module Main
+
+func test(x: Int) -> () {
+    let f = x.toString;
+}
+"#,
+        )
+        .expect(HasError("primitive method 'toString' on 'I64' must be called"));
+    }
+
+    #[test]
+    fn primitive_method_nonexistent_error() {
+        // Unknown member on primitive types that aren't methods
+        Test::new(
+            r#"
+module Main
+
+func test(x: Int) -> Int {
+    x.notAMethod
+}
+"#,
+        )
+        .expect(HasError("cannot access member on type"));
+    }
+}

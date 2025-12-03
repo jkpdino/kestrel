@@ -90,6 +90,22 @@ impl Expression {
     pub fn is_null(&self) -> bool {
         self.kind() == SyntaxKind::ExprNull
     }
+
+    /// Check if this is a call expression
+    pub fn is_call(&self) -> bool {
+        self.kind() == SyntaxKind::ExprCall
+    }
+}
+
+/// A call argument with optional label
+#[derive(Debug, Clone)]
+pub struct CallArg {
+    /// Optional label (identifier before colon)
+    pub label: Option<Span>,
+    /// The colon after the label (if labeled)
+    pub colon: Option<Span>,
+    /// The argument expression
+    pub value: ExprVariant,
 }
 
 /// Internal enum to distinguish between expression variants during parsing
@@ -117,6 +133,14 @@ pub enum ExprVariant {
     Path(Vec<Span>, Vec<Span>), // (segments, dots)
     /// Unary expression: -expr, !expr
     Unary(Token, Span, Box<ExprVariant>), // (operator_token, operator_span, operand)
+    /// Call expression: callee(args)
+    Call {
+        callee: Box<ExprVariant>,
+        lparen: Span,
+        arguments: Vec<CallArg>,
+        commas: Vec<Span>,
+        rparen: Span,
+    },
 }
 
 /// Parser for expressions
@@ -317,6 +341,87 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             .or(paren_expr)
             .or(path);
 
+        // Argument parser for call expressions: unlabeled or labeled
+        // labeled: identifier: expr
+        // unlabeled: expr
+        let argument = skip_trivia()
+            .ignore_then(
+                // Try labeled argument: identifier: expr
+                filter_map(|span, token| match token {
+                    Token::Identifier => Ok(span),
+                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                })
+                .then(skip_trivia().ignore_then(just(Token::Colon).map_with_span(|_, span| span)))
+                .then(skip_trivia().ignore_then(expr.clone()))
+                .map(|((label, colon), value)| CallArg {
+                    label: Some(label),
+                    colon: Some(colon),
+                    value,
+                })
+                // Or unlabeled: just expr
+                .or(
+                    expr.clone().map(|value| CallArg {
+                        label: None,
+                        colon: None,
+                        value,
+                    })
+                )
+            );
+
+        // Argument list: (arg, arg, ...)
+        let arg_list = skip_trivia()
+            .ignore_then(just(Token::LParen).map_with_span(|_, span| span))
+            .then(
+                // Empty arg list
+                skip_trivia()
+                    .ignore_then(just(Token::RParen).map_with_span(|_, span| span))
+                    .map(|rparen| (vec![], vec![], rparen))
+                .or(
+                    // Non-empty: arg followed by optional commas and more
+                    argument.clone()
+                        .then(
+                            skip_trivia()
+                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                                .then(skip_trivia().ignore_then(argument.clone()))
+                                .repeated()
+                        )
+                        .then(
+                            skip_trivia()
+                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                                .or_not()
+                        )
+                        .then(skip_trivia().ignore_then(just(Token::RParen).map_with_span(|_, span| span)))
+                        .map(|(((first, rest), trailing), rparen)| {
+                            let mut arguments = vec![first];
+                            let mut commas = Vec::new();
+                            for (comma, arg) in rest {
+                                commas.push(comma);
+                                arguments.push(arg);
+                            }
+                            if let Some(tc) = trailing {
+                                commas.push(tc);
+                            }
+                            (arguments, commas, rparen)
+                        })
+                )
+            )
+            .map(|(lparen, (arguments, commas, rparen))| (lparen, arguments, commas, rparen));
+
+        // Postfix call: expr(args) - can be chained: foo()()
+        let postfix = primary.clone()
+            .then(arg_list.repeated())
+            .map(|(base, calls)| {
+                calls.into_iter().fold(base, |callee, (lparen, arguments, commas, rparen)| {
+                    ExprVariant::Call {
+                        callee: Box::new(callee),
+                        lparen,
+                        arguments,
+                        commas,
+                        rparen,
+                    }
+                })
+            });
+
         let unary = skip_trivia()
             .ignore_then(
                 just(Token::Minus).map_with_span(|tok, span| (tok, span))
@@ -326,8 +431,8 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
 
         // Combine all expression parsers
-        // Order matters: try unary first to handle -42, then primary expressions
-        unary.or(primary)
+        // Order matters: try unary first to handle -42, then postfix expressions
+        unary.or(postfix)
     })
 }
 
@@ -374,6 +479,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::Unary(tok, span, operand) => {
             emit_unary_expr(sink, tok.clone(), span.clone(), operand);
+        }
+        ExprVariant::Call { callee, lparen, arguments, commas, rparen } => {
+            emit_call_expr(sink, callee, lparen.clone(), arguments, commas, rparen.clone());
         }
     }
 }
@@ -501,6 +609,52 @@ fn emit_unary_expr(sink: &mut EventSink, tok: Token, span: Span, operand: &ExprV
     emit_expr_variant(sink, operand);
     sink.finish_node();
     sink.finish_node();
+}
+
+/// Emit events for a call expression
+fn emit_call_expr(
+    sink: &mut EventSink,
+    callee: &ExprVariant,
+    lparen: Span,
+    arguments: &[CallArg],
+    commas: &[Span],
+    rparen: Span,
+) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprCall);
+
+    // Emit the callee expression
+    emit_expr_variant(sink, callee);
+
+    // Emit the argument list
+    sink.start_node(SyntaxKind::ArgumentList);
+    sink.add_token(SyntaxKind::LParen, lparen);
+
+    for (i, arg) in arguments.iter().enumerate() {
+        sink.start_node(SyntaxKind::Argument);
+
+        // If labeled, emit label and colon
+        if let (Some(label), Some(colon)) = (&arg.label, &arg.colon) {
+            sink.add_token(SyntaxKind::Identifier, label.clone());
+            sink.add_token(SyntaxKind::Colon, colon.clone());
+        }
+
+        // Emit the argument value
+        emit_expr_variant(sink, &arg.value);
+
+        sink.finish_node(); // Argument
+
+        // Add comma after argument if there is one
+        if i < commas.len() {
+            sink.add_token(SyntaxKind::Comma, commas[i].clone());
+        }
+    }
+
+    sink.add_token(SyntaxKind::RParen, rparen);
+    sink.finish_node(); // ArgumentList
+
+    sink.finish_node(); // ExprCall
+    sink.finish_node(); // Expression
 }
 
 /// Parse an expression and emit events
@@ -893,5 +1047,84 @@ mod tests {
         let source = "(null, 42)";
         let expr = parse_expr_from_source(source);
         assert!(expr.is_tuple());
+    }
+
+    // ===== Call Expression Tests =====
+
+    #[test]
+    fn test_call_no_args() {
+        let source = "foo()";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_call_single_arg() {
+        let source = "foo(42)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_call_multiple_args() {
+        let source = "foo(1, 2, 3)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_call_with_trailing_comma() {
+        let source = "foo(1, 2,)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_call_labeled_arg() {
+        let source = "foo(x: 42)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_call_mixed_labeled_unlabeled() {
+        let source = "foo(1, name: \"test\", 3)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_call_chained() {
+        let source = "foo()()";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_method_call() {
+        let source = "obj.method()";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_method_call_with_args() {
+        let source = "obj.method(1, 2)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_chained_method_calls() {
+        let source = "a.b().c().d()";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_call_with_expression_args() {
+        let source = "foo((1, 2), [3, 4])";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
     }
 }

@@ -343,6 +343,27 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
             ExprKind::FieldAccess { object, field } => {
                 format!("{}.{}", format_expr_value(object), field)
             }
+            ExprKind::MethodRef { receiver, method_name, .. } => {
+                format!("{}.{}", format_expr_value(receiver), method_name)
+            }
+            ExprKind::Call { callee, arguments } => {
+                let args: Vec<String> = arguments.iter()
+                    .map(|a| {
+                        if let Some(ref label) = a.label {
+                            format!("{}: {}", label, format_expr_value(&a.value))
+                        } else {
+                            format_expr_value(&a.value)
+                        }
+                    })
+                    .collect();
+                format!("{}({})", format_expr_value(callee), args.join(", "))
+            }
+            ExprKind::PrimitiveMethodCall { receiver, method, arguments } => {
+                let args: Vec<String> = arguments.iter()
+                    .map(|a| format_expr_value(&a.value))
+                    .collect();
+                format!("{}.{}({})", format_expr_value(receiver), method.name(), args.join(", "))
+            }
             ExprKind::Error => "<error>".to_string(),
         }
     }

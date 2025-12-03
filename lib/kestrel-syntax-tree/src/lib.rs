@@ -107,6 +107,9 @@ pub enum SyntaxKind {
     ExprPath,            // a.b.c (path expression)
     ExprUnary,           // -expr, !expr
     ExprNull,            // null
+    ExprCall,            // foo(1, 2) or expr(args)
+    ArgumentList,        // (arg1, label: arg2, ...)
+    Argument,            // Single argument: expr or label: expr
 
     // ===== Tokens (Terminals) =====
     // Literals
@@ -297,6 +300,9 @@ impl Language for KestrelLanguage {
         const EXPR_PATH: u16 = SyntaxKind::ExprPath as u16;
         const EXPR_UNARY: u16 = SyntaxKind::ExprUnary as u16;
         const EXPR_NULL: u16 = SyntaxKind::ExprNull as u16;
+        const EXPR_CALL: u16 = SyntaxKind::ExprCall as u16;
+        const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
+        const ARGUMENT: u16 = SyntaxKind::Argument as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
         const STRING: u16 = SyntaxKind::String as u16;
         const INTEGER: u16 = SyntaxKind::Integer as u16;
@@ -400,6 +406,9 @@ impl Language for KestrelLanguage {
             EXPR_PATH => SyntaxKind::ExprPath,
             EXPR_UNARY => SyntaxKind::ExprUnary,
             EXPR_NULL => SyntaxKind::ExprNull,
+            EXPR_CALL => SyntaxKind::ExprCall,
+            ARGUMENT_LIST => SyntaxKind::ArgumentList,
+            ARGUMENT => SyntaxKind::Argument,
             IDENTIFIER => SyntaxKind::Identifier,
             STRING => SyntaxKind::String,
             INTEGER => SyntaxKind::Integer,

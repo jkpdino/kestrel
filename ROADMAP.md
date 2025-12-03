@@ -115,35 +115,40 @@
 
 ### Paths
 
-- [ ] Paths - `a.b.c`
-- [ ] Resolving paths - resolve to a value, dont't worry about member access yet
-- [ ] Symbols can have a value associated with them
+- [x] Paths - `a.b.c`
+- [x] Resolving paths - resolve to a value
+- [x] Symbols can have a value associated with them (ValueBehavior)
 
 ### Variables
 
-- [ ] Variable Declarations - `let x: Int = 42`
-- [ ] Mutable Variables - `var x: Int = 42`
-- [ ] Type Inference - `let x = 42` (infer Int) [Ignore for now]
-- [ ] Variable Reassignment - `x = 43` (Ignore for now)
+- [x] Variable Declarations - `let x: Int = 42`
+- [x] Mutable Variables - `var x: Int = 42`
+- [x] Pattern-based bindings (Statement::Binding with Pattern)
+- [ ] Type Inference - `let x = 42` (infer Int) [Deferred]
+- [ ] Variable Reassignment - `x = 43`
 
 ### Function Operations
 
-- [ ] Function Calls - `add(1, 2)`, `module.function(arg)`
-- [ ] Calling overloaded functions
-- [ ] Function References - Functions as values
+- [x] Function Calls - `add(1, 2)`, `module.function(arg)`
+- [x] Calling overloaded functions (by arity + labels)
+- [x] Method Calls - `obj.method(args)`
+- [x] Primitive Method Calls - `5.toString()`, `"hello".length()`
+- [ ] First-class Function References - Functions as values (overloaded names error for now)
+- [ ] Self Parameter Handling - Methods get `self` automatically
 
 ### Expressions
 
-- [ ] Arithmetic Operations - `+`, `-`, `*`, `/`, `%`
-- [ ] Comparison Operations - `==`, `!=`, `<`, `>`, `<=`, `>=`
-- [ ] Logical Operations - `&&`, `||`, `!`
-- [ ] Member Access - `struct.field`, `module.function`
+- [x] Member Access - `struct.field` (via MemberAccessBehavior)
+- [ ] Binary Operators - `+`, `-`, `*`, `/`, `%`
+- [ ] Comparison Operators - `==`, `!=`, `<`, `>`, `<=`, `>=`
+- [ ] Logical Operators - `and`, `or`, `!`
+- [ ] Block Expressions - `{ stmt; stmt; expr }`
 
 ### Struct Operations
 
-- [ ] Struct Initialization - `Point(x: 10, y: 20)`
+- [ ] Struct Instantiation - `Point(x: 10, y: 20)`
 - [ ] Struct Initializers - `init() {}`
-- [ ] Field Access - `point.x`, `point.y`
+- [x] Field Access - `point.x`, `point.y`
 - [ ] Struct Field Assignment - `point.x = 5`
 
 ## Phase 4: Control Flow
@@ -160,6 +165,9 @@
 - [ ] Associated Types - Types within protocols
 - [ ] Error Handling - Result types, error propagation
 - [ ] Traits/Extensions - Add methods to existing types
+- [ ] Default Parameters - `func foo(x: Int = 0)`
+- [ ] Variadic Parameters - `func log(messages: String...)`
+- [ ] Trailing Closures
 
 ## Phase 6: Polish & Optimization
 
@@ -178,11 +186,25 @@
 
 ## Current Status
 
-**Phase**: Phase 2 (Generics) - COMPLETE
-**Progress**: Phase 1 & 2 complete
-**Next Tasks**:
+**Phase**: Phase 3 (Values & Expressions) - IN PROGRESS
+**Progress**: Phase 1 & 2 complete. Phase 3 partially complete.
 
-1. Begin Phase 3: Values & Expressions
+**Completed in Phase 3**:
+- Literals (all types)
+- Path resolution
+- Variable declarations (let/var with Pattern-based bindings)
+- Function calls with overload resolution
+- Method calls on structs
+- Primitive method calls
+- Member/field access
+
+**Next Tasks**:
+1. Binary operators (`+`, `-`, `*`, `/`, etc.)
+2. Comparison operators (`==`, `!=`, `<`, `>`, etc.)
+3. If/else expressions
+4. Struct instantiation
+5. Block expressions
+6. Self parameter handling for methods
 
 ## Notes
 
