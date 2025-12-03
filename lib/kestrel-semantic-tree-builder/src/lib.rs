@@ -1,3 +1,4 @@
+pub mod body_resolver;
 mod db;
 pub mod diagnostics;
 pub mod local_scope;
@@ -604,7 +605,6 @@ fn bind_symbol(
 
     // Map symbol kind to syntax kind for resolver lookup
     let syntax_kind = match kind {
-        KestrelSymbolKind::Expression => Some(SyntaxKind::Expression),
         KestrelSymbolKind::Import => Some(SyntaxKind::ImportDeclaration),
         KestrelSymbolKind::Protocol => Some(SyntaxKind::ProtocolDeclaration),
         KestrelSymbolKind::Struct => Some(SyntaxKind::StructDeclaration),
@@ -845,6 +845,16 @@ fn print_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, level: usize) {
                                 .map(|t| format_type(t))
                                 .collect();
                             format!("Conformances({})", conformances.join(", "))
+                        } else {
+                            format!("{:?}", b.kind())
+                        }
+                    }
+                    KestrelBehaviorKind::Executable => {
+                        use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+                        if let Some(eb) = b.as_ref().downcast_ref::<ExecutableBehavior>() {
+                            let stmt_count = eb.body().statements.len();
+                            let has_yield = eb.body().yield_expr().is_some();
+                            format!("Executable(stmts={}, has_yield={})", stmt_count, has_yield)
                         } else {
                             format!("{:?}", b.kind())
                         }

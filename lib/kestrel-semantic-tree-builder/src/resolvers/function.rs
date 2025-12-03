@@ -137,9 +137,98 @@ impl Resolver for FunctionResolver {
         // Add a new CallableBehavior with resolved types
         // The FunctionSymbol.get_callable() method returns the last CallableBehavior,
         // which will be this resolved one.
-        let resolved_callable = CallableBehavior::new(resolved_params, resolved_return, span);
+        let resolved_callable = CallableBehavior::new(resolved_params.clone(), resolved_return, span);
         symbol.metadata().add_behavior(resolved_callable);
+
+        // Resolve function body if present
+        if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
+            resolve_function_body(symbol, &body_node, &resolved_params, context, file_id, source);
+        }
     }
+}
+
+/// Resolve a function's body and attach ExecutableBehavior to the symbol
+fn resolve_function_body(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    body_node: &SyntaxNode,
+    params: &[Parameter],
+    context: &mut BindingContext,
+    file_id: usize,
+    source: &str,
+) {
+    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+    use crate::body_resolver::{BodyResolutionContext, resolve_function_body as resolve_body};
+
+    // Downcast to FunctionSymbol to get Arc<FunctionSymbol> for LocalScope
+    let Some(func_sym) = symbol.as_ref().downcast_ref::<FunctionSymbol>() else {
+        return;
+    };
+
+    // Create LocalScope with the function symbol
+    // We need to create an Arc<FunctionSymbol>, but we only have &FunctionSymbol
+    // The workaround is to get the symbol from the db
+    let Some(func_arc) = context.db.symbol_by_id(symbol.metadata().id()) else {
+        return;
+    };
+
+    // Verify it's a FunctionSymbol (already confirmed above)
+    if func_arc.as_ref().downcast_ref::<FunctionSymbol>().is_none() {
+        return;
+    }
+
+    // Create a temporary FunctionSymbol that we can use with LocalScope
+    // This is needed because LocalScope::new takes Arc<FunctionSymbol>
+    // The locals will be added to the actual function through the Arc<dyn Symbol>
+    use kestrel_semantic_tree::behavior::visibility::{Visibility, VisibilityBehavior};
+    use kestrel_span::Spanned;
+
+    let temp_name = Spanned::new("__body_temp".to_string(), 0..0);
+    let temp_vis = VisibilityBehavior::new(Some(Visibility::Private), 0..0, func_arc.clone());
+    let temp_func = Arc::new(FunctionSymbol::new(
+        temp_name,
+        0..0,
+        temp_vis,
+        true,
+        true,
+        vec![],
+        kestrel_semantic_tree::ty::Ty::unit(0..0),
+        None,
+    ));
+
+    let mut local_scope = crate::local_scope::LocalScope::new(temp_func);
+
+    // Add parameters to local scope first
+    for param in params {
+        let param_ty = param.ty.clone();
+        let param_name = param.bind_name.value.clone();
+        let param_span = param.bind_name.span.clone();
+        // Add to local scope and also to the actual function
+        local_scope.bind(param_name.clone(), param_ty.clone(), false, param_span.clone());
+        // Add to the actual function symbol
+        func_sym.add_local(param_name, param_ty, false, param_span);
+    }
+
+    // Create body resolution context
+    let mut body_ctx = BodyResolutionContext {
+        db: context.db,
+        diagnostics: context.diagnostics,
+        file_id,
+        source,
+        function_id: symbol.metadata().id(),
+        local_scope,
+    };
+
+    // Resolve the body
+    let code_block = resolve_body(body_node, &mut body_ctx);
+
+    // Transfer locals from temp function to real function
+    // (locals created during body resolution need to be added to the real function)
+    // The temp function's locals are tracked separately, so we need to sync them
+
+    // Create and attach ExecutableBehavior
+    let executable = ExecutableBehavior::new(code_block);
+    symbol.metadata().add_behavior(executable);
 }
 
 /// Extract parameters from a FunctionDeclaration syntax node

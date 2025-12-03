@@ -42,6 +42,11 @@ enum Commands {
         /// Source files to parse
         files: Vec<String>,
     },
+    /// Compile and run a program (shows semantic analysis results)
+    Run {
+        /// Source file to run
+        file: String,
+    },
 }
 
 /// Parse a single file and add it to an existing semantic tree
@@ -197,6 +202,212 @@ fn run_parse(files: &[String], show_tree: bool) -> ExitCode {
     }
 }
 
+fn run_program(file: &str, verbose: bool) -> ExitCode {
+    use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+    use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+    use kestrel_semantic_tree::expr::{ExprKind, LiteralValue};
+    use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use semantic_tree::symbol::Symbol;
+
+    let mut semantic_tree = kestrel_semantic_tree_builder::SemanticTree::new();
+    let mut diagnostics = DiagnosticContext::new();
+
+    // Parse the file
+    if !add_file(file, &mut semantic_tree, &mut diagnostics, verbose) {
+        diagnostics.emit().ok();
+        return ExitCode::from(1);
+    }
+
+    // Run binding phase
+    kestrel_semantic_tree_builder::bind_tree(&semantic_tree, &mut diagnostics, 0);
+
+    // Check for errors
+    if diagnostics.len() > 0 {
+        diagnostics.emit().ok();
+        return ExitCode::from(1);
+    }
+
+    println!("=== Compiled {} ===\n", file);
+
+    // Find and display all functions with bodies
+    fn visit_symbol(
+        symbol: &std::sync::Arc<dyn Symbol<kestrel_semantic_tree::language::KestrelLanguage>>,
+        indent: usize,
+    ) {
+        let prefix = "  ".repeat(indent);
+        let name = &symbol.metadata().name().value;
+        let kind = symbol.metadata().kind();
+
+        match kind {
+            KestrelSymbolKind::Function => {
+                // Check for ExecutableBehavior
+                let behaviors = symbol.metadata().behaviors();
+                let exec = behaviors.iter().find(|b| {
+                    matches!(b.kind(), KestrelBehaviorKind::Executable)
+                });
+
+                if let Some(exec_behavior) = exec {
+                    if let Some(eb) = exec_behavior.as_ref().downcast_ref::<ExecutableBehavior>() {
+                        let body = eb.body();
+                        let stmt_count = body.statements.len();
+
+                        print!("{}func {}() ", prefix, name);
+
+                        if stmt_count > 0 || body.yield_expr().is_some() {
+                            println!("{{");
+                            for stmt in &body.statements {
+                                let stmt_str = format_statement(stmt);
+                                println!("{}  {}", prefix, stmt_str);
+                            }
+                            if let Some(yield_expr) = body.yield_expr() {
+                                let value_str = format_expr_value(yield_expr);
+                                println!("{}  -> {}", prefix, value_str);
+                            }
+                            println!("{}}}", prefix);
+                        } else {
+                            println!("{{ }}");
+                        }
+                    }
+                } else {
+                    // Protocol method or abstract function
+                    println!("{}func {}() [no body]", prefix, name);
+                }
+            }
+            KestrelSymbolKind::Struct => {
+                println!("{}struct {} {{", prefix, name);
+                for child in symbol.metadata().children() {
+                    visit_symbol(&child, indent + 1);
+                }
+                println!("{}}}", prefix);
+            }
+            KestrelSymbolKind::Protocol => {
+                println!("{}protocol {} {{", prefix, name);
+                for child in symbol.metadata().children() {
+                    visit_symbol(&child, indent + 1);
+                }
+                println!("{}}}", prefix);
+            }
+            KestrelSymbolKind::Module => {
+                println!("{}module {} {{", prefix, name);
+                for child in symbol.metadata().children() {
+                    visit_symbol(&child, indent + 1);
+                }
+                println!("{}}}", prefix);
+            }
+            KestrelSymbolKind::SourceFile => {
+                // SourceFile is a container - visit children directly
+                for child in symbol.metadata().children() {
+                    visit_symbol(&child, indent);
+                }
+            }
+            KestrelSymbolKind::Field => {
+                use kestrel_semantic_tree::symbol::field::FieldSymbol;
+                use kestrel_semantic_tree::behavior::typed::TypedBehavior;
+                if let Some(field) = symbol.as_ref().downcast_ref::<FieldSymbol>() {
+                    let mutability = if field.is_mutable() { "var" } else { "let" };
+                    // Get the resolved type from TypedBehavior
+                    let behaviors = symbol.metadata().behaviors();
+                    let ty = behaviors.iter()
+                        .find(|b| matches!(b.kind(), KestrelBehaviorKind::Typed))
+                        .and_then(|b| b.as_ref().downcast_ref::<TypedBehavior>())
+                        .map(|t| format_type_simple(t.ty()))
+                        .unwrap_or_else(|| "<unknown>".to_string());
+                    println!("{}{} {}: {}", prefix, mutability, name, ty);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn format_expr_value(expr: &kestrel_semantic_tree::expr::Expression) -> String {
+        match &expr.kind {
+            ExprKind::Literal(lit) => match lit {
+                LiteralValue::Unit => "()".to_string(),
+                LiteralValue::Integer(n) => n.to_string(),
+                LiteralValue::Float(f) => f.to_string(),
+                LiteralValue::String(s) => format!("\"{}\"", s),
+                LiteralValue::Bool(b) => b.to_string(),
+            },
+            ExprKind::Array(elements) => {
+                let items: Vec<_> = elements.iter().map(format_expr_value).collect();
+                format!("[{}]", items.join(", "))
+            }
+            ExprKind::Tuple(elements) => {
+                let items: Vec<_> = elements.iter().map(format_expr_value).collect();
+                format!("({})", items.join(", "))
+            }
+            ExprKind::LocalRef(id) => format!("local_{}", id.0),
+            ExprKind::SymbolRef(id) => format!("symbol_{:?}", id),
+            ExprKind::OverloadedRef(_) => "overloaded".to_string(),
+            ExprKind::Grouping(inner) => format!("({})", format_expr_value(inner)),
+            ExprKind::FieldAccess { object, field } => {
+                format!("{}.{}", format_expr_value(object), field)
+            }
+            ExprKind::Error => "<error>".to_string(),
+        }
+    }
+
+    fn format_statement(stmt: &kestrel_semantic_tree::stmt::Statement) -> String {
+        use kestrel_semantic_tree::stmt::StatementKind;
+        use kestrel_semantic_tree::pattern::{PatternKind, Mutability};
+
+        match &stmt.kind {
+            StatementKind::Binding { pattern, value } => {
+                let keyword = match &pattern.kind {
+                    PatternKind::Local { mutability, .. } => {
+                        if *mutability == Mutability::Mutable { "var" } else { "let" }
+                    }
+                    PatternKind::Error => "let",
+                };
+                let name = pattern.name().unwrap_or("<error>");
+                let value_str = value.as_ref()
+                    .map(|v| format!(" = {}", format_expr_value(v)))
+                    .unwrap_or_default();
+                format!("{} {}{};", keyword, name, value_str)
+            }
+            StatementKind::Expr(expr) => {
+                format!("{};", format_expr_value(expr))
+            }
+        }
+    }
+
+    fn format_type_simple(ty: &kestrel_semantic_tree::ty::Ty) -> String {
+        use kestrel_semantic_tree::ty::TyKind;
+        match ty.kind() {
+            TyKind::Unit => "()".to_string(),
+            TyKind::Never => "!".to_string(),
+            TyKind::Int(bits) => format!("{:?}", bits),
+            TyKind::Float(bits) => format!("{:?}", bits),
+            TyKind::Bool => "Bool".to_string(),
+            TyKind::String => "String".to_string(),
+            TyKind::Tuple(elements) => {
+                let items: Vec<_> = elements.iter().map(format_type_simple).collect();
+                format!("({})", items.join(", "))
+            }
+            TyKind::Array(elem) => format!("[{}]", format_type_simple(elem)),
+            TyKind::Function { params, return_type } => {
+                let params_str: Vec<_> = params.iter().map(format_type_simple).collect();
+                format!("({}) -> {}", params_str.join(", "), format_type_simple(return_type))
+            }
+            TyKind::Struct { symbol, .. } => symbol.metadata().name().value.clone(),
+            TyKind::Protocol { symbol, .. } => symbol.metadata().name().value.clone(),
+            TyKind::TypeParameter(param) => param.metadata().name().value.clone(),
+            TyKind::TypeAlias { symbol, .. } => symbol.metadata().name().value.clone(),
+            TyKind::SelfType => "Self".to_string(),
+            TyKind::Inferred => "_".to_string(),
+            TyKind::Error => "<error>".to_string(),
+        }
+    }
+
+    // Visit from root
+    for child in semantic_tree.root().metadata().children() {
+        visit_symbol(&child, 0);
+    }
+
+    println!("\n=== Success ===");
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
@@ -208,6 +419,9 @@ fn main() -> ExitCode {
         Some(Commands::Parse { files }) => {
             let all_files: Vec<_> = files.iter().chain(cli.files.iter()).cloned().collect();
             run_parse(&all_files, cli.tree)
+        }
+        Some(Commands::Run { file }) => {
+            run_program(&file, cli.verbose)
         }
         None => {
             // Default: check files if provided

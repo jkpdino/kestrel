@@ -2,7 +2,6 @@ use semantic_tree::language::SymbolKind;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum KestrelSymbolKind {
-    Expression,
     Field,
     Function,
     Import,

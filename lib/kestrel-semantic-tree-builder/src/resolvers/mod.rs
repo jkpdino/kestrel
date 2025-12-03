@@ -1,4 +1,3 @@
-mod expression;
 mod field;
 mod function;
 mod import;
@@ -9,7 +8,6 @@ mod terminal;
 mod type_alias;
 pub mod type_parameter;
 
-pub use expression::ExpressionResolver;
 pub use field::FieldResolver;
 pub use function::FunctionResolver;
 pub use import::ImportResolver;

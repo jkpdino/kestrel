@@ -123,8 +123,8 @@
 
 - [ ] Variable Declarations - `let x: Int = 42`
 - [ ] Mutable Variables - `var x: Int = 42`
-- [ ] Type Inference - `let x = 42` (infer Int)
-- [ ] Variable Reassignment - `x = 43`
+- [ ] Type Inference - `let x = 42` (infer Int) [Ignore for now]
+- [ ] Variable Reassignment - `x = 43` (Ignore for now)
 
 ### Function Operations
 
