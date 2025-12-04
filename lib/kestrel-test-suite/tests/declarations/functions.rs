@@ -7,21 +7,36 @@ mod basic {
     fn empty_function() {
         Test::new("module Test\nfunc empty() { }")
             .expect(Compiles)
-            .expect(Symbol::new("empty").is(SymbolKind::Function));
+            .expect(
+                Symbol::new("empty")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(0))
+                    .has(Behavior::HasBody(true)),
+            );
     }
 
     #[test]
     fn function_with_return_type() {
         Test::new("module Test\nfunc getValue() -> Int { }")
             .expect(Compiles)
-            .expect(Symbol::new("getValue").is(SymbolKind::Function));
+            .expect(
+                Symbol::new("getValue")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(0))
+                    .has(Behavior::HasBody(true)),
+            );
     }
 
     #[test]
     fn function_with_parameters() {
         Test::new("module Test\nfunc add(a: Int, b: Int) -> Int { }")
             .expect(Compiles)
-            .expect(Symbol::new("add").is(SymbolKind::Function));
+            .expect(
+                Symbol::new("add")
+                    .is(SymbolKind::Function)
+                    .has(Behavior::ParameterCount(2))
+                    .has(Behavior::HasBody(true)),
+            );
     }
 
     #[test]
@@ -31,7 +46,8 @@ mod basic {
             .expect(
                 Symbol::new("publicFn")
                     .is(SymbolKind::Function)
-                    .has(Behavior::Visibility(Visibility::Public)),
+                    .has(Behavior::Visibility(Visibility::Public))
+                    .has(Behavior::ParameterCount(0)),
             );
     }
 
@@ -42,7 +58,8 @@ mod basic {
             .expect(
                 Symbol::new("privateFn")
                     .is(SymbolKind::Function)
-                    .has(Behavior::Visibility(Visibility::Private)),
+                    .has(Behavior::Visibility(Visibility::Private))
+                    .has(Behavior::ParameterCount(0)),
             );
     }
 
@@ -56,7 +73,13 @@ mod basic {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("staticFn").is(SymbolKind::Function));
+        .expect(Symbol::new("Counter").is(SymbolKind::Struct))
+        .expect(
+            Symbol::new("Counter.staticFn")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsStatic(true))
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 }
 
@@ -72,7 +95,8 @@ mod overloading {
             func process(x: Int, y: Int) { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("process").is(SymbolKind::Function));
     }
 
     #[test]
@@ -83,7 +107,9 @@ mod overloading {
             func convert(x: Float) -> String { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("convert").is(SymbolKind::Function))
+        .expect(Symbol::new("convert").has(Behavior::ParameterCount(1)));
     }
 
     #[test]
@@ -94,7 +120,9 @@ mod overloading {
             func send(from sender: String) { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("send").is(SymbolKind::Function))
+        .expect(Symbol::new("send").has(Behavior::ParameterCount(1)));
     }
 }
 
@@ -112,11 +140,16 @@ mod in_structs {
         )
         .expect(Compiles)
         .expect(Symbol::new("Counter").is(SymbolKind::Struct))
-        .expect(Symbol::new("increment").is(SymbolKind::Function));
+        .expect(
+            Symbol::new("Counter.increment")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsInstanceMethod(true))
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
-    fn multiple_methods() {
+    fn multiple_methods_with_parameters() {
         Test::new(
             r#"module Test
             struct Calculator {
@@ -128,8 +161,21 @@ mod in_structs {
         )
         .expect(Compiles)
         .expect(Symbol::new("Calculator").is(SymbolKind::Struct))
-        .expect(Symbol::new("add").is(SymbolKind::Function))
-        .expect(Symbol::new("subtract").is(SymbolKind::Function))
-        .expect(Symbol::new("multiply").is(SymbolKind::Function));
+        .expect(
+            Symbol::new("Calculator.add")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2))
+                .has(Behavior::IsInstanceMethod(true)),
+        )
+        .expect(
+            Symbol::new("Calculator.subtract")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        )
+        .expect(
+            Symbol::new("Calculator.multiply")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(2)),
+        );
     }
 }

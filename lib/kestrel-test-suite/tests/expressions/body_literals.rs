@@ -9,74 +9,38 @@ mod literal_expressions {
     use super::*;
 
     #[test]
-    fn integer_literal_in_body() {
+    fn primitive_literals_in_bodies() {
         Test::new(
             r#"
 module Main
 
-func getValue() -> Int {
+func getInt() -> Int {
     42
 }
-"#,
-        )
-        .expect(Compiles)
-        .expect(Symbol::new("getValue").is(SymbolKind::Function));
-    }
 
-    #[test]
-    fn float_literal_in_body() {
-        Test::new(
-            r#"
-module Main
-
-func getValue() -> Float {
+func getFloat() -> Float {
     3.14
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn string_literal_in_body() {
-        Test::new(
-            r#"
-module Main
-
-func getMessage() -> String {
+func getString() -> String {
     "hello world"
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn bool_literal_in_body() {
-        Test::new(
-            r#"
-module Main
-
-func isEnabled() -> Bool {
+func getBool() -> Bool {
     true
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn unit_literal_in_body() {
-        Test::new(
-            r#"
-module Main
-
-func doNothing() -> () {
+func getUnit() -> () {
     ()
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("getInt").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
+        .expect(Symbol::new("getFloat").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
+        .expect(Symbol::new("getString").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
+        .expect(Symbol::new("getBool").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
+        .expect(Symbol::new("getUnit").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)));
     }
 }
 
@@ -84,100 +48,52 @@ mod composite_expressions {
     use super::*;
 
     #[test]
-    fn array_literal_in_body() {
+    fn array_literals_in_bodies() {
         Test::new(
             r#"
 module Main
 
-func getNumbers() -> [Int] {
+func getSimpleArray() -> [Int] {
     [1, 2, 3]
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn tuple_literal_in_body() {
-        Test::new(
-            r#"
-module Main
-
-func getPair() -> (Int, String) {
-    (42, "hello")
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn nested_tuple_in_body() {
-        Test::new(
-            r#"
-module Main
-
-func getNested() -> ((Int, Int), String) {
-    ((1, 2), "point")
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn grouping_expression_in_body() {
-        Test::new(
-            r#"
-module Main
-
-func getValue() -> Int {
-    (42)
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn nested_arrays() {
-        Test::new(
-            r#"
-module Main
-
-func getMatrix() -> [[Int]] {
+func getNestedArray() -> [[Int]] {
     [[1, 2], [3, 4]]
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn mixed_array_elements() {
-        Test::new(
-            r#"
-module Main
-
-func getNumbers() -> [Int] {
+func getMultiElementArray() -> [Int] {
     [1, 2, 3, 4, 5]
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("getSimpleArray").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
+        .expect(Symbol::new("getNestedArray").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
+        .expect(Symbol::new("getMultiElementArray").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)));
     }
 
     #[test]
-    fn empty_tuple_is_unit() {
+    fn tuple_literals_in_bodies() {
         Test::new(
             r#"
 module Main
 
-func empty() -> () {
-    ()
+func getSimpleTuple() -> (Int, String) {
+    (42, "hello")
+}
+
+func getNestedTuple() -> ((Int, Int), String) {
+    ((1, 2), "point")
+}
+
+func getGroupedLiteral() -> Int {
+    (42)
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("getSimpleTuple").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
+        .expect(Symbol::new("getNestedTuple").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)))
+        .expect(Symbol::new("getGroupedLiteral").is(SymbolKind::Function).has(Behavior::ParameterCount(0)).has(Behavior::HasBody(true)));
     }
 }

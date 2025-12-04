@@ -4,10 +4,12 @@ mod function_body {
     use super::*;
 
     #[test]
-    fn function_with_body_compiles() {
+    fn function_with_body_compiles_and_has_correct_properties() {
         Test::new("module Test\nfunc hasBody() { }")
             .expect(Compiles)
-            .expect(Symbol::new("hasBody").is(SymbolKind::Function));
+            .expect(Symbol::new("hasBody").is(SymbolKind::Function))
+            .expect(Symbol::new("hasBody").has(Behavior::HasBody(true)))
+            .expect(Symbol::new("hasBody").has(Behavior::ParameterCount(0)));
     }
 
     #[test]
@@ -17,14 +19,16 @@ mod function_body {
     }
 
     #[test]
-    fn multiple_functions_one_missing_body() {
+    fn function_with_return_type_requires_body() {
+        // Verify that any function requiring a return type must have a body
         Test::new(
             r#"module Test
             func valid() { }
             func invalid() -> Int
         "#,
         )
-        .expect(HasError("'invalid' requires a body"));
+        .expect(HasError("'invalid' requires a body"))
+        .expect(Symbol::new("valid").is(SymbolKind::Function));
     }
 }
 
@@ -32,7 +36,7 @@ mod protocol_methods {
     use super::*;
 
     #[test]
-    fn protocol_method_without_body_compiles() {
+    fn protocol_method_without_body_compiles_and_verified() {
         Test::new(
             r#"module Test
             protocol Printable {
@@ -42,7 +46,8 @@ mod protocol_methods {
         )
         .expect(Compiles)
         .expect(Symbol::new("Printable").is(SymbolKind::Protocol))
-        .expect(Symbol::new("print").is(SymbolKind::Function));
+        .expect(Symbol::new("Printable.print").is(SymbolKind::Function))
+        .expect(Symbol::new("Printable.print").has(Behavior::HasBody(false)));
     }
 
     #[test]
@@ -58,7 +63,7 @@ mod protocol_methods {
     }
 
     #[test]
-    fn protocol_with_multiple_methods() {
+    fn protocol_with_multiple_methods_verified() {
         Test::new(
             r#"module Test
             protocol Hashable {
@@ -69,8 +74,10 @@ mod protocol_methods {
         )
         .expect(Compiles)
         .expect(Symbol::new("Hashable").is(SymbolKind::Protocol))
-        .expect(Symbol::new("hash").is(SymbolKind::Function))
-        .expect(Symbol::new("equals").is(SymbolKind::Function));
+        .expect(Symbol::new("Hashable.hash").is(SymbolKind::Function))
+        .expect(Symbol::new("Hashable.hash").has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("Hashable.equals").is(SymbolKind::Function))
+        .expect(Symbol::new("Hashable.equals").has(Behavior::ParameterCount(1)));
     }
 }
 
@@ -78,7 +85,7 @@ mod mixed {
     use super::*;
 
     #[test]
-    fn protocol_and_regular_function() {
+    fn protocol_and_regular_function_coexist() {
         Test::new(
             r#"module Test
             protocol Runnable {
@@ -90,8 +97,10 @@ mod mixed {
         )
         .expect(Compiles)
         .expect(Symbol::new("Runnable").is(SymbolKind::Protocol))
-        .expect(Symbol::new("run").is(SymbolKind::Function))
-        .expect(Symbol::new("execute").is(SymbolKind::Function));
+        .expect(Symbol::new("Runnable.run").is(SymbolKind::Function))
+        .expect(Symbol::new("Runnable.run").has(Behavior::HasBody(false)))
+        .expect(Symbol::new("execute").is(SymbolKind::Function))
+        .expect(Symbol::new("execute").has(Behavior::HasBody(true)));
     }
 }
 
@@ -99,7 +108,7 @@ mod static_context {
     use super::*;
 
     #[test]
-    fn static_function_in_struct_compiles() {
+    fn static_function_in_struct_is_static_and_has_body() {
         Test::new(
             r#"module Test
             struct Counter {
@@ -108,11 +117,13 @@ mod static_context {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("create").is(SymbolKind::Function));
+        .expect(Symbol::new("Counter.create").is(SymbolKind::Function))
+        .expect(Symbol::new("Counter.create").has(Behavior::IsStatic(true)))
+        .expect(Symbol::new("Counter.create").has(Behavior::HasBody(true)));
     }
 
     #[test]
-    fn static_function_in_protocol_compiles() {
+    fn static_function_in_protocol_is_static() {
         Test::new(
             r#"module Test
             protocol Factory {
@@ -121,7 +132,9 @@ mod static_context {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("create").is(SymbolKind::Function));
+        .expect(Symbol::new("Factory.create").is(SymbolKind::Function))
+        .expect(Symbol::new("Factory.create").has(Behavior::IsStatic(true)))
+        .expect(Symbol::new("Factory.create").has(Behavior::HasBody(false)));
     }
 
     #[test]
@@ -168,25 +181,28 @@ mod duplicate_symbol {
     }
 
     #[test]
-    fn different_types_different_names_compiles() {
+    fn different_types_different_names_compiles_and_verified() {
         Test::new(
             r#"module Test
             struct Foo { }
             protocol Bar { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Foo").is(SymbolKind::Struct))
+        .expect(Symbol::new("Bar").is(SymbolKind::Protocol));
     }
 
     #[test]
-    fn function_overloading_allowed() {
+    fn function_overloading_allowed_with_different_signatures() {
         Test::new(
             r#"module Test
             func process() { }
             func process(x: Int) { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("process").is(SymbolKind::Function));
     }
 
     #[test]
@@ -214,7 +230,7 @@ mod duplicate_symbol {
     }
 
     #[test]
-    fn same_field_different_structs_compiles() {
+    fn same_field_different_structs_compiles_and_verified() {
         Test::new(
             r#"module Test
             struct First {
@@ -225,7 +241,11 @@ mod duplicate_symbol {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("First").is(SymbolKind::Struct))
+        .expect(Symbol::new("First").has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Second").is(SymbolKind::Struct))
+        .expect(Symbol::new("Second").has(Behavior::FieldCount(1)));
     }
 }
 
@@ -249,7 +269,7 @@ mod visibility_consistency {
     }
 
     #[test]
-    fn public_function_with_private_return_errors() {
+    fn public_function_with_private_return_type_errors() {
         Test::new(
             r#"module Test
             private struct Secret { }
@@ -260,7 +280,7 @@ mod visibility_consistency {
     }
 
     #[test]
-    fn public_function_with_private_param_errors() {
+    fn public_function_with_private_parameter_type_errors() {
         Test::new(
             r#"module Test
             private struct Secret { }
@@ -271,7 +291,7 @@ mod visibility_consistency {
     }
 
     #[test]
-    fn internal_function_with_private_return_compiles() {
+    fn internal_function_with_private_return_type_compiles_and_verified() {
         // Internal function can use private types within same scope
         Test::new(
             r#"module Test
@@ -279,7 +299,9 @@ mod visibility_consistency {
             func helper() -> Internal { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("helper").is(SymbolKind::Function))
+        .expect(Symbol::new("helper").has(Behavior::Visibility(Visibility::Internal)));
     }
 
     #[test]
@@ -311,24 +333,26 @@ mod module_resolution {
     use super::*;
 
     #[test]
-    fn submodule_type_resolution() {
+    fn nested_module_struct_compiles_and_verified() {
         Test::new(
             r#"module Outer.Inner
             struct NestedType { }
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("NestedType").is(SymbolKind::Struct));
+        .expect(Symbol::new("NestedType").is(SymbolKind::Struct))
+        .expect(Symbol::new("NestedType").has(Behavior::FieldCount(0)));
     }
 
     #[test]
-    fn deeply_nested_module() {
+    fn deeply_nested_module_struct_compiles_and_verified() {
         Test::new(
             r#"module A.B.C.D
             struct DeepType { }
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("DeepType").is(SymbolKind::Struct));
+        .expect(Symbol::new("DeepType").is(SymbolKind::Struct))
+        .expect(Symbol::new("DeepType").has(Behavior::FieldCount(0)));
     }
 }

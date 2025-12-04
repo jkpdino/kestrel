@@ -8,8 +8,8 @@ mod assignment_expressions {
     use super::*;
 
     #[test]
-    fn assign_to_var() {
-        // Basic assignment to a mutable variable
+    fn basic_assignment_to_var() {
+        // Basic assignment to a mutable variable with int literals
         Test::new(
             r#"
 module Main
@@ -21,12 +21,15 @@ func test() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::ParameterCount(0))
+            .has(Behavior::HasBody(true)));
     }
 
     #[test]
-    fn assign_expression_value() {
-        // Assign result of function call
+    fn assignment_with_function_call_result() {
+        // Assign result of function call to variable, verify both functions
         Test::new(
             r#"
 module Main
@@ -40,12 +43,18 @@ func test() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("getValue").is(SymbolKind::Function)
+            .has(Behavior::ParameterCount(0))
+            .has(Behavior::HasBody(true)))
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::ParameterCount(0))
+            .has(Behavior::HasBody(true)));
     }
 
     #[test]
-    fn assign_with_complex_rhs() {
-        // Assign an array literal
+    fn assignment_with_array_literal() {
+        // Assign an array literal to array variable
         Test::new(
             r#"
 module Main
@@ -57,12 +66,15 @@ func test() -> [Int] {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::ParameterCount(0))
+            .has(Behavior::HasBody(true)));
     }
 
     #[test]
-    fn multiple_assignments() {
-        // Multiple sequential assignments
+    fn multiple_sequential_assignments() {
+        // Multiple sequential assignments to same variable
         Test::new(
             r#"
 module Main
@@ -76,12 +88,15 @@ func test() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::ParameterCount(0))
+            .has(Behavior::HasBody(true)));
     }
 
     #[test]
-    fn assign_parameter_to_var() {
-        // Assign a parameter value to a variable
+    fn assignment_from_function_parameter() {
+        // Assign a function parameter value to a local variable
         Test::new(
             r#"
 module Main
@@ -93,6 +108,53 @@ func test(value: Int) -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::ParameterCount(1))
+            .has(Behavior::HasBody(true)));
+    }
+
+    #[test]
+    fn assignment_with_string_value() {
+        // Assignment with string literal
+        Test::new(
+            r#"
+module Main
+
+func test() -> String {
+    var msg: String = "";
+    msg = "hello";
+    msg
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::ParameterCount(0))
+            .has(Behavior::HasBody(true)));
+    }
+
+    #[test]
+    fn chained_assignments_with_different_types() {
+        // Assignments with various types in sequence
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    var num: Int = 0;
+    num = 42;
+    var text: String = "";
+    text = "assigned";
+    var items: [Int] = [];
+    items = [1, 2];
+    num
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::ParameterCount(0))
+            .has(Behavior::HasBody(true)));
     }
 }

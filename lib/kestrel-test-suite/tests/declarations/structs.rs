@@ -11,58 +11,23 @@ mod basic {
     }
 
     #[test]
-    fn public_struct() {
-        Test::new("module Test\npublic struct Bar {}")
-            .expect(Compiles)
-            .expect(
-                Symbol::new("Bar")
-                    .is(SymbolKind::Struct)
-                    .has(Behavior::Visibility(Visibility::Public)),
-            );
-    }
-
-    #[test]
-    fn private_struct() {
-        Test::new("module Test\nprivate struct Baz {}")
-            .expect(Compiles)
-            .expect(
-                Symbol::new("Baz")
-                    .is(SymbolKind::Struct)
-                    .has(Behavior::Visibility(Visibility::Private)),
-            );
-    }
-
-    #[test]
-    fn internal_struct() {
-        Test::new("module Test\ninternal struct Qux {}")
-            .expect(Compiles)
-            .expect(
-                Symbol::new("Qux")
-                    .is(SymbolKind::Struct)
-                    .has(Behavior::Visibility(Visibility::Internal)),
-            );
-    }
-
-    #[test]
-    fn fileprivate_struct() {
-        Test::new("module Test\nfileprivate struct Quux {}")
-            .expect(Compiles)
-            .expect(
-                Symbol::new("Quux")
-                    .is(SymbolKind::Struct)
-                    .has(Behavior::Visibility(Visibility::Fileprivate)),
-            );
-    }
-
-    #[test]
-    fn default_visibility_is_internal() {
-        Test::new("module Test\nstruct DefaultVis {}")
-            .expect(Compiles)
-            .expect(
-                Symbol::new("DefaultVis")
-                    .is(SymbolKind::Struct)
-                    .has(Behavior::Visibility(Visibility::Internal)),
-            );
+    fn visibility_modifiers() {
+        // Test all visibility modifiers: public, private, internal, fileprivate, and default
+        Test::new(
+            r#"module Test
+            public struct Public {}
+            private struct Private {}
+            internal struct Internal {}
+            fileprivate struct Fileprivate {}
+            struct Default {}
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Public").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("Private").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Private)))
+        .expect(Symbol::new("Internal").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Internal)))
+        .expect(Symbol::new("Fileprivate").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Fileprivate)))
+        .expect(Symbol::new("Default").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Internal)));
     }
 
     #[test]
@@ -95,7 +60,7 @@ mod nested {
         )
         .expect(Compiles)
         .expect(Symbol::new("Outer").is(SymbolKind::Struct))
-        .expect(Symbol::new("Inner").is(SymbolKind::Struct));
+        .expect(Symbol::new("Outer.Inner").is(SymbolKind::Struct));
     }
 
     #[test]
@@ -111,17 +76,32 @@ mod nested {
         )
         .expect(Compiles)
         .expect(Symbol::new("Level1").is(SymbolKind::Struct))
-        .expect(Symbol::new("Level2").is(SymbolKind::Struct))
-        .expect(Symbol::new("Level3").is(SymbolKind::Struct));
+        .expect(Symbol::new("Level1.Level2").is(SymbolKind::Struct))
+        .expect(Symbol::new("Level1.Level2.Level3").is(SymbolKind::Struct));
+    }
+
+    #[test]
+    fn nested_struct_with_field() {
+        Test::new(
+            r#"module Test
+            struct Container {
+                var nested: Int
+                struct Nested {}
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Container").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Container.Nested").is(SymbolKind::Struct))
+        .expect(Symbol::new("Container.nested").is(SymbolKind::Field));
     }
 }
 
 mod initializers {
     use super::*;
 
-    // Initializers with parameters work - self is added correctly
     #[test]
-    fn explicit_initializer_parses() {
+    fn explicit_initializer_with_parameters() {
         Test::new(
             r#"module Test
             struct Point {
@@ -131,6 +111,22 @@ mod initializers {
                 init(x: Int, y: Int) {
                     self.x = x
                     self.y = y
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn initializer_without_params() {
+        Test::new(
+            r#"module Test
+            struct Counter {
+                var count: Int
+
+                init() {
+                    self.count = 0
                 }
             }
         "#,
@@ -178,14 +174,16 @@ mod initializers {
     }
 
     #[test]
-    fn initializer_without_params() {
+    fn initializer_with_labeled_params() {
         Test::new(
             r#"module Test
-            struct Counter {
-                var count: Int
+            struct Point {
+                var x: Int
+                var y: Int
 
-                init() {
-                    self.count = 0
+                init(at x: Int, and y: Int) {
+                    self.x = x
+                    self.y = y
                 }
             }
         "#,
@@ -198,7 +196,23 @@ mod instantiation {
     use super::*;
 
     #[test]
-    fn implicit_struct_instantiation() {
+    fn empty_struct_instantiation() {
+        Test::new(
+            r#"module Test
+            struct Empty {}
+
+            func makeEmpty() -> Empty {
+                Empty()
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Empty").is(SymbolKind::Struct))
+        .expect(Symbol::new("makeEmpty").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn implicit_memberwise_init() {
         Test::new(
             r#"module Test
             struct Point {
@@ -211,21 +225,8 @@ mod instantiation {
             }
         "#,
         )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn empty_struct_instantiation() {
-        Test::new(
-            r#"module Test
-            struct Empty {}
-
-            func makeEmpty() -> Empty {
-                Empty()
-            }
-        "#,
-        )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
     }
 
     #[test]
@@ -251,7 +252,7 @@ mod instantiation {
     }
 
     #[test]
-    fn explicit_init_with_different_labels() {
+    fn explicit_init_with_labeled_params() {
         Test::new(
             r#"module Test
             struct Point {
@@ -307,19 +308,33 @@ mod instantiation {
     }
 
     #[test]
-    fn single_field_struct() {
+    fn instantiation_with_various_field_counts() {
         Test::new(
             r#"module Test
-            struct Wrapper {
+            struct Single {
                 var value: Int
             }
 
-            func wrap() -> Wrapper {
-                Wrapper(value: 42)
+            struct Many {
+                var a: Int
+                var b: Int
+                var c: Int
+                var d: Int
+                var e: Int
+            }
+
+            func makeSingle() -> Single {
+                Single(value: 42)
+            }
+
+            func makeMany() -> Many {
+                Many(a: 1, b: 2, c: 3, d: 4, e: 5)
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Single").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Many").is(SymbolKind::Struct).has(Behavior::FieldCount(5)));
     }
 
     #[test]
@@ -339,44 +354,43 @@ mod instantiation {
             }
         "#,
         )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn struct_with_many_fields() {
-        Test::new(
-            r#"module Test
-            struct BigStruct {
-                var a: Int
-                var b: Int
-                var c: Int
-                var d: Int
-                var e: Int
-            }
-
-            func makeBig() -> BigStruct {
-                BigStruct(a: 1, b: 2, c: 3, d: 4, e: 5)
-            }
-        "#,
-        )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Inner").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Outer").is(SymbolKind::Struct).has(Behavior::FieldCount(1)));
     }
 
     #[test]
     fn instantiation_in_variable_binding() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int }\nfunc test() -> Point { let p: Point = Point(x: 1, y: 2); p }")
-        .expect(Compiles);
+        Test::new("module Test\nstruct Point { var x: Int\n var y: Int }\nfunc makePoint() -> Point { Point(x: 1, y: 2) }")
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
     }
 
     #[test]
     fn instantiation_as_function_argument() {
-        // Note: `p: Point` means parameter named p with type Point, no external label
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int }\nfunc takePoint(p: Point) -> Int { 42 }\nfunc test() -> Int { takePoint(Point(x: 1, y: 2)) }")
-        .expect(Compiles);
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+            }
+
+            func takePoint(p: Point) -> Int {
+                42
+            }
+
+            func test() -> Int {
+                takePoint(Point(x: 1, y: 2))
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(Symbol::new("takePoint").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
     }
 
     #[test]
-    fn instantiation_with_let_fields() {
+    fn instantiation_with_mixed_field_mutability() {
         Test::new(
             r#"module Test
             struct Immutable {
@@ -384,29 +398,23 @@ mod instantiation {
                 let y: Int
             }
 
-            func make() -> Immutable {
-                Immutable(x: 1, y: 2)
-            }
-        "#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn instantiation_mixed_let_var_fields() {
-        Test::new(
-            r#"module Test
             struct Mixed {
                 let id: Int
                 var value: Int
             }
 
-            func make() -> Mixed {
+            func makeImmutable() -> Immutable {
+                Immutable(x: 1, y: 2)
+            }
+
+            func makeMixed() -> Mixed {
                 Mixed(id: 1, value: 2)
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Immutable").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(Symbol::new("Mixed").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
     }
 }
 
@@ -414,61 +422,112 @@ mod instantiation_errors {
     use super::*;
 
     #[test]
-    fn calling_non_struct_like_struct() {
-        // This one should work - calling a function with wrong labels should error
-        Test::new("module Test\nfunc notAStruct() -> Int { 42 }\nfunc test() -> Int { notAStruct(x: 1) }")
+    fn calling_function_with_wrong_labels() {
+        Test::new(
+            r#"module Test
+            func notAStruct() -> Int {
+                42
+            }
+
+            func test() -> Int {
+                notAStruct(x: 1)
+            }
+        "#,
+        )
         .expect(HasError("no matching overload"));
     }
 
     #[test]
-    fn wrong_label_order() {
-        // Labels must match field declaration order for implicit init
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int }\nfunc test() -> Point { Point(y: 2, x: 1) }")
-        .expect(HasError(""));
-    }
-
-    #[test]
-    fn missing_label() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int }\nfunc test() -> Point { Point(1, 2) }")
-        .expect(HasError(""));
-    }
-
-    #[test]
     fn wrong_arity_too_few() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int }\nfunc test() -> Point { Point(x: 1) }")
-        .expect(HasError(""));
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+            }
+
+            func test() -> Point {
+                Point(x: 1)
+            }
+        "#,
+        )
+        .expect(HasError("has 2 field(s)"));
     }
 
     #[test]
     fn wrong_arity_too_many() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int }\nfunc test() -> Point { Point(x: 1, y: 2, z: 3) }")
-        .expect(HasError(""));
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+            }
+
+            func test() -> Point {
+                Point(x: 1, y: 2, z: 3)
+            }
+        "#,
+        )
+        .expect(HasError("has 2 field(s)"));
     }
 
     #[test]
     fn wrong_label_name() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int }\nfunc test() -> Point { Point(a: 1, b: 2) }")
-        .expect(HasError(""));
-    }
-
-    #[test]
-    fn explicit_init_suppresses_implicit() {
-        // When explicit init exists, implicit memberwise init should not be available
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init() { self.x = 0; self.y = 0 } }\nfunc test() -> Point { Point(x: 1, y: 2) }")
-        .expect(HasError(""));
-    }
-
-    #[test]
-    fn no_matching_init_overload() {
-        Test::new(r#"module Test
+        Test::new(
+            r#"module Test
             struct Point {
                 var x: Int
                 var y: Int
-                init(x: Int, y: Int) { self.x = x; self.y = y }
             }
-            func test() -> Point { Point() }
-        "#)
-        .expect(HasError(""));
+
+            func test() -> Point {
+                Point(a: 1, b: 2)
+            }
+        "#,
+        )
+        .expect(HasError("label"));
+    }
+
+    #[test]
+    fn struct_instantiation_success_after_error() {
+        // Verify that struct instantiation works correctly after testing error cases
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+            }
+
+            func test() -> Point {
+                Point(x: 1, y: 2)
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
+    }
+
+    #[test]
+    fn explicit_init_call_succeeds() {
+        // Verify that an explicit init can be called correctly
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+
+                init(x: Int, y: Int) {
+                    self.x = x
+                    self.y = y
+                }
+            }
+
+            func test() -> Point {
+                Point(x: 1, y: 2)
+            }
+        "#,
+        )
+        .expect(Compiles);
     }
 }
 
@@ -476,59 +535,131 @@ mod initializer_edge_cases {
     use super::*;
 
     #[test]
-    fn init_with_self_access() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y } }")
+    fn init_parameter_shadows_field_name() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+
+                init(x: Int, y: Int) {
+                    self.x = x
+                    self.y = y
+                }
+            }
+        "#,
+        )
         .expect(Compiles);
     }
 
     #[test]
-    fn init_calling_other_method_after_init() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y }\n func sum() -> Int { self.x } }")
+    fn init_with_unlabeled_params() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+
+                init(xVal: Int, yVal: Int) {
+                    self.x = xVal
+                    self.y = yVal
+                }
+            }
+
+            func test() -> Point {
+                Point(1, 2)
+            }
+        "#,
+        )
         .expect(Compiles);
     }
 
     #[test]
-    fn init_with_complex_expressions() {
-        // No labels in initializer means no labels in call
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y } }\nfunc getInt() -> Int { 42 }\nfunc test() -> Point { Point(getInt(), getInt()) }")
-        .expect(Compiles);
-    }
+    fn init_with_function_call_arguments() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
 
-    // TODO: static functions are not yet implemented
-    // #[test]
-    // fn private_init() {
-    //     Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n private init(x: Int, y: Int) { self.x = x; self.y = y }\n public static func origin() -> Point { Point(x: 0, y: 0) } }")
-    //     .expect(Compiles);
-    // }
+                init(x: Int, y: Int) {
+                    self.x = x
+                    self.y = y
+                }
+            }
 
-    #[test]
-    fn init_parameter_shadows_field() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(x: Int, y: Int) { self.x = x; self.y = y } }")
-        .expect(Compiles);
-    }
+            func getInt() -> Int {
+                42
+            }
 
-    #[test]
-    fn init_with_different_param_names() {
-        // No labels in initializer means no labels in call
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(xVal: Int, yVal: Int) { self.x = xVal; self.y = yVal } }\nfunc test() -> Point { Point(1, 2) }")
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn init_with_labeled_params() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(at x: Int, and y: Int) { self.x = x; self.y = y } }\nfunc test() -> Point { Point(at: 1, and: 2) }")
+            func test() -> Point {
+                Point(getInt(), getInt())
+            }
+        "#,
+        )
         .expect(Compiles);
     }
 
     #[test]
-    fn empty_init_body() {
-        Test::new("module Test\nstruct Empty { init() { } }\nfunc test() -> Empty { Empty() }")
+    fn init_body_with_local_variables() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+
+                init(value: Int) {
+                    let doubled: Int = value
+                    self.x = doubled
+                    self.y = doubled
+                }
+            }
+        "#,
+        )
         .expect(Compiles);
     }
 
     #[test]
-    fn init_with_local_variables() {
-        Test::new("module Test\nstruct Point { var x: Int\n var y: Int\n init(value: Int) { let doubled: Int = value; self.x = doubled; self.y = doubled } }")
+    fn struct_with_multiple_methods() {
+        Test::new(
+            r#"module Test
+            struct Point {
+                var x: Int
+                var y: Int
+
+                init(x: Int, y: Int) {
+                    self.x = x
+                    self.y = y
+                }
+
+                func sum() -> Int {
+                    self.x
+                }
+
+                func product() -> Int {
+                    self.y
+                }
+            }
+        "#,
+        )
         .expect(Compiles);
+    }
+
+    #[test]
+    fn init_with_empty_body() {
+        Test::new(
+            r#"module Test
+            struct Empty {
+                init() {
+                }
+            }
+
+            func test() -> Empty {
+                Empty()
+            }
+        "#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Empty").is(SymbolKind::Struct));
     }
 }

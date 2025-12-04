@@ -22,7 +22,8 @@ struct Node {
 }
 "#,
         )
-        .expect(HasError("cannot contain itself"));
+        .expect(HasError("cannot contain itself"))
+        .expect(HasError("Node"));
     }
 
     #[test]
@@ -68,21 +69,6 @@ struct C {
     }
 
     #[test]
-    fn array_breaks_cycle() {
-        // Arrays use indirection, so this should be allowed
-        Test::new(
-            r#"
-module Main
-
-struct Node {
-    let children: [Node]
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
     fn tuple_with_cycle_error() {
         // Tuple containing struct that references parent
         Test::new(
@@ -102,8 +88,41 @@ struct B {
     }
 
     #[test]
-    fn no_cycle_different_structs() {
-        // Structs referencing each other but no cycle
+    fn array_breaks_cycle() {
+        // Arrays use indirection, so this should be allowed
+        Test::new(
+            r#"
+module Main
+
+struct Node {
+    let children: [Node]
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("Node").is(SymbolKind::Struct).has(Behavior::FieldCount(1)));
+    }
+
+    #[test]
+    fn self_reference_in_array_ok() {
+        // Self-reference through array is ok (indirect)
+        Test::new(
+            r#"
+module Main
+
+struct TreeNode {
+    let value: Int
+    let children: [TreeNode]
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("TreeNode").is(SymbolKind::Struct).has(Behavior::FieldCount(2)));
+    }
+
+    #[test]
+    fn no_cycle_acyclic_references() {
+        // Structs referencing each other but no cycle (Point <- Line, Point <- Triangle)
         Test::new(
             r#"
 module Main
@@ -125,12 +144,15 @@ struct Triangle {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(Symbol::new("Line").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(Symbol::new("Triangle").is(SymbolKind::Struct).has(Behavior::FieldCount(3)));
     }
 
     #[test]
-    fn nested_structs_no_cycle() {
-        // Deep nesting but no cycle
+    fn nested_structs_valid_chain() {
+        // Deep nesting with no cycle: Inner <- Middle <- Outer
         Test::new(
             r#"
 module Main
@@ -148,23 +170,10 @@ struct Outer {
 }
 "#,
         )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn self_reference_in_array_ok() {
-        // Self-reference through array is ok (indirect)
-        Test::new(
-            r#"
-module Main
-
-struct TreeNode {
-    let value: Int
-    let children: [TreeNode]
-}
-"#,
-        )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Inner").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Middle").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Outer").is(SymbolKind::Struct).has(Behavior::FieldCount(1)));
     }
 }
 
@@ -193,7 +202,8 @@ func swap[T: Container[U], U: Container[T]](a: T, b: U) -> () {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Container").is(SymbolKind::Protocol).has(Behavior::TypeParamCount(1)));
     }
 
     #[test]
@@ -216,12 +226,14 @@ func process[T: Printable, U: Comparable](a: T, b: U) -> () {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Printable").is(SymbolKind::Protocol))
+        .expect(Symbol::new("Comparable").is(SymbolKind::Protocol));
     }
 
     #[test]
-    fn single_constraint_no_cycle() {
-        // Single constraint, no cycle possible
+    fn single_constraint_generic_struct() {
+        // Single constraint with generic struct, no cycle possible
         Test::new(
             r#"
 module Main
@@ -231,18 +243,17 @@ protocol Hashable {
 }
 
 struct Set[T: Hashable] {
+    let items: [T]
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Hashable").is(SymbolKind::Protocol));
     }
 }
 
 mod protocol_inheritance_cycles {
     use super::*;
-
-    // Note: Protocol inheritance cycles are tested through conformances
-    // which may already have coverage in protocols.rs
 
     #[test]
     fn direct_protocol_self_inheritance() {
@@ -303,7 +314,7 @@ protocol C: A {
 
     #[test]
     fn linear_protocol_inheritance_ok() {
-        // Linear chain, no cycle
+        // Linear chain, no cycle: Base <- Middle <- Derived
         Test::new(
             r#"
 module Main
@@ -321,12 +332,15 @@ protocol Derived: Middle {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Base").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(0)))
+        .expect(Symbol::new("Middle").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(1)))
+        .expect(Symbol::new("Derived").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(1)));
     }
 
     #[test]
     fn diamond_inheritance_ok() {
-        // Diamond pattern (A <- B, A <- C, B & C <- D) is not a cycle
+        // Diamond pattern (A <- B, A <- C) is not a cycle
         Test::new(
             r#"
 module Main
@@ -344,6 +358,9 @@ protocol C: A {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("A").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(0)))
+        .expect(Symbol::new("B").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(1)))
+        .expect(Symbol::new("C").is(SymbolKind::Protocol).has(Behavior::ConformanceCount(1)));
     }
 }

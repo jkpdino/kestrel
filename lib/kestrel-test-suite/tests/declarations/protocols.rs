@@ -7,7 +7,11 @@ mod basic {
     fn empty_protocol() {
         Test::new("module Test\nprotocol Drawable { }")
             .expect(Compiles)
-            .expect(Symbol::new("Drawable").is(SymbolKind::Protocol));
+            .expect(
+                Symbol::new("Drawable")
+                    .is(SymbolKind::Protocol)
+                    .has(Behavior::ChildCount(0))
+            );
     }
 
     #[test]
@@ -17,12 +21,13 @@ mod basic {
             .expect(
                 Symbol::new("Equatable")
                     .is(SymbolKind::Protocol)
-                    .has(Behavior::Visibility(Visibility::Public)),
+                    .has(Behavior::Visibility(Visibility::Public))
+                    .has(Behavior::ChildCount(0))
             );
     }
 
     #[test]
-    fn protocol_with_method() {
+    fn protocol_with_single_method() {
         Test::new(
             r#"module Test
             protocol Hashable {
@@ -31,8 +36,17 @@ mod basic {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Hashable").is(SymbolKind::Protocol))
-        .expect(Symbol::new("hash").is(SymbolKind::Function));
+        .expect(
+            Symbol::new("Hashable")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ChildCount(1))
+        )
+        .expect(
+            Symbol::new("Hashable.hash")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(false))
+        );
     }
 
     #[test]
@@ -47,10 +61,26 @@ mod basic {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Comparable").is(SymbolKind::Protocol))
-        .expect(Symbol::new("lessThan").is(SymbolKind::Function))
-        .expect(Symbol::new("greaterThan").is(SymbolKind::Function))
-        .expect(Symbol::new("equals").is(SymbolKind::Function));
+        .expect(
+            Symbol::new("Comparable")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ChildCount(3))
+        )
+        .expect(
+            Symbol::new("Comparable.lessThan")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1))
+        )
+        .expect(
+            Symbol::new("Comparable.greaterThan")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1))
+        )
+        .expect(
+            Symbol::new("Comparable.equals")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1))
+        );
     }
 }
 
@@ -67,7 +97,11 @@ mod conformance {
         )
         .expect(Compiles)
         .expect(Symbol::new("Drawable").is(SymbolKind::Protocol))
-        .expect(Symbol::new("Point").is(SymbolKind::Struct));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::ConformanceCount(1))
+        );
     }
 
     #[test]
@@ -80,11 +114,15 @@ mod conformance {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct));
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::ConformanceCount(2))
+        );
     }
 
     #[test]
-    fn struct_with_conformance_and_type_params() {
+    fn generic_struct_with_conformance() {
         Test::new(
             r#"module Test
             protocol Container[T] { }
@@ -92,11 +130,22 @@ mod conformance {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").is(SymbolKind::Struct));
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::ConformanceCount(1))
+        )
+        .expect(
+            Symbol::new("Container")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::TypeParamCount(1))
+        );
     }
 
     #[test]
-    fn struct_with_conformance_and_where_clause() {
+    fn generic_struct_with_conformance_and_where_clause() {
         Test::new(
             r#"module Test
             protocol Equatable { }
@@ -105,7 +154,13 @@ mod conformance {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Set").is(SymbolKind::Struct));
+        .expect(
+            Symbol::new("Set")
+                .is(SymbolKind::Struct)
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::ConformanceCount(1))
+        );
     }
 }
 
@@ -122,7 +177,11 @@ mod inheritance {
         )
         .expect(Compiles)
         .expect(Symbol::new("Drawable").is(SymbolKind::Protocol))
-        .expect(Symbol::new("Shape").is(SymbolKind::Protocol));
+        .expect(
+            Symbol::new("Shape")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ConformanceCount(1))
+        );
     }
 
     #[test]
@@ -135,11 +194,16 @@ mod inheritance {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Widget").is(SymbolKind::Protocol));
+        .expect(
+            Symbol::new("Widget")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ConformanceCount(2))
+                .has(Behavior::ChildCount(0))
+        );
     }
 
     #[test]
-    fn protocol_with_methods_and_inheritance() {
+    fn protocol_with_inherited_method_and_own_method() {
         Test::new(
             r#"module Test
             protocol Drawable {
@@ -151,8 +215,18 @@ mod inheritance {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Shape").is(SymbolKind::Protocol))
-        .expect(Symbol::new("area").is(SymbolKind::Function));
+        .expect(
+            Symbol::new("Shape")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ChildCount(1))
+        )
+        .expect(
+            Symbol::new("Shape.area")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(false))
+        );
     }
 
     #[test]
@@ -164,7 +238,13 @@ mod inheritance {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Sortable").is(SymbolKind::Protocol));
+        .expect(
+            Symbol::new("Sortable")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::ConformanceCount(1))
+        );
     }
 }
 
@@ -184,7 +264,18 @@ mod validation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Circle").is(SymbolKind::Struct));
+        .expect(
+            Symbol::new("Circle")
+                .is(SymbolKind::Struct)
+                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ChildCount(1))
+        )
+        .expect(
+            Symbol::new("Circle.draw")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(0))
+                .has(Behavior::HasBody(true))
+        );
     }
 
     #[test]
@@ -201,7 +292,7 @@ mod validation {
     }
 
     #[test]
-    fn struct_implements_multiple_methods() {
+    fn struct_implements_all_protocol_methods() {
         Test::new(
             r#"module Test
             protocol Comparable {
@@ -214,7 +305,23 @@ mod validation {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Number")
+                .is(SymbolKind::Struct)
+                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ChildCount(2))
+        )
+        .expect(
+            Symbol::new("Number.lessThan")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1))
+        )
+        .expect(
+            Symbol::new("Number.equals")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1))
+        );
     }
 
     #[test]
@@ -249,7 +356,13 @@ mod validation {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Circle")
+                .is(SymbolKind::Struct)
+                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ChildCount(2))
+        );
     }
 
     #[test]
@@ -301,7 +414,7 @@ mod validation {
     }
 
     #[test]
-    fn struct_implements_from_multiple_conformances() {
+    fn struct_implements_multiple_protocol_conformances() {
         Test::new(
             r#"module Test
             protocol Drawable {
@@ -316,7 +429,15 @@ mod validation {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Button")
+                .is(SymbolKind::Struct)
+                .has(Behavior::ConformanceCount(2))
+                .has(Behavior::ChildCount(2))
+        )
+        .expect(Symbol::new("Button.draw").is(SymbolKind::Function))
+        .expect(Symbol::new("Button.onClick").is(SymbolKind::Function));
     }
 
     #[test]
@@ -338,14 +459,20 @@ mod validation {
     }
 
     #[test]
-    fn empty_protocol_requires_no_methods() {
+    fn empty_protocol_conformance_requires_no_methods() {
         Test::new(
             r#"module Test
             protocol Marker { }
             struct Point: Marker { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Point")
+                .is(SymbolKind::Struct)
+                .has(Behavior::ConformanceCount(1))
+                .has(Behavior::ChildCount(0))
+        );
     }
 
     #[test]
@@ -360,7 +487,17 @@ mod validation {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Person")
+                .is(SymbolKind::Struct)
+                .has(Behavior::ConformanceCount(1))
+        )
+        .expect(
+            Symbol::new("Person.greet")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1))
+        );
     }
 
     #[test]

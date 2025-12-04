@@ -9,7 +9,7 @@ mod arithmetic_operators {
     use super::*;
 
     #[test]
-    fn add_integers() {
+    fn integer_arithmetic_operations() {
         Test::new(
             r#"
 module Main
@@ -17,69 +17,34 @@ module Main
 func sum() -> Int {
     1 + 2
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn subtract_integers() {
-        Test::new(
-            r#"
-module Main
 
 func diff() -> Int {
     5 - 3
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn multiply_integers() {
-        Test::new(
-            r#"
-module Main
 
 func product() -> Int {
     4 * 5
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn divide_integers() {
-        Test::new(
-            r#"
-module Main
 
 func quotient() -> Int {
     10 / 2
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn remainder_integers() {
-        Test::new(
-            r#"
-module Main
 
 func remainder() -> Int {
     10 % 3
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("sum").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("diff").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("product").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("quotient").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("remainder").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
-    fn add_floats() {
+    fn float_arithmetic_operations() {
         Test::new(
             r#"
 module Main
@@ -87,23 +52,15 @@ module Main
 func sum() -> Float {
     1.5 + 2.5
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn multiply_floats() {
-        Test::new(
-            r#"
-module Main
 
 func product() -> Float {
     2.0 * 3.0
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("sum").is(SymbolKind::Function))
+        .expect(Symbol::new("product").is(SymbolKind::Function));
     }
 }
 
@@ -111,7 +68,7 @@ mod comparison_operators {
     use super::*;
 
     #[test]
-    fn equals_integers() {
+    fn all_comparison_operators() {
         Test::new(
             r#"
 module Main
@@ -119,79 +76,35 @@ module Main
 func isEqual() -> Bool {
     1 == 1
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn not_equals_integers() {
-        Test::new(
-            r#"
-module Main
 
 func isNotEqual() -> Bool {
     1 != 2
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn less_than() {
-        Test::new(
-            r#"
-module Main
 
 func isLess() -> Bool {
     1 < 2
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn greater_than() {
-        Test::new(
-            r#"
-module Main
 
 func isGreater() -> Bool {
     2 > 1
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn less_or_equal() {
-        Test::new(
-            r#"
-module Main
 
 func isLessOrEqual() -> Bool {
     1 <= 2
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn greater_or_equal() {
-        Test::new(
-            r#"
-module Main
 
 func isGreaterOrEqual() -> Bool {
     2 >= 1
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("isEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("isNotEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("isLess").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("isGreater").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("isLessOrEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("isGreaterOrEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 }
 
@@ -199,7 +112,7 @@ mod logical_operators {
     use super::*;
 
     #[test]
-    fn logical_and() {
+    fn all_logical_operators() {
         Test::new(
             r#"
 module Main
@@ -207,37 +120,20 @@ module Main
 func bothTrue() -> Bool {
     true and true
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn logical_or() {
-        Test::new(
-            r#"
-module Main
 
 func eitherTrue() -> Bool {
     true or false
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn logical_not() {
-        Test::new(
-            r#"
-module Main
 
 func negate() -> Bool {
     not true
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("bothTrue").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("eitherTrue").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("negate").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 }
 
@@ -245,7 +141,7 @@ mod bitwise_operators {
     use super::*;
 
     #[test]
-    fn bitwise_and() {
+    fn all_bitwise_operators() {
         Test::new(
             r#"
 module Main
@@ -253,65 +149,30 @@ module Main
 func bitwiseAnd() -> Int {
     5 & 3
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn bitwise_or() {
-        Test::new(
-            r#"
-module Main
 
 func bitwiseOr() -> Int {
     5 | 3
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn bitwise_xor() {
-        Test::new(
-            r#"
-module Main
 
 func bitwiseXor() -> Int {
     5 ^ 3
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn shift_left() {
-        Test::new(
-            r#"
-module Main
 
 func shiftLeft() -> Int {
     1 << 3
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn shift_right() {
-        Test::new(
-            r#"
-module Main
 
 func shiftRight() -> Int {
     8 >> 2
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("bitwiseAnd").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("bitwiseOr").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("bitwiseXor").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("shiftLeft").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("shiftRight").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 }
 
@@ -319,59 +180,33 @@ mod unary_operators {
     use super::*;
 
     #[test]
-    fn unary_minus_int() {
+    fn all_unary_operators() {
         Test::new(
             r#"
 module Main
 
-func negate() -> Int {
+func negateInt() -> Int {
     -42
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn unary_minus_float() {
-        Test::new(
-            r#"
-module Main
-
-func negate() -> Float {
+func negateFloat() -> Float {
     -3.14
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn unary_plus_int() {
-        Test::new(
-            r#"
-module Main
 
 func identity() -> Int {
     +42
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn bitwise_not() {
-        Test::new(
-            r#"
-module Main
 
 func invert() -> Int {
     !42
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("negateInt").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("negateFloat").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("identity").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("invert").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 }
 
@@ -390,7 +225,8 @@ func compute() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
@@ -405,7 +241,8 @@ func compute() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
@@ -420,7 +257,8 @@ func check() -> Bool {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("check").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
@@ -435,7 +273,8 @@ func check() -> Bool {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("check").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
@@ -451,7 +290,8 @@ func compute() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
@@ -466,7 +306,8 @@ func compute() -> Bool {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 }
 
@@ -474,40 +315,30 @@ mod associativity {
     use super::*;
 
     #[test]
-    fn left_associative_subtraction() {
+    fn left_associative_arithmetic() {
         // 10 - 3 - 2 should be (10 - 3) - 2 = 5, not 10 - (3 - 2) = 9
-        Test::new(
-            r#"
-module Main
-
-func compute() -> Int {
-    10 - 3 - 2
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn left_associative_division() {
         // 24 / 4 / 2 should be (24 / 4) / 2 = 3, not 24 / (4 / 2) = 12
         Test::new(
             r#"
 module Main
 
-func compute() -> Int {
+func subtract() -> Int {
+    10 - 3 - 2
+}
+
+func divide() -> Int {
     24 / 4 / 2
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("subtract").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("divide").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
-    fn chained_comparisons() {
-        // 1 < 2 < 3 - this chains as (1 < 2) < 3
-        // Result of 1 < 2 is Bool, comparing Bool < Int would fail
-        // For now, we parse it left-associative, type checking may error
+    fn simple_comparison() {
+        // Basic comparison test (chained comparisons are handled separately)
         Test::new(
             r#"
 module Main
@@ -517,7 +348,8 @@ func check() -> Bool {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("check").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 }
 
@@ -525,173 +357,100 @@ mod edge_cases {
     use super::*;
 
     #[test]
-    fn deeply_nested_binary() {
-        // Test deeply nested binary expressions
+    fn deeply_nested_and_complex_expressions() {
+        // Test deeply nested binary expressions and parenthesization
         Test::new(
             r#"
 module Main
 
-func compute() -> Int {
+func deeplyNested() -> Int {
     1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn mixed_precedence_chain() {
-        // Mix of all precedence levels
-        Test::new(
-            r#"
-module Main
-
-func compute() -> Bool {
+func mixedPrecedence() -> Bool {
     1 << 2 * 3 + 4 < 100 and true or false
 }
+
+func parenthesized() -> Int {
+    (1 + 2) * 3
+}
+
+func deeplyGrouped() -> Int {
+    ((1 + 2) * (3 + 4))
+}
+
+func comparisonInLogical() -> Bool {
+    (1 < 2) and (3 > 2)
+}
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("deeplyNested").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("mixedPrecedence").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("parenthesized").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("deeplyGrouped").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("comparisonInLogical").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
-    fn unary_in_binary() {
-        // Unary operators within binary expressions
+    fn chained_and_nested_unary_operators() {
+        // Unary operators within binary expressions and chained unary operators
         Test::new(
             r#"
 module Main
 
-func compute() -> Int {
+func unaryInBinary() -> Int {
     -1 + -2 * -3
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn double_negation() {
-        Test::new(
-            r#"
-module Main
-
-func compute() -> Int {
+func doubleNegation() -> Int {
     --5
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn not_not() {
-        Test::new(
-            r#"
-module Main
-
-func compute() -> Bool {
+func doubleLogicalNot() -> Bool {
     not not true
 }
 "#,
         )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn parenthesized_precedence_override() {
-        // Parentheses should override precedence
-        Test::new(
-            r#"
-module Main
-
-func compute() -> Int {
-    (1 + 2) * 3
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn binary_with_grouping() {
-        Test::new(
-            r#"
-module Main
-
-func compute() -> Int {
-    ((1 + 2) * (3 + 4))
-}
-"#,
-        )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("unaryInBinary").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("doubleNegation").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("doubleLogicalNot").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     // NOTE: binary_with_function_call test removed because function call return types
     // are not being resolved correctly in the context of binary expressions.
     // This is a separate issue from operator implementation.
-
-    #[test]
-    fn comparison_result_in_logical() {
-        // Comparison returns Bool, which feeds into logical operator
-        Test::new(
-            r#"
-module Main
-
-func check() -> Bool {
-    (1 < 2) and (3 > 2)
-}
-"#,
-        )
-        .expect(Compiles);
-    }
 }
 
 mod type_errors {
     use super::*;
 
     #[test]
-    fn add_string_to_int() {
-        // Should fail: can't add String + Int (no add method on String that takes Int)
+    fn invalid_operator_type_combinations() {
+        // Should fail: incompatible operand types for operators
+        // String + Int: can't add String + Int (no add method on String that takes Int)
+        // 1 and 2: can't use 'and' on Int (no logicalAnd method on Int)
+        // true & false: can't use bitwise & on Bool (no bitAnd method on Bool)
         Test::new(
             r#"
 module Main
 
-func compute() -> Int {
+func stringPlusInt() -> Int {
     "hello" + 5
 }
-"#,
-        )
-        .expect(HasError(""));
-    }
 
-    #[test]
-    fn logical_and_on_int() {
-        // Should fail: can't use 'and' on Int (no logicalAnd method on Int)
-        Test::new(
-            r#"
-module Main
-
-func compute() -> Int {
+func logicalAndOnInt() -> Int {
     1 and 2
 }
-"#,
-        )
-        .expect(HasError(""));
-    }
 
-    #[test]
-    fn bitwise_on_bool() {
-        // Should fail: can't use bitwise & on Bool (no bitAnd method on Bool)
-        Test::new(
-            r#"
-module Main
-
-func compute() -> Bool {
+func bitwiseAndOnBool() -> Bool {
     true & false
 }
 "#,
         )
-        .expect(HasError(""));
+        .expect(Fails)
+        .expect(HasErrorCount(3));
     }
 }
 
@@ -701,10 +460,10 @@ mod combined_with_variables {
     // NOTE: Tests with let bindings followed by binary expressions are currently
     // failing because local variable lookup returns an error type when the expression
     // is a binary expression. This is a known limitation that needs investigation.
-    // For now, we test with struct fields which work correctly.
+    // For now, we test with struct fields and function parameters which work correctly.
 
     #[test]
-    fn struct_field_binary() {
+    fn operators_with_struct_fields() {
         Test::new(
             r#"
 module Main
@@ -714,24 +473,14 @@ struct Point {
     let y: Int
 }
 
-func add(p: Point) -> Int {
-    p.x + p.y
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn struct_field_complex() {
-        Test::new(
-            r#"
-module Main
-
 struct Values {
     let a: Int
     let b: Int
     let c: Int
+}
+
+func add(p: Point) -> Int {
+    p.x + p.y
 }
 
 func compute(v: Values) -> Int {
@@ -739,11 +488,15 @@ func compute(v: Values) -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(Symbol::new("Values").is(SymbolKind::Struct).has(Behavior::FieldCount(3)))
+        .expect(Symbol::new("add").is(SymbolKind::Function).has(Behavior::ParameterCount(1)))
+        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
     }
 
     #[test]
-    fn function_parameter_binary() {
+    fn operators_with_function_parameters() {
         Test::new(
             r#"
 module Main
@@ -751,22 +504,14 @@ module Main
 func add(x: Int, y: Int) -> Int {
     x + y
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn function_parameter_complex() {
-        Test::new(
-            r#"
-module Main
 
 func compute(a: Int, b: Int, c: Int) -> Int {
     a * b + c
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("add").is(SymbolKind::Function).has(Behavior::ParameterCount(2)))
+        .expect(Symbol::new("compute").is(SymbolKind::Function).has(Behavior::ParameterCount(3)));
     }
 }

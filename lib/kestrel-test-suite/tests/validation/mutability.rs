@@ -18,7 +18,10 @@ mod local_variables {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::ParameterCount(0))
+            .has(Behavior::HasBody(true)));
     }
 
     #[test]
@@ -62,7 +65,9 @@ mod local_variables {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::HasBody(true)));
     }
 }
 
@@ -84,11 +89,14 @@ mod field_access {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(2)));
     }
 
     #[test]
-    fn assign_to_let_field_fails() {
+    fn assign_to_immutable_field_fails() {
+        // Tests that assigning to a let field fails regardless of receiver mutability
         Test::new(
             r#"module Test
             struct Point {
@@ -102,11 +110,14 @@ mod field_access {
             }
         "#,
         )
-        .expect(HasError("cannot assign to immutable field"));
+        .expect(HasError("cannot assign to immutable field"))
+        .expect(Symbol::new("Point").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(2)));
     }
 
     #[test]
-    fn assign_to_var_field_on_let_receiver_fails() {
+    fn assign_to_mutable_field_on_immutable_receiver_fails() {
+        // Even though x is mutable (var), receiver p is immutable (let)
         Test::new(
             r#"module Test
             struct Point {
@@ -120,29 +131,14 @@ mod field_access {
             }
         "#,
         )
-        .expect(HasError("cannot assign to immutable field"));
+        .expect(HasError("cannot assign to immutable field"))
+        .expect(Symbol::new("Point").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(2)));
     }
 
     #[test]
-    fn assign_to_let_field_on_let_receiver_fails() {
-        Test::new(
-            r#"module Test
-            struct Point {
-                let x: Int
-                let y: Int
-            }
-            func test() -> Int {
-                let p = Point(x: 1, y: 2);
-                p.x = 10;
-                p.x
-            }
-        "#,
-        )
-        .expect(HasError("cannot assign to immutable field"));
-    }
-
-    #[test]
-    fn chained_field_access_all_mutable() {
+    fn nested_field_assignment_all_mutable_succeeds() {
+        // All components in the chain are mutable
         Test::new(
             r#"module Test
             struct Inner {
@@ -158,11 +154,16 @@ mod field_access {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Outer").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Inner").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(1)));
     }
 
     #[test]
-    fn chained_field_access_inner_let_fails() {
+    fn nested_field_assignment_inner_immutable_fails() {
+        // Inner field is immutable (let)
         Test::new(
             r#"module Test
             struct Inner {
@@ -178,11 +179,16 @@ mod field_access {
             }
         "#,
         )
-        .expect(HasError("cannot assign to immutable field"));
+        .expect(HasError("cannot assign to immutable field"))
+        .expect(Symbol::new("Outer").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Inner").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(1)));
     }
 
     #[test]
-    fn chained_field_access_outer_let_fails() {
+    fn nested_field_assignment_outer_immutable_fails() {
+        // Outer field is immutable (let), blocking inner access
         Test::new(
             r#"module Test
             struct Inner {
@@ -198,11 +204,16 @@ mod field_access {
             }
         "#,
         )
-        .expect(HasError("cannot assign to immutable field"));
+        .expect(HasError("cannot assign to immutable field"))
+        .expect(Symbol::new("Outer").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Inner").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(1)));
     }
 
     #[test]
-    fn chained_field_access_receiver_let_fails() {
+    fn nested_field_assignment_receiver_immutable_fails() {
+        // Receiver variable is immutable (let)
         Test::new(
             r#"module Test
             struct Inner {
@@ -218,7 +229,11 @@ mod field_access {
             }
         "#,
         )
-        .expect(HasError("cannot assign to immutable field"));
+        .expect(HasError("cannot assign to immutable field"))
+        .expect(Symbol::new("Outer").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Inner").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(1)));
     }
 }
 
@@ -226,11 +241,34 @@ mod initializers {
     use super::*;
 
     #[test]
-    fn init_can_assign_to_let_field() {
-        // In initializers, self.field = value is allowed even for let fields
+    fn init_can_assign_to_all_field_types() {
+        // In initializers, self.field = value is allowed for both let and var fields
         Test::new(
             r#"module Test
-            struct Point {
+            struct Mixed {
+                let id: Int
+                let name: String
+                var value: Int
+                var count: Int
+
+                init(id: Int, name: String, value: Int, count: Int) {
+                    self.id = id
+                    self.name = name
+                    self.value = value
+                    self.count = count
+                }
+            }
+        "#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn init_with_only_let_fields() {
+        // Initializer for struct with only immutable fields
+        Test::new(
+            r#"module Test
+            struct Immutable {
                 let x: Int
                 let y: Int
 
@@ -245,34 +283,17 @@ mod initializers {
     }
 
     #[test]
-    fn init_can_assign_to_var_field() {
+    fn init_with_only_var_fields() {
+        // Initializer for struct with only mutable fields
         Test::new(
             r#"module Test
-            struct Point {
+            struct Mutable {
                 var x: Int
                 var y: Int
 
                 init(x: Int, y: Int) {
                     self.x = x
                     self.y = y
-                }
-            }
-        "#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn init_mixed_let_var_fields() {
-        Test::new(
-            r#"module Test
-            struct Mixed {
-                let id: Int
-                var value: Int
-
-                init(id: Int, value: Int) {
-                    self.id = id
-                    self.value = value
                 }
             }
         "#,
@@ -294,11 +315,13 @@ mod invalid_targets {
             }
         "#,
         )
-        .expect(HasError("cannot assign to this expression"));
+        .expect(HasError("cannot assign to this expression"))
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::HasBody(true)));
     }
 
     #[test]
-    fn assign_to_call_result_fails() {
+    fn assign_to_function_call_result_fails() {
         Test::new(
             r#"module Test
             func getValue() -> Int { 5 }
@@ -308,11 +331,15 @@ mod invalid_targets {
             }
         "#,
         )
-        .expect(HasError("cannot assign to this expression"));
+        .expect(HasError("cannot assign to this expression"))
+        .expect(Symbol::new("getValue").is(SymbolKind::Function)
+            .has(Behavior::HasBody(true)))
+        .expect(Symbol::new("test").is(SymbolKind::Function)
+            .has(Behavior::HasBody(true)));
     }
 
     #[test]
-    fn assign_to_struct_init_fails() {
+    fn assign_to_struct_initializer_fails() {
         Test::new(
             r#"module Test
             struct Point {
@@ -321,6 +348,21 @@ mod invalid_targets {
             }
             func test() -> Int {
                 Point(x: 1, y: 2) = Point(x: 3, y: 4);
+                0
+            }
+        "#,
+        )
+        .expect(HasError("cannot assign to this expression"))
+        .expect(Symbol::new("Point").is(SymbolKind::Struct)
+            .has(Behavior::FieldCount(2)));
+    }
+
+    #[test]
+    fn assign_to_binary_expression_fails() {
+        Test::new(
+            r#"module Test
+            func test() -> Int {
+                (5 + 10) = 20;
                 0
             }
         "#,

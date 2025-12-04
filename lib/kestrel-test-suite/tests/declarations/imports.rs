@@ -4,13 +4,13 @@ mod basic {
     use super::*;
 
     #[test]
-    fn import_module() {
+    fn import_entire_module() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct PublicClass {}"),
             ("consumer.ks", "module Consumer\nimport Library\nstruct UsesPublic {}"),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct))
+        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
         .expect(Symbol::new("UsesPublic").is(SymbolKind::Struct));
     }
 
@@ -27,6 +27,8 @@ mod basic {
             ),
         ])
         .expect(Compiles)
+        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("PublicAlias").is(SymbolKind::TypeAlias).has(Behavior::Visibility(Visibility::Public)))
         .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 
@@ -40,6 +42,7 @@ mod basic {
             ),
         ])
         .expect(Compiles)
+        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
         .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 
@@ -53,6 +56,7 @@ mod basic {
             ),
         ])
         .expect(Compiles)
+        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
         .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 }
@@ -61,18 +65,7 @@ mod nested_modules {
     use super::*;
 
     #[test]
-    fn import_top_level_module() {
-        Test::with_files(&[
-            ("math.ks", "module Math\npublic struct Vector {}\npublic struct Matrix {}"),
-            ("consumer.ks", "module NestedConsumer\nimport Math\nstruct MyApp {}"),
-        ])
-        .expect(Compiles)
-        .expect(Symbol::new("Vector").is(SymbolKind::Struct))
-        .expect(Symbol::new("MyApp").is(SymbolKind::Struct));
-    }
-
-    #[test]
-    fn import_nested_module() {
+    fn import_from_nested_module() {
         Test::with_files(&[
             (
                 "math_geometry.ks",
@@ -84,12 +77,13 @@ mod nested_modules {
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("Point").is(SymbolKind::Struct))
-        .expect(Symbol::new("Circle").is(SymbolKind::Struct));
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("Circle").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("MyApp").is(SymbolKind::Struct));
     }
 
     #[test]
-    fn import_specific_from_nested() {
+    fn import_specific_items_from_nested() {
         Test::with_files(&[
             (
                 "math_geometry.ks",
@@ -101,11 +95,13 @@ mod nested_modules {
             ),
         ])
         .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("Circle").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
         .expect(Symbol::new("MyApp").is(SymbolKind::Struct));
     }
 
     #[test]
-    fn import_nested_with_alias() {
+    fn import_nested_module_with_alias() {
         Test::with_files(&[
             (
                 "math_algebra.ks",
@@ -117,6 +113,8 @@ mod nested_modules {
             ),
         ])
         .expect(Compiles)
+        .expect(Symbol::new("Polynomial").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("Equation").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
         .expect(Symbol::new("MyApp").is(SymbolKind::Struct));
     }
 }
@@ -125,17 +123,7 @@ mod visibility {
     use super::*;
 
     #[test]
-    fn import_public_class() {
-        Test::with_files(&[
-            ("library.ks", "module Library\npublic struct PublicClass {}"),
-            ("consumer.ks", "module Consumer\nimport Library\nstruct UsesPublic {}"),
-        ])
-        .expect(Compiles)
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct));
-    }
-
-    #[test]
-    fn import_public_type_alias() {
+    fn import_and_verify_public_items_are_accessible() {
         Test::with_files(&[
             (
                 "library.ks",
@@ -143,15 +131,17 @@ mod visibility {
             ),
             (
                 "consumer.ks",
-                "module Consumer\nimport Library.(PublicAlias)\nstruct MyClass {}",
+                "module Consumer\nimport Library\nstruct UsesPublic {}",
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("PublicAlias").is(SymbolKind::TypeAlias));
+        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("PublicAlias").is(SymbolKind::TypeAlias).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("UsesPublic").is(SymbolKind::Struct));
     }
 
     #[test]
-    fn can_see_internal_in_same_module() {
+    fn internal_symbols_visible_within_same_module() {
         Test::with_files(&[
             (
                 "internal_lib.ks",
@@ -159,8 +149,8 @@ mod visibility {
             ),
         ])
         .expect(Compiles)
-        .expect(Symbol::new("InternalClass").is(SymbolKind::Struct))
-        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct));
+        .expect(Symbol::new("InternalClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Internal)))
+        .expect(Symbol::new("PublicClass").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)));
     }
 }
 
@@ -168,7 +158,7 @@ mod conflicts {
     use super::*;
 
     #[test]
-    fn resolve_conflict_with_aliases() {
+    fn resolve_naming_conflicts_with_item_aliases() {
         Test::with_files(&[
             ("module_a.ks", "module ModuleA\npublic struct Widget {}\npublic struct Helper {}"),
             ("module_b.ks", "module ModuleB\npublic struct Widget {}\npublic struct Utility {}"),
@@ -178,6 +168,9 @@ mod conflicts {
             ),
         ])
         .expect(Compiles)
+        .expect(Symbol::new("Widget").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("Helper").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
+        .expect(Symbol::new("Utility").is(SymbolKind::Struct).has(Behavior::Visibility(Visibility::Public)))
         .expect(Symbol::new("MyClass").is(SymbolKind::Struct));
     }
 }
@@ -186,13 +179,13 @@ mod errors {
     use super::*;
 
     #[test]
-    fn import_nonexistent_module() {
+    fn error_on_importing_nonexistent_module() {
         Test::new("module Test\nimport NonExistent\nstruct Foo {}")
             .expect(HasError("module 'NonExistent' not found"));
     }
 
     #[test]
-    fn import_nonexistent_nested_module() {
+    fn error_on_importing_nonexistent_nested_module() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct Foo {}"),
             ("consumer.ks", "module Consumer\nimport Library.Nonexistent\nstruct Bar {}"),
@@ -201,7 +194,7 @@ mod errors {
     }
 
     #[test]
-    fn import_nonexistent_item() {
+    fn error_on_importing_nonexistent_item_from_module() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct Foo {}"),
             ("consumer.ks", "module Consumer\nimport Library.(Bar)\nstruct Test {}"),
@@ -210,7 +203,7 @@ mod errors {
     }
 
     #[test]
-    fn import_nonexistent_item_from_nested() {
+    fn error_on_importing_nonexistent_item_from_nested_module() {
         Test::with_files(&[
             ("math_geometry.ks", "module Math.Geometry\npublic struct Point {}"),
             ("consumer.ks", "module Consumer\nimport Math.Geometry.(Circle)\nstruct Test {}"),
@@ -219,7 +212,7 @@ mod errors {
     }
 
     #[test]
-    fn import_private_item() {
+    fn error_on_importing_private_item() {
         Test::with_files(&[
             ("library.ks", "module Library\nprivate struct PrivateClass {}\npublic struct PublicClass {}"),
             ("consumer.ks", "module Consumer\nimport Library.(PrivateClass)\nstruct Test {}"),
@@ -237,7 +230,7 @@ mod errors {
     // symbol properly represents the importing module.
     #[test]
     #[ignore = "Internal visibility across modules - needs investigation of import context"]
-    fn import_internal_item_from_different_module() {
+    fn error_on_importing_internal_item_from_different_module() {
         Test::with_files(&[
             ("library.ks", "module Library\ninternal struct InternalClass {}\npublic struct PublicClass {}"),
             ("consumer.ks", "module Consumer\nimport Library.(InternalClass)\nstruct Test {}"),
@@ -246,7 +239,7 @@ mod errors {
     }
 
     #[test]
-    fn duplicate_import_same_item() {
+    fn error_on_duplicate_import_same_item() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct Foo {}"),
             ("consumer.ks", "module Consumer\nimport Library.(Foo)\nimport Library.(Foo)\nstruct Test {}"),
@@ -255,7 +248,7 @@ mod errors {
     }
 
     #[test]
-    fn whole_module_import_conflicts_with_local() {
+    fn error_when_imported_item_conflicts_with_local_declaration() {
         Test::with_files(&[
             ("library.ks", "module Library\npublic struct Widget {}"),
             ("consumer.ks", "module Consumer\nimport Library\nstruct Widget {}"),
@@ -264,7 +257,7 @@ mod errors {
     }
 
     #[test]
-    fn whole_module_import_conflicts_with_specific() {
+    fn error_when_imported_items_conflict_from_different_imports() {
         Test::with_files(&[
             ("library_a.ks", "module LibraryA\npublic struct Widget {}"),
             ("library_b.ks", "module LibraryB\npublic struct Widget {}"),

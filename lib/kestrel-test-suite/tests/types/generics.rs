@@ -27,6 +27,7 @@ mod basic_parsing {
             .expect(
                 Symbol::new("Pair")
                     .is(SymbolKind::Struct)
+                    .has(Behavior::IsGeneric(true))
                     .has(Behavior::TypeParamCount(2)),
             );
     }
@@ -38,6 +39,7 @@ mod basic_parsing {
             .expect(
                 Symbol::new("Triple")
                     .is(SymbolKind::Struct)
+                    .has(Behavior::IsGeneric(true))
                     .has(Behavior::TypeParamCount(3)),
             );
     }
@@ -80,7 +82,9 @@ mod basic_parsing {
                 Symbol::new("identity")
                     .is(SymbolKind::Function)
                     .has(Behavior::IsGeneric(true))
-                    .has(Behavior::TypeParamCount(1)),
+                    .has(Behavior::TypeParamCount(1))
+                    .has(Behavior::ParameterCount(1))
+                    .has(Behavior::HasBody(true)),
             );
     }
 
@@ -107,6 +111,7 @@ mod defaults {
             .expect(
                 Symbol::new("Map")
                     .is(SymbolKind::Struct)
+                    .has(Behavior::IsGeneric(true))
                     .has(Behavior::TypeParamCount(2)),
             );
     }
@@ -118,6 +123,7 @@ mod defaults {
             .expect(
                 Symbol::new("Wrapper")
                     .is(SymbolKind::Struct)
+                    .has(Behavior::IsGeneric(true))
                     .has(Behavior::TypeParamCount(1)),
             );
     }
@@ -131,7 +137,9 @@ mod defaults {
             type IntMap = Map[Int];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Map").has(Behavior::TypeParamCount(2)))
+        .expect(Symbol::new("IntMap").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -143,7 +151,9 @@ mod defaults {
             type IntToInt = Map[Int, Int];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Map").has(Behavior::TypeParamCount(2)))
+        .expect(Symbol::new("IntToInt").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -155,7 +165,10 @@ mod defaults {
             type CustomConfig = Config[Bool, Float];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Config").has(Behavior::TypeParamCount(3)))
+        .expect(Symbol::new("SimpleConfig").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("CustomConfig").is(SymbolKind::TypeAlias));
     }
 }
 
@@ -201,7 +214,12 @@ mod where_clause {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Set").has(Behavior::TypeParamCount(1)));
+        .expect(
+            Symbol::new("Set")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 
     #[test]
@@ -214,7 +232,12 @@ mod where_clause {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("HashSet").has(Behavior::TypeParamCount(1)));
+        .expect(
+            Symbol::new("HashSet")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 
     #[test]
@@ -226,7 +249,12 @@ mod where_clause {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("sort").has(Behavior::IsGeneric(true)));
+        .expect(
+            Symbol::new("sort")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -275,7 +303,12 @@ mod where_clause {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Logger").has(Behavior::TypeParamCount(1)));
+        .expect(
+            Symbol::new("Logger")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 }
 
@@ -292,8 +325,18 @@ mod nested_generics {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Outer").has(Behavior::TypeParamCount(1)))
-        .expect(Symbol::new("Inner").has(Behavior::TypeParamCount(1)));
+        .expect(
+            Symbol::new("Outer")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        )
+        .expect(
+            Symbol::new("Inner")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 
     #[test]
@@ -306,8 +349,18 @@ mod nested_generics {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Container").has(Behavior::IsGeneric(true)))
-        .expect(Symbol::new("Plain").has(Behavior::IsGeneric(false)));
+        .expect(
+            Symbol::new("Container")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        )
+        .expect(
+            Symbol::new("Plain")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(false))
+                .has(Behavior::TypeParamCount(0)),
+        );
     }
 }
 
@@ -325,7 +378,13 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Box").has(Behavior::TypeParamCount(1)));
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::FieldCount(1)),
+        );
     }
 
     #[test]
@@ -338,7 +397,14 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("makeBox").has(Behavior::TypeParamCount(1)));
+        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("makeBox")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::ParameterCount(0)),
+        );
     }
 
     #[test]
@@ -351,7 +417,14 @@ mod instantiation {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("unbox").has(Behavior::TypeParamCount(1)));
+        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("unbox")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 
     #[test]
@@ -363,7 +436,9 @@ mod instantiation {
             type NestedBox = Box[Box[Int]];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("NestedBox").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -375,7 +450,9 @@ mod instantiation {
             type StringToInt = Map[String, Int];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Map").is(SymbolKind::Struct).has(Behavior::TypeParamCount(2)))
+        .expect(Symbol::new("StringToInt").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -389,7 +466,14 @@ mod instantiation {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("Container")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 
     #[test]
@@ -401,7 +485,15 @@ mod instantiation {
             func pair[A, B](a: A, b: B) -> (Box[A], Box[B]) { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("pair")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(2))
+                .has(Behavior::ParameterCount(2)),
+        );
     }
 
     #[test]
@@ -413,7 +505,15 @@ mod instantiation {
             func transform[T](f: (T) -> Box[T], value: T) -> Box[T] { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(
+            Symbol::new("transform")
+                .is(SymbolKind::Function)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::ParameterCount(2)),
+        );
     }
 }
 
@@ -429,7 +529,7 @@ mod arity_errors {
             type Bad = Map[Int];
         "#,
         )
-        .expect(HasError("type argument"));
+        .expect(HasError("too few type arguments"));
     }
 
     #[test]
@@ -441,7 +541,7 @@ mod arity_errors {
             type Bad = Box[Int, String];
         "#,
         )
-        .expect(HasError("type argument"));
+        .expect(HasError("too many type arguments"));
     }
 
     #[test]
@@ -468,7 +568,10 @@ mod arity_errors {
             type IntToInt = Map[Int, Int];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Map").is(SymbolKind::Struct).has(Behavior::TypeParamCount(2)))
+        .expect(Symbol::new("IntMap").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("IntToInt").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -480,7 +583,7 @@ mod arity_errors {
             type Bad = Triple[Int];
         "#,
         )
-        .expect(HasError("type argument"));
+        .expect(HasError("too few type arguments"));
     }
 }
 
@@ -574,6 +677,7 @@ mod type_alias_resolution {
         .expect(
             Symbol::new("Identity")
                 .is(SymbolKind::TypeAlias)
+                .has(Behavior::IsGeneric(true))
                 .has(Behavior::TypeParamCount(1)),
         );
     }
@@ -587,7 +691,9 @@ mod type_alias_resolution {
             type IntAlias = Identity[Int];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Identity").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("IntAlias").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -599,7 +705,9 @@ mod type_alias_resolution {
             type IntPair = Pair[Int];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Pair").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("IntPair").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -612,7 +720,10 @@ mod type_alias_resolution {
             type BoxedInt = Boxed[Int];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("Boxed").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("BoxedInt").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -624,7 +735,9 @@ mod type_alias_resolution {
             type IntToString = Transformer[Int, String];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Transformer").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(2)))
+        .expect(Symbol::new("IntToString").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -637,7 +750,10 @@ mod type_alias_resolution {
             type DoubleBoxed[T] = Boxed[Boxed[T]];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("Boxed").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("DoubleBoxed").is(SymbolKind::TypeAlias).has(Behavior::TypeParamCount(1)));
     }
 
     #[test]
@@ -648,7 +764,12 @@ mod type_alias_resolution {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Nested").has(Behavior::TypeParamCount(1)));
+        .expect(
+            Symbol::new("Nested")
+                .is(SymbolKind::TypeAlias)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 }
 
@@ -664,7 +785,13 @@ mod multiple_constraints {
             struct BiMap[K, V] where K: Equatable, V: Hashable { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("BiMap")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(2)),
+        );
     }
 
     #[test]
@@ -677,7 +804,13 @@ mod multiple_constraints {
             struct Complex[X, Y, Z] where X: A, Y: B and C, Z: A { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Complex")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(3)),
+        );
     }
 
     #[test]
@@ -690,7 +823,13 @@ mod multiple_constraints {
             struct Logger[T] where T: Display, T: Debug { }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Logger")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 }
 
@@ -701,21 +840,36 @@ mod edge_cases {
     fn single_letter_type_params() {
         Test::new("module Test\nstruct A[B] {}")
             .expect(Compiles)
-            .expect(Symbol::new("A").has(Behavior::TypeParamCount(1)));
+            .expect(
+                Symbol::new("A")
+                    .is(SymbolKind::Struct)
+                    .has(Behavior::IsGeneric(true))
+                    .has(Behavior::TypeParamCount(1)),
+            );
     }
 
     #[test]
     fn long_type_param_names() {
         Test::new("module Test\nstruct Container[ElementType, KeyType, ValueType] {}")
             .expect(Compiles)
-            .expect(Symbol::new("Container").has(Behavior::TypeParamCount(3)));
+            .expect(
+                Symbol::new("Container")
+                    .is(SymbolKind::Struct)
+                    .has(Behavior::IsGeneric(true))
+                    .has(Behavior::TypeParamCount(3)),
+            );
     }
 
     #[test]
     fn many_type_params() {
         Test::new("module Test\nstruct Many[A, B, C, D, E, F] {}")
             .expect(Compiles)
-            .expect(Symbol::new("Many").has(Behavior::TypeParamCount(6)));
+            .expect(
+                Symbol::new("Many")
+                    .is(SymbolKind::Struct)
+                    .has(Behavior::IsGeneric(true))
+                    .has(Behavior::TypeParamCount(6)),
+            );
     }
 
     #[test]
@@ -723,7 +877,12 @@ mod edge_cases {
         // Type parameter named same as the struct itself
         Test::new("module Test\nstruct Box[Box] {}")
             .expect(Compiles)
-            .expect(Symbol::new("Box").has(Behavior::TypeParamCount(1)));
+            .expect(
+                Symbol::new("Box")
+                    .is(SymbolKind::Struct)
+                    .has(Behavior::IsGeneric(true))
+                    .has(Behavior::TypeParamCount(1)),
+            );
     }
 
     #[test]
@@ -752,7 +911,14 @@ mod edge_cases {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Node")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::FieldCount(2)),
+        );
     }
 
     #[test]
@@ -787,7 +953,21 @@ mod edge_cases {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Tree")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::FieldCount(2)),
+        )
+        .expect(
+            Symbol::new("Forest")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::FieldCount(1)),
+        );
     }
 
     #[test]
@@ -803,8 +983,18 @@ mod edge_cases {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Outer").has(Behavior::TypeParamCount(1)))
-        .expect(Symbol::new("Inner").has(Behavior::TypeParamCount(1)));
+        .expect(
+            Symbol::new("Outer")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        )
+        .expect(
+            Symbol::new("Inner")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 
     #[test]
@@ -817,7 +1007,19 @@ mod edge_cases {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Box")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        )
+        .expect(
+            Symbol::new("Factory")
+                .is(SymbolKind::Protocol)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1)),
+        );
     }
 
     #[test]
@@ -826,7 +1028,7 @@ mod edge_cases {
         Test::new(
             r#"module Test
             protocol Comparable[U] { }
-            struct Set[T] where T: Comparable[T] { }
+            struct Collection[T] where T: Comparable[T] { }
         "#,
         )
         .expect(Compiles);
@@ -840,7 +1042,9 @@ mod edge_cases {
             type Deep = Box[Box[Box[Box[Int]]]];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Box").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("Deep").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -854,7 +1058,16 @@ mod edge_cases {
             type OptionalOptional = Option[Option[String]];
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(
+            Symbol::new("Option")
+                .is(SymbolKind::Struct)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(1))
+                .has(Behavior::FieldCount(1)),
+        )
+        .expect(Symbol::new("OptionalInt").is(SymbolKind::TypeAlias))
+        .expect(Symbol::new("OptionalOptional").is(SymbolKind::TypeAlias));
     }
 
     #[test]
@@ -865,6 +1078,11 @@ mod edge_cases {
         "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Pair").has(Behavior::TypeParamCount(2)));
+        .expect(
+            Symbol::new("Pair")
+                .is(SymbolKind::TypeAlias)
+                .has(Behavior::IsGeneric(true))
+                .has(Behavior::TypeParamCount(2)),
+        );
     }
 }

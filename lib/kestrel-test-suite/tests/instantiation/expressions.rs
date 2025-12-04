@@ -410,7 +410,7 @@ mod literal_value_equality {
 
 mod cloning {
     #[test]
-    fn expression_clone() {
+    fn expression_clone_preserves_type_and_span() {
         use kestrel_semantic_tree::expr::Expression;
 
         let expr = Expression::integer(42, 0..2);
@@ -418,10 +418,30 @@ mod cloning {
 
         assert!(cloned.ty.is_int());
         assert_eq!(cloned.span, 0..2);
+        assert_eq!(cloned.span, expr.span);
     }
 
     #[test]
-    fn statement_clone() {
+    fn expression_clone_with_different_types() {
+        use kestrel_semantic_tree::expr::Expression;
+
+        let string_expr = Expression::string("test".to_string(), 5..10);
+        let cloned_string = string_expr.clone();
+        assert!(cloned_string.ty.is_string());
+        assert_eq!(cloned_string.span, 5..10);
+
+        let bool_expr = Expression::bool(false, 0..5);
+        let cloned_bool = bool_expr.clone();
+        assert!(cloned_bool.ty.is_bool());
+        assert_eq!(cloned_bool.span, 0..5);
+
+        let unit_expr = Expression::unit(10..12);
+        let cloned_unit = unit_expr.clone();
+        assert!(cloned_unit.ty.is_unit());
+    }
+
+    #[test]
+    fn statement_clone_preserves_binding_properties() {
         use kestrel_semantic_tree::expr::Expression;
         use kestrel_semantic_tree::pattern::{Mutability, Pattern};
         use kestrel_semantic_tree::stmt::Statement;
@@ -440,10 +460,35 @@ mod cloning {
 
         assert!(cloned.is_binding());
         assert_eq!(cloned.pattern().and_then(|p| p.local_id()), Some(LocalId(0)));
+        assert_eq!(cloned.pattern().and_then(|p| p.mutability()), Some(Mutability::Immutable));
+        assert_eq!(cloned.span, 0..10);
     }
 
     #[test]
-    fn code_block_clone() {
+    fn statement_clone_with_mutable_variable() {
+        use kestrel_semantic_tree::expr::Expression;
+        use kestrel_semantic_tree::pattern::{Mutability, Pattern};
+        use kestrel_semantic_tree::stmt::Statement;
+        use kestrel_semantic_tree::symbol::local::LocalId;
+        use kestrel_semantic_tree::ty::Ty;
+
+        let pattern = Pattern::local(
+            LocalId(5),
+            Mutability::Mutable,
+            "y".to_string(),
+            Ty::string(0..6),
+            0..1,
+        );
+        let stmt = Statement::binding(pattern, Some(Expression::string("hello".to_string(), 0..6)), 0..15);
+        let cloned = stmt.clone();
+
+        assert!(cloned.is_binding());
+        assert_eq!(cloned.pattern().and_then(|p| p.mutability()), Some(Mutability::Mutable));
+        assert_eq!(cloned.pattern().and_then(|p| p.local_id()), Some(LocalId(5)));
+    }
+
+    #[test]
+    fn code_block_clone_preserves_structure() {
         use kestrel_semantic_tree::behavior::executable::CodeBlock;
         use kestrel_semantic_tree::expr::Expression;
         use kestrel_semantic_tree::pattern::{Mutability, Pattern};
@@ -459,15 +504,29 @@ mod cloning {
             0..1,
         );
         let stmt = Statement::binding(pattern, Some(Expression::integer(1, 0..1)), 0..10);
-        let block = CodeBlock::new(vec![stmt], Some(Expression::integer(42, 11..13)));
+        let yield_expr = Expression::integer(42, 11..13);
+        let block = CodeBlock::new(vec![stmt], Some(yield_expr));
         let cloned = block.clone();
 
         assert_eq!(cloned.statements.len(), 1);
         assert!(cloned.yield_expr().is_some());
+        assert!(!cloned.is_empty());
     }
 
     #[test]
-    fn executable_behavior_clone() {
+    fn code_block_clone_empty_block() {
+        use kestrel_semantic_tree::behavior::executable::CodeBlock;
+
+        let block = CodeBlock::empty();
+        let cloned = block.clone();
+
+        assert!(cloned.is_empty());
+        assert!(cloned.statements.is_empty());
+        assert!(cloned.yield_expr().is_none());
+    }
+
+    #[test]
+    fn executable_behavior_clone_empty() {
         use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
 
         let block = CodeBlock::empty();
@@ -475,13 +534,39 @@ mod cloning {
         let cloned = behavior.clone();
 
         assert!(cloned.body().is_empty());
+        assert_eq!(cloned.body().statements.len(), 0);
+    }
+
+    #[test]
+    fn executable_behavior_clone_with_body() {
+        use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
+        use kestrel_semantic_tree::expr::Expression;
+        use kestrel_semantic_tree::pattern::{Mutability, Pattern};
+        use kestrel_semantic_tree::stmt::Statement;
+        use kestrel_semantic_tree::symbol::local::LocalId;
+        use kestrel_semantic_tree::ty::Ty;
+
+        let pattern = Pattern::local(
+            LocalId(0),
+            Mutability::Immutable,
+            "z".to_string(),
+            Ty::string(0..5),
+            0..1,
+        );
+        let stmt = Statement::binding(pattern, Some(Expression::string("hi".to_string(), 0..5)), 0..10);
+        let block = CodeBlock::new(vec![stmt], Some(Expression::unit(11..13)));
+        let behavior = ExecutableBehavior::new(block);
+        let cloned = behavior.clone();
+
+        assert_eq!(cloned.body().statements.len(), 1);
+        assert!(cloned.body().yield_expr().is_some());
     }
 }
 
 mod nested_expressions {
     #[test]
     fn deeply_nested_array() {
-        use kestrel_semantic_tree::expr::Expression;
+        use kestrel_semantic_tree::expr::{Expression, ExprKind};
         use kestrel_semantic_tree::ty::{Ty, IntBits};
 
         // Create [[1, 2], [3, 4]]
@@ -498,15 +583,20 @@ mod nested_expressions {
         let array1 = Expression::array(inner1, element_ty.clone(), 0..5);
         let array2 = Expression::array(inner2, element_ty.clone(), 7..12);
 
+        assert!(array1.ty.is_array());
+        assert!(array2.ty.is_array());
+
         let outer_element_ty = Ty::array(element_ty, 0..0);
         let outer = Expression::array(vec![array1, array2], outer_element_ty, 0..13);
 
         assert!(outer.ty.is_array());
+        assert!(matches!(outer.kind, ExprKind::Array(_)));
+        assert_eq!(outer.span, 0..13);
     }
 
     #[test]
     fn nested_tuple_in_array() {
-        use kestrel_semantic_tree::expr::Expression;
+        use kestrel_semantic_tree::expr::{Expression, ExprKind};
 
         // Create [(1, "a"), (2, "b")]
         let tuple1 = Expression::tuple(
@@ -524,24 +614,41 @@ mod nested_expressions {
             10..18,
         );
 
+        assert!(tuple1.ty.is_tuple());
+        assert!(tuple2.ty.is_tuple());
+        assert_eq!(tuple1.span, 0..8);
+        assert_eq!(tuple2.span, 10..18);
+
         let element_ty = tuple1.ty.clone();
         let array = Expression::array(vec![tuple1, tuple2], element_ty, 0..20);
 
         assert!(array.ty.is_array());
+        assert!(matches!(array.kind, ExprKind::Array(_)));
+        assert_eq!(array.span, 0..20);
     }
 
     #[test]
     fn nested_grouping() {
-        use kestrel_semantic_tree::expr::Expression;
+        use kestrel_semantic_tree::expr::{Expression, ExprKind};
 
         // Create (((42)))
         let inner = Expression::integer(42, 3..5);
-        let g1 = Expression::grouping(inner, 2..6);
-        let g2 = Expression::grouping(g1, 1..7);
-        let g3 = Expression::grouping(g2, 0..8);
+        assert!(inner.ty.is_int());
+        assert_eq!(inner.span, 3..5);
 
+        let g1 = Expression::grouping(inner, 2..6);
+        assert!(g1.ty.is_int());
+        assert!(matches!(g1.kind, ExprKind::Grouping(_)));
+
+        let g2 = Expression::grouping(g1, 1..7);
+        assert!(g2.ty.is_int());
+        assert_eq!(g2.span, 1..7);
+
+        let g3 = Expression::grouping(g2, 0..8);
         // All groupings should preserve the Int type
         assert!(g3.ty.is_int());
+        assert_eq!(g3.span, 0..8);
+        assert!(matches!(g3.kind, ExprKind::Grouping(_)));
     }
 }
 
@@ -550,90 +657,39 @@ mod integration {
     use super::*;
 
     #[test]
-    fn function_with_integer_body() {
+    fn functions_with_varied_literal_return_types() {
         Test::new(
             r#"module Test
             func answer() -> Int { 42 }
-        "#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn function_with_string_body() {
-        Test::new(
-            r#"module Test
             func greeting() -> String { "hello" }
+            func nothing() { () }
+            func flag() -> Bool { true }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("answer").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("greeting").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("nothing").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("flag").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
-    fn function_with_tuple_body() {
+    fn functions_with_aggregate_expressions() {
         Test::new(
             r#"module Test
             func pair() { (1, 2) }
-        "#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn function_with_array_body() {
-        Test::new(
-            r#"module Test
             func numbers() { [1, 2, 3] }
-        "#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn function_with_nested_expressions() {
-        Test::new(
-            r#"module Test
             func complex() { [(1, 2), (3, 4)] }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("pair").is(SymbolKind::Function))
+        .expect(Symbol::new("numbers").is(SymbolKind::Function))
+        .expect(Symbol::new("complex").is(SymbolKind::Function));
     }
 
     #[test]
-    fn function_with_unit_body() {
-        Test::new(
-            r#"module Test
-            func nothing() { () }
-        "#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn function_with_bool_body() {
-        Test::new(
-            r#"module Test
-            func yes() { true }
-            func no() { false }
-        "#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn multiple_functions_with_bodies() {
-        Test::new(
-            r#"module Test
-            func one() { 1 }
-            func two() { 2 }
-            func three() { 3 }
-        "#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn struct_with_method_body() {
+    fn struct_with_method() {
         Test::new(
             r#"module Test
             struct Point {
@@ -641,6 +697,8 @@ mod integration {
             }
         "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct))
+        .expect(Symbol::new("Point.origin").is(SymbolKind::Function).has(Behavior::IsInstanceMethod(true)));
     }
 }

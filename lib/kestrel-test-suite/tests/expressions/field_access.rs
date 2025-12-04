@@ -9,7 +9,7 @@ mod field_access {
     use super::*;
 
     #[test]
-    fn simple_field_access() {
+    fn simple_field_access_with_struct_verification() {
         Test::new(
             r#"
 module Main
@@ -24,11 +24,13 @@ func getX(p: Point) -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(Symbol::new("getX").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
     }
 
     #[test]
-    fn chained_field_access() {
+    fn chained_field_access_with_nested_structs() {
         Test::new(
             r#"
 module Main
@@ -48,11 +50,41 @@ func getStartX(line: Line) -> Int {
 }
 "#,
         )
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(Symbol::new("Line").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(
+            Symbol::new("getStartX")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
+    }
+
+    #[test]
+    fn public_field_access_with_multiple_accessors() {
+        Test::new(
+            r#"
+module Main
+
+struct Point {
+    pub let x: Int
+    pub let y: Int
+}
+
+func getX(p: Point) -> Int {
+    p.x
+}
+
+func getY(p: Point) -> Int {
+    p.y
+}
+"#,
+        )
         .expect(Compiles);
     }
 
     #[test]
-    fn field_access_in_variable() {
+    fn field_access_in_variable_declaration() {
         Test::new(
             r#"
 module Main
@@ -68,7 +100,9 @@ func example(p: Point) -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(Symbol::new("example").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
     }
 
     #[test]
@@ -91,7 +125,7 @@ func getZ(p: Point) -> Int {
     }
 
     #[test]
-    fn member_access_on_primitive_error() {
+    fn member_access_on_primitive_type_error() {
         Test::new(
             r#"
 module Main
@@ -123,22 +157,28 @@ func peek(s: Secret) -> Int {
     }
 
     #[test]
-    fn public_field_access_succeeds() {
+    fn multiple_field_access_in_single_expression() {
         Test::new(
             r#"
 module Main
 
 struct Point {
-    pub let x: Int
-    pub let y: Int
+    let x: Int
+    let y: Int
 }
 
-func getX(p: Point) -> Int {
-    p.x
+func sum(p: Point) -> Int {
+    p.x + p.y
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(
+            Symbol::new("sum")
+                .is(SymbolKind::Function)
+                .has(Behavior::ParameterCount(1)),
+        );
     }
 }
 

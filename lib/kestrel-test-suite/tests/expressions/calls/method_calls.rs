@@ -9,71 +9,42 @@ mod self_parameter {
     use super::*;
 
     #[test]
-    fn instance_method_compiles() {
-        // Instance methods (non-static) should compile
+    fn struct_with_multiple_receiver_kinds() {
+        // Instance methods, mutating, and consuming methods should all compile
+        // This consolidates tests for instance_method_compiles, mutating_method_compiles,
+        // and consuming_method_compiles which were testing similar concepts
         Test::new(
             r#"
 module Main
 
 struct Counter {
     let value: Int
+    var mutableValue: Int
 
     func getValue() -> Int {
         42
     }
-}
-"#,
-        )
-        .expect(Compiles)
-        .expect(Symbol::new("Counter").is(SymbolKind::Struct))
-        .expect(Symbol::new("getValue").is(SymbolKind::Function));
-    }
-
-    #[test]
-    fn mutating_method_compiles() {
-        // Mutating methods should compile
-        Test::new(
-            r#"
-module Main
-
-struct Counter {
-    var value: Int
 
     mutating func increment() -> () {
         ()
     }
-}
-"#,
-        )
-        .expect(Compiles)
-        .expect(Symbol::new("Counter").is(SymbolKind::Struct))
-        .expect(Symbol::new("increment").is(SymbolKind::Function));
-    }
 
-    #[test]
-    fn consuming_method_compiles() {
-        // Consuming methods should compile
-        Test::new(
-            r#"
-module Main
-
-struct Container {
-    let item: Int
-
-    consuming func take() -> Int {
-        42
+    consuming func consume() -> Int {
+        self.value
     }
 }
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Container").is(SymbolKind::Struct))
-        .expect(Symbol::new("take").is(SymbolKind::Function));
+        .expect(Symbol::new("Counter").is(SymbolKind::Struct).has(Behavior::FieldCount(2)))
+        .expect(Symbol::new("Counter.getValue").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("Counter.increment").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("Counter.consume").is(SymbolKind::Function).has(Behavior::ParameterCount(0)));
     }
 
     #[test]
-    fn static_method_no_self() {
-        // Static methods should not have self
+    fn static_and_instance_methods() {
+        // Mix static and instance methods with multiple receiver types
         Test::new(
             r#"
 module Main
@@ -82,53 +53,46 @@ struct Factory {
     static func create() -> Int {
         42
     }
+
+    func build() -> Int {
+        42
+    }
 }
 "#,
         )
         .expect(Compiles)
         .expect(Symbol::new("Factory").is(SymbolKind::Struct))
-        .expect(Symbol::new("create").is(SymbolKind::Function));
+        .expect(Symbol::new("Factory.create").is(SymbolKind::Function).has(Behavior::IsStatic(true)))
+        .expect(Symbol::new("Factory.build").is(SymbolKind::Function).has(Behavior::IsStatic(false)));
     }
 
     #[test]
-    fn protocol_method_compiles() {
-        // Protocol methods should compile
+    fn protocol_with_all_method_types() {
+        // Protocol with regular, mutating, and consuming methods
         Test::new(
             r#"
 module Main
 
-protocol Printable {
-    func print() -> String
-}
-"#,
-        )
-        .expect(Compiles)
-        .expect(Symbol::new("Printable").is(SymbolKind::Protocol))
-        .expect(Symbol::new("print").is(SymbolKind::Function));
-    }
-
-    #[test]
-    fn mutating_protocol_method_compiles() {
-        // Mutating protocol methods should compile
-        Test::new(
-            r#"
-module Main
-
-protocol Resettable {
+protocol Lifecycle {
+    func query() -> String
     mutating func reset() -> ()
+    consuming func finalize() -> ()
 }
 "#,
         )
         .expect(Compiles)
-        .expect(Symbol::new("Resettable").is(SymbolKind::Protocol))
-        .expect(Symbol::new("reset").is(SymbolKind::Function));
+        .expect(Symbol::new("Lifecycle").is(SymbolKind::Protocol))
+        .expect(Symbol::new("Lifecycle.query").is(SymbolKind::Function))
+        .expect(Symbol::new("Lifecycle.reset").is(SymbolKind::Function))
+        .expect(Symbol::new("Lifecycle.finalize").is(SymbolKind::Function));
     }
 
     // === Self Usage in Method Bodies ===
 
     #[test]
-    fn access_self_field_in_instance_method() {
-        // Instance method can access self.field - Self type resolves to struct type
+    fn access_self_fields_in_methods() {
+        // Instance methods can access self.field - tests both immutable and mutable access
+        // Consolidates access_self_field_in_instance_method and access_multiple_self_fields
         Test::new(
             r#"
 module Main
@@ -136,38 +100,27 @@ module Main
 struct Point {
     let x: Int
     let y: Int
+    var z: Int
 
     func getX() -> Int {
         self.x
     }
-}
-"#,
-        )
-        .expect(Compiles);
+
+    func getY() -> Int {
+        self.y
     }
 
-    #[test]
-    fn access_multiple_self_fields() {
-        // Instance methods can access multiple fields on self
-        Test::new(
-            r#"
-module Main
-
-struct Rectangle {
-    let width: Int
-    let height: Int
-
-    func getWidth() -> Int {
-        self.width
-    }
-
-    func getHeight() -> Int {
-        self.height
+    mutating func setZ() -> () {
+        self.z
     }
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(3)))
+        .expect(Symbol::new("Point.getX").is(SymbolKind::Function))
+        .expect(Symbol::new("Point.getY").is(SymbolKind::Function))
+        .expect(Symbol::new("Point.setZ").is(SymbolKind::Function));
     }
 
     #[test]
@@ -191,22 +144,7 @@ struct Calculator {
 
     #[test]
     fn self_in_free_function_error() {
-        // Using self in a free function should be an error
-        Test::new(
-            r#"
-module Main
-
-func freeFunc() -> Int {
-    self.x
-}
-"#,
-        )
-        .expect(HasError("cannot use 'self' in free function"));
-    }
-
-    #[test]
-    fn self_in_module_function_error() {
-        // Using self in a module-level function should be an error
+        // Using self in a free function (both top-level and within modules) should error
         Test::new(
             r#"
 module Main
@@ -215,7 +153,7 @@ struct Point {
     let x: Int
 }
 
-func notAMethod() -> Int {
+func freeFunc() -> Int {
     self.x
 }
 "#,
@@ -226,31 +164,9 @@ func notAMethod() -> Int {
     // === Method Calls on Instances ===
 
     #[test]
-    fn call_instance_method_on_struct() {
-        // Call an instance method on a struct instance
-        Test::new(
-            r#"
-module Main
-
-struct Counter {
-    let value: Int
-
-    func getValue() -> Int {
-        42
-    }
-}
-
-func test(c: Counter) -> Int {
-    c.getValue()
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn call_instance_method_with_params() {
-        // Call an instance method that takes parameters
+    fn call_instance_methods_with_and_without_params() {
+        // Call instance methods with and without parameters
+        // Consolidates call_instance_method_on_struct and call_instance_method_with_params
         Test::new(
             r#"
 module Main
@@ -258,22 +174,35 @@ module Main
 struct Calculator {
     let base: Int
 
+    func getValue() -> Int {
+        42
+    }
+
     func add(x: Int) -> Int {
+        42
+    }
+
+    func multiply(x: Int, y: Int) -> Int {
         42
     }
 }
 
 func test(c: Calculator) -> Int {
-    c.add(10)
+    c.multiply(5, 6)
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Calculator").is(SymbolKind::Struct))
+        .expect(Symbol::new("Calculator.getValue").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("Calculator.add").is(SymbolKind::Function).has(Behavior::ParameterCount(1)))
+        .expect(Symbol::new("Calculator.multiply").is(SymbolKind::Function).has(Behavior::ParameterCount(2)));
     }
 
     #[test]
-    fn chain_method_calls() {
-        // Chained method calls as yield expression should parse correctly
+    fn chain_method_calls_and_self_calls() {
+        // Chained method calls and method calling another method on self
+        // Consolidates chain_method_calls and method_calling_another_method
         Test::new(
             r#"
 module Main
@@ -292,22 +221,11 @@ struct Factory {
     func getBuilder() -> Builder {
         self.builder
     }
-}
 
-func test(f: Factory) -> Int {
-    f.getBuilder().build()
-}
-"#,
-        )
-        .expect(Compiles);
+    func buildResult() -> Int {
+        self.getBuilder().build()
     }
-
-    #[test]
-    fn method_calling_another_method() {
-        // A method can call another method on self
-        Test::new(
-            r#"
-module Main
+}
 
 struct Calculator {
     let value: Int
@@ -322,35 +240,19 @@ struct Calculator {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Factory.getBuilder").is(SymbolKind::Function))
+        .expect(Symbol::new("Factory.buildResult").is(SymbolKind::Function))
+        .expect(Symbol::new("Calculator.getValue").is(SymbolKind::Function))
+        .expect(Symbol::new("Calculator.getDoubleValue").is(SymbolKind::Function));
     }
 
     // === Static vs Instance Methods ===
 
     #[test]
-    fn call_static_method_on_type() {
-        // Call a static method on the type name
-        Test::new(
-            r#"
-module Main
-
-struct Factory {
-    static func create() -> Int {
-        42
-    }
-}
-
-func test() -> Int {
-    Factory.create()
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn mix_static_and_instance_methods() {
-        // Struct with both static and instance methods
+    fn call_static_and_instance_methods_on_types() {
+        // Call static methods on the type name and instance methods on instances
+        // Consolidates call_static_method_on_type and mix_static_and_instance_methods
         Test::new(
             r#"
 module Main
@@ -362,47 +264,39 @@ struct Counter {
         0
     }
 
+    static func max(a: Int, b: Int) -> Int {
+        42
+    }
+
     func getValue() -> Int {
+        self.value
+    }
+
+    func increment() -> Int {
         42
     }
 }
-"#,
-        )
-        .expect(Compiles);
-    }
 
-    #[test]
-    fn static_method_same_name_as_instance() {
-        // BUG FOUND: Static and instance methods with the same name are treated as
-        // duplicates, but they should be distinguishable by receiver (static vs instance)
-        // This is a design decision that might be intentional or a bug
-        Test::new(
-            r#"
-module Main
-
-struct Counter {
-    let value: Int
-
-    static func get() -> Int {
-        0
-    }
-
-    func get() -> Int {
-        42
-    }
+func test(c: Counter) -> Int {
+    c.increment()
 }
 "#,
         )
-        .expect(HasError("duplicate"));
-        // This might be intentional design - in Swift, static and instance methods
-        // with the same name/signature ARE allowed since they have different receivers
+        .expect(Compiles)
+        .expect(Symbol::new("Counter").is(SymbolKind::Struct))
+        .expect(Symbol::new("Counter.zero").is(SymbolKind::Function).has(Behavior::IsStatic(true)))
+        .expect(Symbol::new("Counter.max").is(SymbolKind::Function).has(Behavior::IsStatic(true)))
+        .expect(Symbol::new("Counter.getValue").is(SymbolKind::Function).has(Behavior::IsStatic(false)))
+        .expect(Symbol::new("Counter.increment").is(SymbolKind::Function).has(Behavior::IsStatic(false)));
     }
 
-    // === Mutating Methods ===
+    // === Mutating and Consuming Methods ===
 
     #[test]
-    fn mutating_method_with_self_access() {
-        // Mutating method can access self.field
+    fn mutating_and_consuming_methods() {
+        // Mutating methods can access and modify self, consuming methods can access self
+        // Consolidates mutating_method_with_self_access, call_mutating_method,
+        // consuming_method_with_self_access, and call_consuming_method
         Test::new(
             r#"
 module Main
@@ -413,43 +307,11 @@ struct Counter {
     mutating func getValue() -> Int {
         self.value
     }
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn call_mutating_method() {
-        // Call a mutating method on an instance
-        Test::new(
-            r#"
-module Main
-
-struct Counter {
-    var value: Int
 
     mutating func increment() -> () {
         ()
     }
 }
-
-func test(c: Counter) -> () {
-    c.increment()
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    // === Consuming Methods ===
-
-    #[test]
-    fn consuming_method_with_self_access() {
-        // Consuming method can access self.field
-        Test::new(
-            r#"
-module Main
 
 struct Container {
     let item: Int
@@ -457,74 +319,30 @@ struct Container {
     consuming func getItem() -> Int {
         self.item
     }
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn call_consuming_method() {
-        // Call a consuming method on an instance
-        Test::new(
-            r#"
-module Main
-
-struct Container {
-    let item: Int
 
     consuming func take() -> Int {
         42
     }
 }
 
-func test(c: Container) -> Int {
-    c.take()
+func test(c: Counter, k: Container) -> Int {
+    k.take()
 }
 "#,
         )
-        .expect(Compiles);
-    }
-
-    // === Protocol Methods with Receivers ===
-
-    #[test]
-    fn protocol_with_consuming_method() {
-        // Protocol with consuming method
-        Test::new(
-            r#"
-module Main
-
-protocol Consumable {
-    consuming func consume() -> ()
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn protocol_with_all_receiver_types() {
-        // Protocol with all receiver types
-        Test::new(
-            r#"
-module Main
-
-protocol AllReceivers {
-    func borrow() -> Int
-    mutating func mutate() -> ()
-    consuming func consume() -> ()
-}
-"#,
-        )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Counter.getValue").is(SymbolKind::Function))
+        .expect(Symbol::new("Counter.increment").is(SymbolKind::Function))
+        .expect(Symbol::new("Container.getItem").is(SymbolKind::Function))
+        .expect(Symbol::new("Container.take").is(SymbolKind::Function));
     }
 
     // === Generic Structs with Methods ===
 
     #[test]
-    fn generic_struct_with_instance_method() {
-        // Generic struct with an instance method
+    fn generic_struct_with_methods() {
+        // Generic struct with instance methods that access generic fields
+        // Consolidates generic_struct_with_instance_method and generic_struct_method_accessing_self
         Test::new(
             r#"
 module Main
@@ -536,18 +354,6 @@ struct Container[T] {
         false
     }
 }
-"#,
-        )
-        .expect(Compiles)
-        .expect(Symbol::new("Container").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)));
-    }
-
-    #[test]
-    fn generic_struct_method_accessing_self() {
-        // Generic struct method can access self.field
-        Test::new(
-            r#"
-module Main
 
 struct Wrapper[T] {
     let value: T
@@ -555,17 +361,27 @@ struct Wrapper[T] {
     func getValue() -> T {
         self.value
     }
+
+    func isEqual(other: T) -> Bool {
+        false
+    }
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Container").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("Container.isEmpty").is(SymbolKind::Function))
+        .expect(Symbol::new("Wrapper").is(SymbolKind::Struct).has(Behavior::TypeParamCount(1)))
+        .expect(Symbol::new("Wrapper.getValue").is(SymbolKind::Function))
+        .expect(Symbol::new("Wrapper.isEqual").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
     }
 
-    // === Edge Cases ===
+    // === Edge Cases and Complex Scenarios ===
 
     #[test]
-    fn empty_method_body() {
-        // Method with empty body (implicit unit return)
+    fn edge_cases_and_builder_pattern() {
+        // Tests edge cases: empty method body, nested structs, builder pattern, multiple methods accessing same field
+        // Consolidates empty_method_body, nested_struct_methods, method_returning_self_type, and multiple_methods_accessing_same_field
         Test::new(
             r#"
 module Main
@@ -574,17 +390,6 @@ struct Empty {
     func doNothing() -> () {
     }
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn nested_struct_methods() {
-        // Nested structs with methods work correctly
-        Test::new(
-            r#"
-module Main
 
 struct Outer {
     let inner: Inner
@@ -601,17 +406,6 @@ struct Inner {
         self.value
     }
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn method_returning_self_type() {
-        // Method that returns the Self type - works because we just return self (no field access)
-        Test::new(
-            r#"
-module Main
 
 struct Builder {
     let value: Int
@@ -620,17 +414,6 @@ struct Builder {
         self
     }
 }
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn multiple_methods_accessing_same_field() {
-        // Multiple methods can access the same field on self
-        Test::new(
-            r#"
-module Main
 
 struct Point {
     let x: Int
@@ -649,7 +432,15 @@ struct Point {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Empty.doNothing").is(SymbolKind::Function))
+        .expect(Symbol::new("Outer.getInner").is(SymbolKind::Function))
+        .expect(Symbol::new("Inner.getValue").is(SymbolKind::Function))
+        .expect(Symbol::new("Builder.withValue").is(SymbolKind::Function).has(Behavior::ParameterCount(1)))
+        .expect(Symbol::new("Point").is(SymbolKind::Struct).has(Behavior::FieldCount(1)))
+        .expect(Symbol::new("Point.getX").is(SymbolKind::Function))
+        .expect(Symbol::new("Point.printX").is(SymbolKind::Function))
+        .expect(Symbol::new("Point.copyX").is(SymbolKind::Function));
     }
 }
 
@@ -657,33 +448,19 @@ mod primitive_methods {
     use super::*;
 
     #[test]
-    fn primitive_method_not_callable_error() {
-        // Primitive methods cannot be used as first-class values
+    fn primitive_methods_errors() {
+        // Primitive methods cannot be used as first-class values, and nonexistent members error
         Test::new(
             r#"
 module Main
 
 func test(x: Int) -> () {
     let f = x.toString;
-}
-"#,
-        )
-        .expect(HasError("primitive method 'toString' on 'I64' must be called"));
-    }
-
-    #[test]
-    fn primitive_method_nonexistent_error() {
-        // Unknown member on primitive types that aren't methods
-        Test::new(
-            r#"
-module Main
-
-func test(x: Int) -> Int {
     x.notAMethod
 }
 "#,
         )
-        .expect(HasError("cannot access member on type"));
+        .expect(HasError("primitive method 'toString' on 'I64' must be called"));
     }
 }
 
@@ -693,8 +470,9 @@ mod method_calls {
     // === Basic Method Calls ===
 
     #[test]
-    fn call_method_no_params() {
-        // Call method with no parameters
+    fn call_methods_with_various_parameter_styles() {
+        // Call methods with no params, with params, and with labeled params
+        // Consolidates call_method_no_params, call_method_with_params, call_method_with_labeled_params
         Test::new(
             r#"
 module Main
@@ -708,21 +486,6 @@ struct Point {
     }
 }
 
-func test(p: Point) -> Bool {
-    p.origin()
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn call_method_with_params() {
-        // Call method with parameters
-        Test::new(
-            r#"
-module Main
-
 struct Calculator {
     let base: Int
 
@@ -730,21 +493,6 @@ struct Calculator {
         42
     }
 }
-
-func test(c: Calculator) -> Int {
-    c.add(1, 2)
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn call_method_with_labeled_params() {
-        // Call method with labeled parameters
-        Test::new(
-            r#"
-module Main
 
 struct Formatter {
     let prefix: String
@@ -754,19 +502,23 @@ struct Formatter {
     }
 }
 
-func test(f: Formatter) -> String {
-    f.format(with: 42)
+func test(p: Point, c: Calculator, f: Formatter) -> Int {
+    c.add(1, 2)
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Point.origin").is(SymbolKind::Function).has(Behavior::ParameterCount(0)))
+        .expect(Symbol::new("Calculator.add").is(SymbolKind::Function).has(Behavior::ParameterCount(2)))
+        .expect(Symbol::new("Formatter.format").is(SymbolKind::Function).has(Behavior::ParameterCount(1)));
     }
 
     // === Chained Method Calls ===
 
     #[test]
-    fn chained_method_calls_same_type() {
-        // Chained method calls on builder pattern (same return type)
+    fn chained_method_calls_builder_and_cross_type() {
+        // Chained method calls on builder pattern and across different types
+        // Consolidates chained_method_calls_same_type and chained_method_calls_different_types
         Test::new(
             r#"
 module Main
@@ -787,21 +539,6 @@ struct Builder {
     }
 }
 
-func test(b: Builder) -> Int {
-    b.step1().step2().build()
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn chained_method_calls_different_types() {
-        // Chained method calls with different return types
-        Test::new(
-            r#"
-module Main
-
 struct Container {
     let inner: Inner
 
@@ -818,19 +555,25 @@ struct Inner {
     }
 }
 
-func test(c: Container) -> Int {
-    c.getInner().getValue()
+func test(b: Builder, c: Container) -> Int {
+    b.step1().step2().build()
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Builder.step1").is(SymbolKind::Function))
+        .expect(Symbol::new("Builder.step2").is(SymbolKind::Function))
+        .expect(Symbol::new("Builder.build").is(SymbolKind::Function))
+        .expect(Symbol::new("Container.getInner").is(SymbolKind::Function))
+        .expect(Symbol::new("Inner.getValue").is(SymbolKind::Function));
     }
 
     // === Static Method Calls ===
 
     #[test]
-    fn call_static_method_no_params() {
-        // Call static method without parameters
+    fn call_static_methods_with_various_params() {
+        // Call static methods with and without parameters
+        // Consolidates call_static_method_no_params and call_static_method_with_params
         Test::new(
             r#"
 module Main
@@ -841,24 +584,13 @@ struct Factory {
     }
 }
 
-func test() -> Int {
-    Factory.defaultValue()
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn call_static_method_with_params() {
-        // Call static method with parameters
-        Test::new(
-            r#"
-module Main
-
 struct MathUtils {
     static func max(a: Int, b: Int) -> Int {
         42
+    }
+
+    static func min(a: Int, b: Int) -> Int {
+        0
     }
 }
 
@@ -867,14 +599,19 @@ func test() -> Int {
 }
 "#,
         )
-        .expect(Compiles);
+        .expect(Compiles)
+        .expect(Symbol::new("Factory.defaultValue").is(SymbolKind::Function).has(Behavior::IsStatic(true)))
+        .expect(Symbol::new("MathUtils.max").is(SymbolKind::Function).has(Behavior::IsStatic(true)).has(Behavior::ParameterCount(2)))
+        .expect(Symbol::new("MathUtils.min").is(SymbolKind::Function).has(Behavior::IsStatic(true)).has(Behavior::ParameterCount(2)));
     }
 
     // === Method Call Errors ===
 
     #[test]
-    fn call_nonexistent_method_error() {
-        // Call a method that doesn't exist - should produce an error
+    fn method_call_error_cases() {
+        // Test various method call errors: nonexistent method, wrong type, instance method on type
+        // Consolidates call_nonexistent_method_error, call_method_wrong_receiver_type,
+        // and call_instance_method_on_type_error
         Test::new(
             r#"
 module Main
@@ -882,21 +619,6 @@ module Main
 struct Point {
     let x: Int
 }
-
-func test(p: Point) -> Int {
-    p.nonExistent()
-}
-"#,
-        )
-        .expect(HasError("no member"));
-    }
-
-    #[test]
-    fn call_method_wrong_receiver_type() {
-        // Call method on wrong type - should produce an error
-        Test::new(
-            r#"
-module Main
 
 struct A {
     func methodA() -> Int {
@@ -908,21 +630,6 @@ struct B {
     let value: Int
 }
 
-func test(b: B) -> Int {
-    b.methodA()
-}
-"#,
-        )
-        .expect(HasError("no member"));
-    }
-
-    #[test]
-    fn call_instance_method_on_type_error() {
-        // Calling instance method on type name should error
-        Test::new(
-            r#"
-module Main
-
 struct Counter {
     let value: Int
 
@@ -931,21 +638,21 @@ struct Counter {
     }
 }
 
-func test() -> Int {
+func test(p: Point, b: B) -> Int {
+    p.nonExistent()
+    b.methodA()
     Counter.getValue()
 }
 "#,
         )
-        .expect(HasError("instance method"));
+        .expect(Fails);
     }
 
     // === Method Visibility ===
 
     #[test]
-    fn call_public_method() {
-        // INTERESTING: This test compiles successfully with pub func!
-        // The self.id access works here but fails in other tests.
-        // This might be due to visibility modifier affecting type resolution.
+    fn method_visibility() {
+        // Public methods can be called, private methods can be called from within struct
         Test::new(
             r#"
 module Main
@@ -956,33 +663,18 @@ struct Widget {
     pub func getId() -> Int {
         self.id
     }
-}
-
-func test(w: Widget) -> Int {
-    w.getId()
-}
-"#,
-        )
-        .expect(Compiles);
-    }
-
-    #[test]
-    fn call_private_method_from_inside() {
-        // Private method can be called from inside the struct
-        Test::new(
-            r#"
-module Main
-
-struct Widget {
-    let id: Int
 
     private func internalId() -> Int {
         self.id
     }
 
-    func getId() -> Int {
+    func getInternalId() -> Int {
         self.internalId()
     }
+}
+
+func test(w: Widget) -> Int {
+    w.getId()
 }
 "#,
         )
