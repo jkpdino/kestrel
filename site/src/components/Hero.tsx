@@ -12,7 +12,7 @@ export default function Hero() {
     <section className="scroll-section relative overflow-hidden bg-[#f8f6f1]">
       {/* GitHub icon in top right */}
       <a
-        href="https://github.com/jkpdino/kestrel-lang"
+        href="https://github.com/jkpdino/kestrel"
         className={`absolute top-6 right-6 z-20 p-3 rounded-full text-[var(--color-slate)] hover:text-[var(--color-rust)] hover:bg-[var(--color-slate)]/5 transition-all ${
           isVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4"
         }`}

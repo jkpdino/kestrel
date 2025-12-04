@@ -20,7 +20,7 @@ export default function Footer() {
 
           {/* GitHub CTA */}
           <a
-            href="https://github.com/jkpdino/kestrel-lang"
+            href="https://github.com/jkpdino/kestrel"
             className="inline-flex items-center gap-3 px-6 py-3 bg-white/10 text-white font-mono text-sm rounded-lg hover:bg-[var(--color-rust)] transition-colors">
             <Github className="w-5 h-5" />
             Star on GitHub
