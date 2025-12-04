@@ -384,6 +384,13 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
             ExprKind::Assignment { target, value } => {
                 format!("{} = {}", format_expr_value(target), format_expr_value(value))
             }
+            ExprKind::If { condition, then_branch: _, then_value, else_branch } => {
+                let then_str = then_value.as_ref()
+                    .map(|v| format_expr_value(v))
+                    .unwrap_or_else(|| "()".to_string());
+                let else_str = if else_branch.is_some() { " else { ... }" } else { "" };
+                format!("if {} {{ {} }}{}", format_expr_value(condition), then_str, else_str)
+            }
             ExprKind::Error => "<error>".to_string(),
         }
     }

@@ -112,6 +112,8 @@ pub enum SyntaxKind {
     ExprNull,            // null
     ExprCall,            // foo(1, 2) or expr(args)
     ExprAssignment,      // lhs = rhs
+    ExprIf,              // if condition { then } else { else }
+    ElseClause,          // else { ... } or else if ...
     ArgumentList,        // (arg1, label: arg2, ...)
     Argument,            // Single argument: expr or label: expr
 
@@ -354,6 +356,8 @@ impl Language for KestrelLanguage {
         const EXPR_NULL: u16 = SyntaxKind::ExprNull as u16;
         const EXPR_CALL: u16 = SyntaxKind::ExprCall as u16;
         const EXPR_ASSIGNMENT: u16 = SyntaxKind::ExprAssignment as u16;
+        const EXPR_IF: u16 = SyntaxKind::ExprIf as u16;
+        const ELSE_CLAUSE: u16 = SyntaxKind::ElseClause as u16;
         const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
         const ARGUMENT: u16 = SyntaxKind::Argument as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
@@ -486,6 +490,8 @@ impl Language for KestrelLanguage {
             EXPR_NULL => SyntaxKind::ExprNull,
             EXPR_CALL => SyntaxKind::ExprCall,
             EXPR_ASSIGNMENT => SyntaxKind::ExprAssignment,
+            EXPR_IF => SyntaxKind::ExprIf,
+            ELSE_CLAUSE => SyntaxKind::ElseClause,
             ARGUMENT_LIST => SyntaxKind::ArgumentList,
             ARGUMENT => SyntaxKind::Argument,
             IDENTIFIER => SyntaxKind::Identifier,

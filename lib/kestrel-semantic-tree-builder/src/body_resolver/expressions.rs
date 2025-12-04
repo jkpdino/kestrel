@@ -4,7 +4,8 @@
 //! representations. It dispatches to specialized modules for complex expressions
 //! like calls, operators, and paths.
 
-use kestrel_semantic_tree::expr::Expression;
+use kestrel_semantic_tree::expr::{ElseBranch, Expression};
+use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
@@ -14,6 +15,7 @@ use super::calls::resolve_call_expression;
 use super::context::BodyResolutionContext;
 use super::operators::{resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression};
 use super::paths::resolve_path_expression;
+use super::statements::resolve_statement;
 use super::utils::is_expression_kind;
 
 /// Resolve an expression syntax node into a semantic Expression
@@ -95,6 +97,10 @@ pub fn resolve_expression(
 
         SyntaxKind::ExprAssignment => {
             resolve_assignment_expression(expr_node, ctx)
+        }
+
+        SyntaxKind::ExprIf => {
+            resolve_if_expression(expr_node, ctx)
         }
 
         _ => Expression::error(span),
@@ -242,6 +248,140 @@ fn resolve_assignment_expression(
     // TODO: Type check that value type is compatible with target type
 
     Expression::assignment(target, value, span)
+}
+
+/// Resolve an if expression: if condition { then } else { else }
+fn resolve_if_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // ExprIf structure:
+    // - If token
+    // - Expression (condition)
+    // - CodeBlock (then branch)
+    // - Optional: ElseClause
+    //   - Else token
+    //   - Either CodeBlock or Expression (for else-if)
+
+    let mut children = node.children().peekable();
+
+    // Find condition expression (first Expression child)
+    let condition = children
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+        .map(|c| resolve_expression(&c, ctx))
+        .unwrap_or_else(|| Expression::error(span.clone()));
+
+    // Find then block (first CodeBlock child)
+    let (then_statements, then_value) = children
+        .find(|c| c.kind() == SyntaxKind::CodeBlock)
+        .map(|c| resolve_if_block(&c, ctx))
+        .unwrap_or_else(|| (vec![], None));
+
+    // Find optional else clause
+    let else_branch = node.children()
+        .find(|c| c.kind() == SyntaxKind::ElseClause)
+        .and_then(|else_clause| resolve_else_clause(&else_clause, ctx));
+
+    Expression::if_expr(condition, then_statements, then_value, else_branch, span)
+}
+
+/// Resolve the body of an if/else block, returning statements and optional trailing expression.
+/// This creates a new scope for the block.
+fn resolve_if_block(
+    block_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> (Vec<Statement>, Option<Expression>) {
+    // Push a new scope for this block
+    ctx.local_scope.push_scope();
+
+    let mut statements = Vec::new();
+    let mut trailing_expr = None;
+
+    let children: Vec<_> = block_node.children().collect();
+
+    for (i, child) in children.iter().enumerate() {
+        let is_last = i == children.len() - 1;
+
+        match child.kind() {
+            SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
+                if let Some(stmt) = resolve_statement(child, ctx) {
+                    statements.push(stmt);
+                }
+            }
+            SyntaxKind::VariableDeclaration => {
+                if let Some(stmt) = super::statements::resolve_variable_declaration(child, ctx) {
+                    statements.push(stmt);
+                }
+            }
+            SyntaxKind::Expression => {
+                // If last child and no semicolon, it's the trailing expression
+                if is_last && !has_trailing_semicolon(child) {
+                    trailing_expr = Some(resolve_expression(child, ctx));
+                } else {
+                    let expr = resolve_expression(child, ctx);
+                    let stmt_span = get_node_span(child, ctx.source);
+                    statements.push(Statement::expr(expr, stmt_span));
+                }
+            }
+            _ if is_expression_kind(child.kind()) => {
+                // Handle bare expression kinds (not wrapped in Expression)
+                if is_last {
+                    trailing_expr = Some(resolve_expression(child, ctx));
+                } else {
+                    let expr = resolve_expression(child, ctx);
+                    let stmt_span = get_node_span(child, ctx.source);
+                    statements.push(Statement::expr(expr, stmt_span));
+                }
+            }
+            // Skip tokens like braces
+            _ => {}
+        }
+    }
+
+    // Pop the scope
+    ctx.local_scope.pop_scope();
+
+    (statements, trailing_expr)
+}
+
+/// Check if a node has a trailing semicolon
+fn has_trailing_semicolon(node: &SyntaxNode) -> bool {
+    node.children_with_tokens()
+        .any(|elem| elem.kind() == SyntaxKind::Semicolon)
+}
+
+/// Resolve an else clause, which can be either a block or an else-if expression
+fn resolve_else_clause(
+    else_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<ElseBranch> {
+    // ElseClause contains either:
+    // - A CodeBlock (else { ... })
+    // - An Expression which is an ExprIf (else if ... { ... })
+
+    // Check for else-if (Expression containing ExprIf)
+    for child in else_node.children() {
+        if child.kind() == SyntaxKind::Expression || child.kind() == SyntaxKind::ExprIf {
+            // This is an else-if expression
+            let if_expr = resolve_expression(&child, ctx);
+            return Some(ElseBranch::ElseIf(Box::new(if_expr)));
+        }
+    }
+
+    // Check for plain else block
+    for child in else_node.children() {
+        if child.kind() == SyntaxKind::CodeBlock {
+            let (statements, value) = resolve_if_block(&child, ctx);
+            return Some(ElseBranch::Block {
+                statements,
+                value: value.map(Box::new),
+            });
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

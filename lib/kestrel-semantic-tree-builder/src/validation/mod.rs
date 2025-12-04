@@ -449,6 +449,35 @@ fn walk_expression(expr: &Expression, validators: &[&dyn Validator], ctx: &BodyC
             walk_expression(target, validators, ctx);
             walk_expression(value, validators, ctx);
         }
+        ExprKind::If {
+            condition,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
+            walk_expression(condition, validators, ctx);
+            for stmt in then_branch {
+                walk_statement(stmt, validators, ctx);
+            }
+            if let Some(value) = then_value {
+                walk_expression(value, validators, ctx);
+            }
+            if let Some(else_branch) = else_branch {
+                match else_branch {
+                    kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
+                        for stmt in statements {
+                            walk_statement(stmt, validators, ctx);
+                        }
+                        if let Some(value) = value {
+                            walk_expression(value, validators, ctx);
+                        }
+                    }
+                    kestrel_semantic_tree::expr::ElseBranch::ElseIf(if_expr) => {
+                        walk_expression(if_expr, validators, ctx);
+                    }
+                }
+            }
+        }
         // Leaf expressions - no nested nodes
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)

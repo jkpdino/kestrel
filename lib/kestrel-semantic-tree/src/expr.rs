@@ -340,10 +340,37 @@ pub enum ExprKind {
         value: Box<Expression>,
     },
 
-    // Future: If, While, Block, BinaryOp, UnaryOp, etc.
+    /// If expression: `if condition { then } else { else }`
+    ///
+    /// Type is:
+    /// - `()` if there's no else branch
+    /// - The common type of both branches if there's an else branch
+    ///   (type checking deferred - currently just uses then_branch type)
+    If {
+        condition: Box<Expression>,
+        then_branch: Vec<crate::stmt::Statement>,
+        /// Optional trailing expression in then branch (determines its value)
+        then_value: Option<Box<Expression>>,
+        /// Optional else branch - can be statements + optional value, or another if
+        else_branch: Option<ElseBranch>,
+    },
+
+    // Future: While, Block, BinaryOp, UnaryOp, etc.
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
     Error,
+}
+
+/// Represents an else branch of an if expression.
+#[derive(Debug, Clone)]
+pub enum ElseBranch {
+    /// else { statements; value }
+    Block {
+        statements: Vec<crate::stmt::Statement>,
+        value: Option<Box<Expression>>,
+    },
+    /// else if condition { ... } else { ... }
+    ElseIf(Box<Expression>),
 }
 
 /// A resolved expression in the semantic tree.
@@ -646,6 +673,44 @@ impl Expression {
                 value: Box::new(value),
             },
             ty: Ty::never(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create an if expression.
+    ///
+    /// Type is:
+    /// - `()` if there's no else branch
+    /// - The type of the then_value if there's an else branch (type checking deferred)
+    /// If expressions are not mutable lvalues.
+    pub fn if_expr(
+        condition: Expression,
+        then_branch: Vec<crate::stmt::Statement>,
+        then_value: Option<Expression>,
+        else_branch: Option<ElseBranch>,
+        span: Span,
+    ) -> Self {
+        // Compute the type:
+        // - No else: type is ()
+        // - With else: type is the then_value's type (or () if no then_value)
+        let ty = if else_branch.is_some() {
+            then_value
+                .as_ref()
+                .map(|v| v.ty.clone())
+                .unwrap_or_else(|| Ty::unit(span.clone()))
+        } else {
+            Ty::unit(span.clone())
+        };
+
+        Expression {
+            kind: ExprKind::If {
+                condition: Box::new(condition),
+                then_branch,
+                then_value: then_value.map(Box::new),
+                else_branch,
+            },
+            ty,
             span,
             mutable: false,
         }

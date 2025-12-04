@@ -362,6 +362,39 @@ fn analyze_expression(
             // Analyze the value being assigned
             analyze_expression(value, ctx, false);
         }
+        ExprKind::If {
+            condition,
+            then_branch,
+            then_value,
+            else_branch,
+        } => {
+            // Analyze condition
+            analyze_expression(condition, ctx, false);
+            // Analyze then branch statements
+            for stmt in then_branch {
+                analyze_statement(stmt, ctx);
+            }
+            // Analyze then value if present
+            if let Some(value) = then_value {
+                analyze_expression(value, ctx, false);
+            }
+            // Analyze else branch if present
+            if let Some(else_branch) = else_branch {
+                match else_branch {
+                    kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
+                        for stmt in statements {
+                            analyze_statement(stmt, ctx);
+                        }
+                        if let Some(value) = value {
+                            analyze_expression(value, ctx, false);
+                        }
+                    }
+                    kestrel_semantic_tree::expr::ElseBranch::ElseIf(if_expr) => {
+                        analyze_expression(if_expr, ctx, false);
+                    }
+                }
+            }
+        }
         ExprKind::Error => {}
     }
 }

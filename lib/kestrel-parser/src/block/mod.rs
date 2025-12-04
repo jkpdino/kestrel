@@ -67,7 +67,9 @@ impl CodeBlock {
 pub enum BlockItem {
     /// A statement (has semicolon)
     Statement(StmtVariant),
-    /// A trailing expression (no semicolon)
+    /// A statement-like expression (if, while, etc. - no semicolon required)
+    StatementExpr(ExprVariant),
+    /// A trailing expression (no semicolon, determines block value)
     TrailingExpression(ExprVariant),
 }
 
@@ -93,13 +95,7 @@ pub struct CodeBlockData {
 pub fn code_block_parser() -> impl Parser<Token, CodeBlockData, Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(just(Token::LBrace).map_with_span(|_, span| span))
-        .then(
-            // Parse zero or more items
-            // An item is either:
-            // 1. A statement (ends with semicolon)
-            // 2. A trailing expression (no semicolon, must be last)
-            code_block_items_parser()
-        )
+        .then(code_block_items_parser())
         .then(
             skip_trivia()
                 .ignore_then(just(Token::RBrace).map_with_span(|_, span| span))
@@ -113,28 +109,74 @@ pub fn code_block_parser() -> impl Parser<Token, CodeBlockData, Error = Simple<T
         })
 }
 
+/// Check if an expression variant is "statement-like" (doesn't require semicolon)
+fn is_statement_like_expr(expr: &ExprVariant) -> bool {
+    matches!(expr, ExprVariant::If { .. })
+    // Future: add While, For, Match, etc.
+}
+
 /// Parser for the items inside a code block
 fn code_block_items_parser() -> impl Parser<Token, Vec<BlockItem>, Error = Simple<Token>> + Clone {
-    // We need to handle the distinction between:
-    // - Statements (have semicolon)
-    // - Trailing expressions (no semicolon, must be last)
+    // We need to handle:
+    // 1. Regular statements (let/var declarations, or expressions with semicolons)
+    // 2. Statement-like expressions (if, while, etc.) that don't need semicolons
+    // 3. A final trailing expression (determines the block's value)
     //
-    // Strategy: Try to parse statements repeatedly, then optionally parse a trailing expression
+    // Strategy:
+    // - Repeatedly parse items that are either statements OR statement-like expressions
+    // - Then optionally parse a trailing expression
+    //
+    // The tricky part: we need to distinguish between:
+    // - `if cond { } else { }` followed by more items (statement-like, continue parsing)
+    // - `if cond { } else { }` at the end (trailing expression)
+    // - `if cond { }` followed by more items (statement-like, continue parsing)
+    // - `if cond { }` at the end (trailing expression with unit type)
 
-    stmt_parser()
+    // An "item" is either:
+    // 1. A regular statement (with semicolon)
+    // 2. A statement-like expression followed by more content (not at end)
+
+    // Parse a single block item (not the trailing expression)
+    let block_item = stmt_parser()
         .map(BlockItem::Statement)
+        .or(
+            // Try to parse a statement-like expression
+            // We need to look ahead to see if there's more content after it
+            expr_parser()
+                .then(
+                    // Check if there's a semicolon (making it a regular statement)
+                    skip_trivia()
+                        .ignore_then(just(Token::Semicolon).map_with_span(|_, span| span))
+                        .map(Some)
+                        .or(empty().map(|_| None))
+                )
+                .try_map(|(expr, maybe_semi), span| {
+                    if let Some(semi) = maybe_semi {
+                        // Has semicolon - it's a regular expression statement
+                        Ok(BlockItem::Statement(StmtVariant::Expression(expr, semi)))
+                    } else if is_statement_like_expr(&expr) {
+                        // No semicolon but it's statement-like - OK
+                        Ok(BlockItem::StatementExpr(expr))
+                    } else {
+                        // No semicolon and not statement-like - fail, let it be parsed as trailing
+                        Err(Simple::custom(span, "expected semicolon"))
+                    }
+                })
+        );
+
+    block_item
         .repeated()
         .then(
-            // Optional trailing expression
+            // Optional trailing expression (any expression without semicolon at the end)
             expr_parser()
                 .map(BlockItem::TrailingExpression)
                 .or_not()
         )
-        .map(|(mut statements, trailing)| {
+        .map(|(mut items, trailing)| {
             if let Some(expr) = trailing {
-                statements.push(expr);
+                items.push(expr);
             }
-            statements
+            items
         })
 }
 
@@ -147,6 +189,15 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
         match item {
             BlockItem::Statement(stmt) => {
                 emit_stmt_variant(sink, stmt);
+            }
+            BlockItem::StatementExpr(expr) => {
+                // Statement-like expressions are wrapped in Statement node
+                // but don't have a semicolon
+                sink.start_node(SyntaxKind::Statement);
+                sink.start_node(SyntaxKind::ExpressionStatement);
+                emit_expr_variant(sink, expr);
+                sink.finish_node(); // ExpressionStatement
+                sink.finish_node(); // Statement
             }
             BlockItem::TrailingExpression(expr) => {
                 emit_expr_variant(sink, expr);

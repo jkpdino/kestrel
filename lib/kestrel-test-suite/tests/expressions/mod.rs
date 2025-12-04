@@ -6,9 +6,11 @@
 //! - Path expressions and variable references
 //! - Function and method calls
 //! - Field access on structs
+//! - Control flow (if/else)
 
 mod body_literals;
 mod operators;
 mod paths;
 mod calls;
 mod field_access;
+mod control_flow;

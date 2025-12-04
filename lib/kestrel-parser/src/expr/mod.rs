@@ -11,6 +11,9 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::common::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
+use crate::block::{CodeBlockData, emit_code_block, BlockItem};
+use crate::stmt::{StmtVariant, VariableDeclarationData};
+use crate::ty::ty_parser;
 
 /// Represents an expression
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +103,11 @@ impl Expression {
     pub fn is_assignment(&self) -> bool {
         self.kind() == SyntaxKind::ExprAssignment
     }
+
+    /// Check if this is an if expression
+    pub fn is_if(&self) -> bool {
+        self.kind() == SyntaxKind::ExprIf
+    }
 }
 
 /// A call argument with optional label
@@ -170,6 +178,28 @@ pub enum ExprVariant {
         lhs: Box<ExprVariant>,
         equals: Span,
         rhs: Box<ExprVariant>,
+    },
+    /// If expression: if condition { then } else { else }
+    If {
+        if_span: Span,
+        condition: Box<ExprVariant>,
+        then_block: CodeBlockData,
+        else_clause: Option<ElseClause>,
+    },
+}
+
+/// Else clause: either a block or another if expression
+#[derive(Debug, Clone)]
+pub enum ElseClause {
+    /// else { block }
+    Block {
+        else_span: Span,
+        block: CodeBlockData,
+    },
+    /// else if ...
+    ElseIf {
+        else_span: Span,
+        if_expr: Box<ExprVariant>,
     },
 }
 
@@ -375,16 +405,15 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 }
             });
 
-        // Unary operators: -expr, !expr
-        // This must be defined after the other expression parsers so we can use them
-        let primary = float
-            .or(integer)
-            .or(string)
-            .or(boolean)
-            .or(null)
-            .or(array)
-            .or(paren_expr)
-            .or(path);
+        // Primary expressions without if (no nested expr references, for conditions)
+        // These are used for if conditions to avoid infinite recursion
+        let condition_primary = float
+            .clone()
+            .or(integer.clone())
+            .or(string.clone())
+            .or(boolean.clone())
+            .or(null.clone())
+            .or(path.clone());
 
         // Argument parser for call expressions: unlabeled or labeled
         // labeled: identifier: expr
@@ -481,6 +510,220 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         // These can be chained: a.b().c.d()!
         let postfix_op = arg_list.or(member_access).or(postfix_bang);
 
+        // Postfix expression for conditions: using condition_primary (no nested expr)
+        // Only allows member access, not calls (calls would need full expr for args)
+        let condition_member_access = skip_trivia()
+            .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
+            .then(
+                skip_trivia().ignore_then(filter_map(|span, token| match token {
+                    Token::Identifier => Ok(span),
+                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                })),
+            )
+            .map(|(dot, member)| (dot, member));
+
+        let condition_postfix = condition_primary
+            .clone()
+            .then(condition_member_access.repeated())
+            .map(|(base, accesses)| {
+                accesses.into_iter().fold(base, |acc, (dot, member)| {
+                    ExprVariant::MemberAccess {
+                        base: Box::new(acc),
+                        dot,
+                        member,
+                    }
+                })
+            });
+
+        // Prefix unary operators: -, +, !, not
+        let unary_op = skip_trivia().ignore_then(
+            just(Token::Minus)
+                .map_with_span(|tok, span| (tok, span))
+                .or(just(Token::Plus).map_with_span(|tok, span| (tok, span)))
+                .or(just(Token::Bang).map_with_span(|tok, span| (tok, span)))
+                .or(just(Token::Not).map_with_span(|tok, span| (tok, span))),
+        );
+
+        // Binary operator parser - matches any binary operator token
+        let binary_op = skip_trivia().ignore_then(filter_map(|span, token: Token| {
+            if is_binary_operator(&token) {
+                Ok((token, span))
+            } else {
+                Err(Simple::expected_input_found(span, vec![], Some(token)))
+            }
+        }));
+
+        // Unary expression for conditions (no nested expr)
+        let condition_unary = unary_op
+            .clone()
+            .then(condition_postfix.clone())
+            .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
+
+        // Non-assignment expression for conditions
+        let condition_non_assignment = condition_unary.or(condition_postfix.clone());
+
+        // Binary expression for conditions (no nested expr, no if)
+        let condition_binary = condition_non_assignment
+            .clone()
+            .then(binary_op.clone().then(condition_non_assignment.clone()).repeated())
+            .map(|(first, rest)| {
+                rest.into_iter()
+                    .fold(first, |lhs, ((op_token, op_span), rhs)| {
+                        ExprVariant::Binary {
+                            lhs: Box::new(lhs),
+                            operator: op_token,
+                            operator_span: op_span,
+                            rhs: Box::new(rhs),
+                        }
+                    })
+            });
+
+        // Inline variable declaration parser (uses expr for initializer)
+        let inline_var_decl = {
+            let expr_for_init = expr.clone();
+            skip_trivia()
+                .ignore_then(
+                    just(Token::Let)
+                        .map_with_span(|_, span| (span, false))
+                        .or(just(Token::Var).map_with_span(|_, span| (span, true)))
+                )
+                .then(
+                    skip_trivia()
+                        .ignore_then(filter_map(|span, token| match token {
+                            Token::Identifier => Ok(span),
+                            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                        }))
+                )
+                .then(
+                    // Optional type annotation: : Type
+                    skip_trivia()
+                        .ignore_then(just(Token::Colon).map_with_span(|_, span| span))
+                        .then(ty_parser())
+                        .or_not()
+                )
+                .then(
+                    // Optional initializer: = expr
+                    skip_trivia()
+                        .ignore_then(just(Token::Equals).map_with_span(|_, span| span))
+                        .then(expr_for_init)
+                        .or_not()
+                )
+                .then(
+                    skip_trivia()
+                        .ignore_then(just(Token::Semicolon).map_with_span(|_, span| span))
+                )
+                .map(|(((((mutability_span, is_mutable), name_span), type_annotation), initializer), semicolon)| {
+                    StmtVariant::VariableDeclaration(VariableDeclarationData {
+                        mutability_span,
+                        is_mutable,
+                        name_span,
+                        type_annotation,
+                        initializer,
+                        semicolon,
+                    })
+                })
+        };
+
+        // Inline expression statement parser (uses expr)
+        let inline_expr_stmt = {
+            let expr_for_stmt = expr.clone();
+            expr_for_stmt
+                .then(
+                    skip_trivia()
+                        .ignore_then(just(Token::Semicolon).map_with_span(|_, span| span))
+                )
+                .map(|(e, semi)| StmtVariant::Expression(e, semi))
+        };
+
+        // Inline statement parser
+        let inline_stmt = inline_var_decl.or(inline_expr_stmt);
+
+        // Code block parser that uses the local expr reference (to avoid mutual recursion)
+        // Syntax: { statement* expression? }
+        let inline_code_block = {
+            let expr_for_block = expr.clone();
+            skip_trivia()
+                .ignore_then(just(Token::LBrace).map_with_span(|_, span| span))
+                .then(
+                    inline_stmt
+                        .map(BlockItem::Statement)
+                        .repeated()
+                        .then(
+                            expr_for_block
+                                .map(BlockItem::TrailingExpression)
+                                .or_not()
+                        )
+                        .map(|(mut statements, trailing)| {
+                            if let Some(expr) = trailing {
+                                statements.push(expr);
+                            }
+                            statements
+                        })
+                )
+                .then(
+                    skip_trivia()
+                        .ignore_then(just(Token::RBrace).map_with_span(|_, span| span))
+                )
+                .map(|((lbrace, items), rbrace)| {
+                    CodeBlockData {
+                        lbrace,
+                        items,
+                        rbrace,
+                    }
+                })
+        };
+
+        // If expression: if condition { then } else { else }
+        // Uses condition_binary for condition to avoid infinite recursion
+        // Uses inline_code_block for blocks (shares expr reference)
+        let if_expr = skip_trivia()
+            .ignore_then(just(Token::If).map_with_span(|_, span| span))
+            .then(condition_binary.clone())
+            .then(inline_code_block.clone())
+            .then(
+                // Optional else clause
+                skip_trivia()
+                    .ignore_then(just(Token::Else).map_with_span(|_, span| span))
+                    .then(
+                        // Either another expression (for else if) or a block
+                        // Using expr.clone() allows `else if` to work via the recursive parser
+                        expr.clone().map(ElseClauseVariant::ElseIf)
+                            .or(inline_code_block.clone().map(ElseClauseVariant::Block))
+                    )
+                    .or_not()
+            )
+            .map(|(((if_span, condition), then_block), else_opt)| {
+                let else_clause = else_opt.map(|(else_span, else_variant)| {
+                    match else_variant {
+                        ElseClauseVariant::Block(block) => ElseClause::Block {
+                            else_span,
+                            block,
+                        },
+                        ElseClauseVariant::ElseIf(if_expr) => ElseClause::ElseIf {
+                            else_span,
+                            if_expr: Box::new(if_expr),
+                        },
+                    }
+                });
+                ExprVariant::If {
+                    if_span,
+                    condition: Box::new(condition),
+                    then_block,
+                    else_clause,
+                }
+            });
+
+        // Full primary expressions (includes arrays, tuples, paren, and if)
+        let primary = float
+            .or(integer)
+            .or(string)
+            .or(boolean)
+            .or(null)
+            .or(array)
+            .or(paren_expr)
+            .or(if_expr)
+            .or(path);
+
         // Postfix expression: primary followed by zero or more postfix operations
         let postfix = primary
             .clone()
@@ -515,15 +758,6 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 })
             });
 
-        // Prefix unary operators: -, +, !, not
-        let unary_op = skip_trivia().ignore_then(
-            just(Token::Minus)
-                .map_with_span(|tok, span| (tok, span))
-                .or(just(Token::Plus).map_with_span(|tok, span| (tok, span)))
-                .or(just(Token::Bang).map_with_span(|tok, span| (tok, span)))
-                .or(just(Token::Not).map_with_span(|tok, span| (tok, span))),
-        );
-
         let unary = unary_op
             .then(expr.clone())
             .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
@@ -531,15 +765,6 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         // Non-assignment expression (unary or postfix)
         // Order matters: try unary first to handle -42, then postfix expressions
         let non_assignment = unary.or(postfix);
-
-        // Binary operator parser - matches any binary operator token
-        let binary_op = skip_trivia().ignore_then(filter_map(|span, token: Token| {
-            if is_binary_operator(&token) {
-                Ok((token, span))
-            } else {
-                Err(Simple::expected_input_found(span, vec![], Some(token)))
-            }
-        }));
 
         // Binary expression: lhs op rhs op rhs ...
         // We parse as a flat left-to-right chain, precedence is handled in semantic phase
@@ -587,6 +812,13 @@ enum ParenContent {
     Unit(Span),
     Grouping(ExprVariant, Span),
     Tuple(Vec<ExprVariant>, Vec<Span>, Span),
+}
+
+/// Helper enum for parsing else clauses
+#[derive(Debug, Clone)]
+enum ElseClauseVariant {
+    Block(CodeBlockData),
+    ElseIf(ExprVariant),
 }
 
 /// Helper enum for postfix operations (calls, member access, and postfix operators)
@@ -708,6 +940,14 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
             rhs,
         } => {
             emit_binary_expr(sink, lhs, operator.clone(), operator_span.clone(), rhs);
+        }
+        ExprVariant::If {
+            if_span,
+            condition,
+            then_block,
+            else_clause,
+        } => {
+            emit_if_expr(sink, if_span.clone(), condition, then_block, else_clause.as_ref());
         }
     }
 }
@@ -979,6 +1219,47 @@ fn emit_binary_expr(
     sink.add_token(SyntaxKind::from(operator), operator_span);
     emit_expr_variant(sink, rhs);
     sink.finish_node(); // ExprBinary
+    sink.finish_node(); // Expression
+}
+
+/// Emit events for an if expression
+fn emit_if_expr(
+    sink: &mut EventSink,
+    if_span: Span,
+    condition: &ExprVariant,
+    then_block: &CodeBlockData,
+    else_clause: Option<&ElseClause>,
+) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprIf);
+
+    // if keyword
+    sink.add_token(SyntaxKind::If, if_span);
+
+    // condition expression
+    emit_expr_variant(sink, condition);
+
+    // then block
+    emit_code_block(sink, then_block);
+
+    // optional else clause
+    if let Some(else_clause) = else_clause {
+        sink.start_node(SyntaxKind::ElseClause);
+        match else_clause {
+            ElseClause::Block { else_span, block } => {
+                sink.add_token(SyntaxKind::Else, else_span.clone());
+                emit_code_block(sink, block);
+            }
+            ElseClause::ElseIf { else_span, if_expr } => {
+                sink.add_token(SyntaxKind::Else, else_span.clone());
+                // Recursively emit the if expression
+                emit_expr_variant(sink, if_expr);
+            }
+        }
+        sink.finish_node(); // ElseClause
+    }
+
+    sink.finish_node(); // ExprIf
     sink.finish_node(); // Expression
 }
 
@@ -1504,5 +1785,49 @@ mod tests {
         let source = "foo.bar";
         let expr = parse_expr_from_source(source);
         assert!(expr.is_path());
+    }
+
+    // ===== If Expression Tests =====
+
+    #[test]
+    fn test_if_without_else() {
+        let source = "if true { 1 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_if());
+    }
+
+    #[test]
+    fn test_if_with_else() {
+        let source = "if true { 1 } else { 2 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_if());
+    }
+
+    #[test]
+    fn test_if_else_if() {
+        let source = "if a { 1 } else if b { 2 } else { 3 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_if());
+    }
+
+    #[test]
+    fn test_if_with_complex_condition() {
+        let source = "if a and b { 1 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_if());
+    }
+
+    #[test]
+    fn test_if_with_statements_in_block() {
+        let source = "if true { let x: Int = 1; x }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_if());
+    }
+
+    #[test]
+    fn test_nested_if() {
+        let source = "if a { if b { 1 } else { 2 } } else { 3 }";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_if());
     }
 }

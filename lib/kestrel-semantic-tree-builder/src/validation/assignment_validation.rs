@@ -110,6 +110,7 @@ fn validate_assignment_target(
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
         | ExprKind::Assignment { .. }
+        | ExprKind::If { .. }
         | ExprKind::Error => {
             ctx.diagnostics().get().throw(
                 CannotAssignToExpressionError {
