@@ -1,0 +1,271 @@
+//! Path expression resolution.
+//!
+//! This module handles resolving path expressions (variable references, function
+//! references, qualified names) including local variable lookup and module path resolution.
+
+use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_tree::expr::Expression;
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::Ty;
+use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+
+use crate::diagnostics::{SelfOutsideInstanceMethodError, UndefinedNameError};
+use crate::queries::ValuePathResolution;
+use crate::utils::get_node_span;
+
+use super::context::BodyResolutionContext;
+use super::expressions::resolve_expression;
+use super::members::resolve_member_chain;
+use super::utils::is_expression_kind;
+
+/// Resolve a path expression (variable reference, function reference, or member access)
+pub fn resolve_path_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // Check for nested expression inside the path (happens with member access on call expressions)
+    // e.g., `obj.method().field` is parsed as ExprPath containing ExprCall
+    if let Some(nested_expr) = find_nested_expression(node) {
+        let base = resolve_expression(&nested_expr, ctx);
+        let trailing_members = extract_trailing_identifiers(node, ctx.source);
+        if trailing_members.is_empty() {
+            return base;
+        }
+        return resolve_member_chain(base, &trailing_members, ctx);
+    }
+
+    // Extract the path segments with their spans
+    let path_with_spans = extract_path_segments_with_spans(node, ctx.source);
+
+    if path_with_spans.is_empty() {
+        return Expression::error(span);
+    }
+
+    // Extract just the names for lookups
+    let path: Vec<String> = path_with_spans.iter().map(|(name, _)| name.clone()).collect();
+    let first_name = &path[0];
+    let first_span = path_with_spans[0].1.clone();
+
+    // First, check if it's a local variable
+    if let Some(local_id) = ctx.local_scope.lookup(first_name) {
+        // Get the type and mutability from the local
+        let local = ctx.local_scope.function().get_local(local_id);
+        let local_ty = local
+            .as_ref()
+            .map(|l| l.ty().clone())
+            .unwrap_or_else(|| Ty::error(span.clone()));
+        let is_mutable = local.as_ref().map(|l| l.is_mutable()).unwrap_or(false);
+
+        let base_expr = Expression::local_ref(local_id, local_ty, is_mutable, first_span);
+
+        // If there are more segments, they are member accesses
+        if path_with_spans.len() == 1 {
+            return base_expr;
+        } else {
+            return resolve_member_chain(base_expr, &path_with_spans[1..], ctx);
+        }
+    }
+
+    // Check if this is 'self' being used outside an instance method
+    if first_name == "self" {
+        // 'self' was not found in local scope, which means we're not in an instance method
+        let context = get_function_context(ctx);
+        let error = SelfOutsideInstanceMethodError {
+            span: first_span.clone(),
+            context,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Not a local - resolve as a value path (module path)
+    match ctx.db.resolve_value_path(path.clone(), ctx.function_id) {
+        ValuePathResolution::Symbol { symbol_id, ty } => {
+            // For now, module-level symbols (functions) are not mutable lvalues
+            // TODO: Support module-level `var` declarations if/when added
+            Expression::symbol_ref(symbol_id, ty, false, span)
+        }
+        ValuePathResolution::Overloaded { candidates } => {
+            Expression::overloaded_ref(candidates, span)
+        }
+        ValuePathResolution::NotFound { segment, index } => {
+            // Report undefined name error
+            let error_span = if index < path_with_spans.len() {
+                path_with_spans[index].1.clone()
+            } else {
+                first_span.clone()
+            };
+            let error = UndefinedNameError {
+                span: error_span,
+                name: segment,
+            };
+            ctx.diagnostics
+                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            Expression::error(span)
+        }
+        ValuePathResolution::Ambiguous { segment, index, candidates } => {
+            // TODO: Report ambiguous name diagnostic
+            let _ = (segment, index, candidates);
+            Expression::error(span)
+        }
+        ValuePathResolution::NotAValue { symbol_id } => {
+            // This is a type reference (e.g., struct name) - may be used for initialization
+            // The actual type resolution happens during call resolution
+            Expression::type_ref(symbol_id, Ty::inferred(span.clone()), span)
+        }
+    }
+}
+
+/// Get a description of the function context for error messages.
+///
+/// Returns descriptions like "static method", "free function", etc.
+fn get_function_context(ctx: &BodyResolutionContext) -> String {
+    let Some(function) = ctx.db.symbol_by_id(ctx.function_id) else {
+        return "this context".to_string();
+    };
+
+    // Check if the function is in a struct or protocol
+    let parent = function.metadata().parent();
+    match parent.as_ref().map(|p| p.metadata().kind()) {
+        Some(KestrelSymbolKind::Struct) | Some(KestrelSymbolKind::Protocol) => {
+            // It's a method - check if static
+            // We can check by looking for 'self' in local scope, but we already know
+            // 'self' wasn't found, so this must be a static method
+            "static method".to_string()
+        }
+        _ => {
+            // Not in a struct/protocol, so it's a free function
+            "free function".to_string()
+        }
+    }
+}
+
+/// Extract path segments with their spans from a path expression node
+fn extract_path_segments_with_spans(node: &SyntaxNode, source: &str) -> Vec<(String, Span)> {
+    let mut segments = Vec::new();
+
+    // ExprPath may contain Path or direct PathElements
+    if let Some(path_node) = node.children().find(|c| c.kind() == SyntaxKind::Path) {
+        // Path contains PathElements
+        for element in path_node.children() {
+            if element.kind() == SyntaxKind::PathElement {
+                if let Some((name, span)) = extract_path_element_name_with_span(&element, source) {
+                    segments.push((name, span));
+                }
+            }
+        }
+    } else {
+        // Direct identifiers
+        for child in node.children() {
+            if child.kind() == SyntaxKind::PathElement {
+                if let Some((name, span)) = extract_path_element_name_with_span(&child, source) {
+                    segments.push((name, span));
+                }
+            }
+        }
+
+        // Fallback: look for Name or Identifier tokens
+        if segments.is_empty() {
+            for elem in node.children_with_tokens() {
+                if let Some(token) = elem.as_token() {
+                    if token.kind() == SyntaxKind::Identifier {
+                        let span = token.text_range();
+                        segments.push((
+                            token.text().to_string(),
+                            span.start().into()..span.end().into(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    segments
+}
+
+/// Extract the name and span from a PathElement node
+fn extract_path_element_name_with_span(element: &SyntaxNode, _source: &str) -> Option<(String, Span)> {
+    // PathElement contains Name or Identifier
+    if let Some(name_node) = element.children().find(|c| c.kind() == SyntaxKind::Name) {
+        return name_node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == SyntaxKind::Identifier)
+            .map(|t| {
+                let range = t.text_range();
+                (t.text().to_string(), range.start().into()..range.end().into())
+            });
+    }
+
+    // Direct Identifier token
+    element
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|t| {
+            let range = t.text_range();
+            (t.text().to_string(), range.start().into()..range.end().into())
+        })
+}
+
+/// Find a nested expression inside a path node
+///
+/// This handles the case where member access on a call expression is emitted as
+/// an ExprPath containing an Expression/ExprCall child.
+/// e.g., `obj.method().field` is parsed as ExprPath containing ExprCall
+fn find_nested_expression(node: &SyntaxNode) -> Option<SyntaxNode> {
+    // We're looking inside an ExprPath node. Normally it contains only identifiers and dots.
+    // But when member access is on a call expression, the parser emits the call inside the ExprPath.
+    // We need to find such nested call expressions.
+
+    for child in node.children() {
+        // Look for Expression wrapper containing a non-path expression
+        if child.kind() == SyntaxKind::Expression {
+            // Check if this Expression contains an ExprCall or other complex (non-path) expression
+            for inner in child.children() {
+                // Only return if it's a complex expression type, not just another path
+                if inner.kind() == SyntaxKind::ExprCall {
+                    return Some(child);
+                }
+            }
+        }
+        // Also check for direct ExprCall nodes
+        if child.kind() == SyntaxKind::ExprCall {
+            return Some(child);
+        }
+    }
+    None
+}
+
+/// Extract trailing identifier tokens after a nested expression in a path
+///
+/// When a path contains a nested expression (e.g., from member access on a call),
+/// this extracts the identifiers that appear after the expression.
+fn extract_trailing_identifiers(node: &SyntaxNode, _source: &str) -> Vec<(String, Span)> {
+    let mut identifiers = Vec::new();
+    let mut found_expression = false;
+
+    for elem in node.children_with_tokens() {
+        if let Some(child) = elem.as_node() {
+            // Mark when we see the nested expression
+            if child.kind() == SyntaxKind::Expression || is_expression_kind(child.kind()) {
+                found_expression = true;
+            }
+        } else if let Some(token) = elem.as_token() {
+            // Only collect identifiers after the expression
+            if found_expression && token.kind() == SyntaxKind::Identifier {
+                let range = token.text_range();
+                identifiers.push((
+                    token.text().to_string(),
+                    range.start().into()..range.end().into(),
+                ));
+            }
+        }
+    }
+
+    identifiers
+}
