@@ -49,10 +49,10 @@ enum Commands {
     },
 }
 
-/// Parse a single file and add it to an existing semantic tree
+/// Parse a single file and add it to the builder
 fn add_file(
     path: &str,
-    semantic_tree: &mut kestrel_semantic_tree_builder::SemanticTree,
+    builder: &mut kestrel_semantic_tree_builder::SemanticTreeBuilder,
     diagnostics: &mut DiagnosticContext,
     verbose: bool,
 ) -> bool {
@@ -91,40 +91,39 @@ fn add_file(
 
     // Add to semantic tree
     let file_id = diagnostics.add_file(path.to_string(), content.clone());
-    kestrel_semantic_tree_builder::add_file_to_tree(
-        semantic_tree,
-        path,
-        &result.tree,
-        &content,
-        diagnostics,
-        file_id,
-    );
+    builder.add_file(path, &result.tree, &content, diagnostics, file_id);
 
     true
 }
 
 fn run_check(files: &[String], show_tree: bool, show_symbols: bool, verbose: bool) -> ExitCode {
+    use kestrel_semantic_tree_builder::{SemanticTreeBuilder, SemanticBinder};
+
     if files.is_empty() {
         eprintln!("error: no input files");
         return ExitCode::from(1);
     }
 
-    let mut semantic_tree = kestrel_semantic_tree_builder::SemanticTree::new();
+    let mut builder = SemanticTreeBuilder::new();
     let mut diagnostics = DiagnosticContext::new();
     let mut parse_ok = true;
 
     // Parse all files
     for file in files {
-        if !add_file(file, &mut semantic_tree, &mut diagnostics, verbose) {
+        if !add_file(file, &mut builder, &mut diagnostics, verbose) {
             parse_ok = false;
         }
     }
+
+    // Build the semantic tree
+    let semantic_tree = builder.build();
 
     // Run binding phase
     if verbose {
         eprintln!("  Running semantic analysis...");
     }
-    kestrel_semantic_tree_builder::bind_tree(&semantic_tree, &mut diagnostics, 0);
+    let mut binder = SemanticBinder::new(&semantic_tree);
+    binder.bind(&mut diagnostics);
 
     // Show results
     if show_tree {
@@ -207,19 +206,24 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
     use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
     use kestrel_semantic_tree::expr::{ExprKind, LiteralValue};
     use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+    use kestrel_semantic_tree_builder::{SemanticTreeBuilder, SemanticBinder};
     use semantic_tree::symbol::Symbol;
 
-    let mut semantic_tree = kestrel_semantic_tree_builder::SemanticTree::new();
+    let mut builder = SemanticTreeBuilder::new();
     let mut diagnostics = DiagnosticContext::new();
 
     // Parse the file
-    if !add_file(file, &mut semantic_tree, &mut diagnostics, verbose) {
+    if !add_file(file, &mut builder, &mut diagnostics, verbose) {
         diagnostics.emit().ok();
         return ExitCode::from(1);
     }
 
+    // Build the semantic tree
+    let semantic_tree = builder.build();
+
     // Run binding phase
-    kestrel_semantic_tree_builder::bind_tree(&semantic_tree, &mut diagnostics, 0);
+    let mut binder = SemanticBinder::new(&semantic_tree);
+    binder.bind(&mut diagnostics);
 
     // Check for errors
     if diagnostics.len() > 0 {

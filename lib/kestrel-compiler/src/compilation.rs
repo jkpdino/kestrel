@@ -2,7 +2,7 @@ use crate::source_file::SourceFile;
 use kestrel_lexer::lex;
 use kestrel_parser::{parse_source_file, Parser};
 use kestrel_reporting::{Diagnostic, DiagnosticContext, IntoDiagnostic, Label};
-use kestrel_semantic_tree_builder::{add_file_to_tree, SemanticTree};
+use kestrel_semantic_tree_builder::{SemanticTree, SemanticTreeBuilder, SemanticBinder};
 
 /// Represents a compiled Kestrel project.
 ///
@@ -33,8 +33,8 @@ impl Compilation {
         let mut diagnostics = DiagnosticContext::new();
         let mut source_files = Vec::new();
 
-        // Create the unified semantic tree
-        let mut semantic_tree = SemanticTree::new();
+        // Create the semantic tree builder
+        let mut builder = SemanticTreeBuilder::new();
 
         // Phase 1, 2 & 3: Lex, parse, and add each file to the semantic tree
         for (name, source) in sources {
@@ -73,8 +73,8 @@ impl Compilation {
                 diagnostics.throw(error_diag, file_id);
             }
 
-            // Phase 3: Add file to the unified semantic tree (emits module validation diagnostics)
-            add_file_to_tree(&mut semantic_tree, &name, &parse_result.tree, &source, &mut diagnostics, file_id);
+            // Phase 3: Add file to the semantic tree builder
+            builder.add_file(&name, &parse_result.tree, &source, &mut diagnostics, file_id);
 
             // Create source file
             let source_file = SourceFile::new(
@@ -85,6 +85,13 @@ impl Compilation {
 
             source_files.push(source_file);
         }
+
+        // Build the semantic tree
+        let semantic_tree = builder.build();
+
+        // Run binding phase (includes validation)
+        let mut binder = SemanticBinder::new(&semantic_tree);
+        binder.bind(&mut diagnostics);
 
         Self {
             source_files,

@@ -4,7 +4,9 @@
 //! with caching for expensive queries like scope computation.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 use kestrel_prelude::primitives;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
@@ -196,21 +198,15 @@ impl Db for SemanticDatabase {
 
     fn scope_for(&self, symbol_id: SymbolId) -> Arc<Scope> {
         // Check cache first
-        {
-            let cache = self.scope_cache.read().expect("RwLock poisoned");
-            if let Some(scope) = cache.get(&symbol_id) {
-                return scope.clone();
-            }
+        if let Some(scope) = self.scope_cache.read().get(&symbol_id) {
+            return scope.clone();
         }
 
         // Compute scope
         let scope = self.compute_scope(symbol_id);
 
         // Cache result
-        {
-            let mut cache = self.scope_cache.write().expect("RwLock poisoned");
-            cache.insert(symbol_id, scope.clone());
-        }
+        self.scope_cache.write().insert(symbol_id, scope.clone());
 
         scope
     }

@@ -111,11 +111,13 @@ impl Test {
 
     /// Compile the test files and store the result
     fn compile(&mut self) {
+        use kestrel_semantic_tree_builder::{SemanticTreeBuilder, SemanticBinder};
+
         if self.context.is_some() {
             return; // Already compiled
         }
 
-        let mut semantic_tree = SemanticTree::new();
+        let mut builder = SemanticTreeBuilder::new();
         let mut diagnostics = DiagnosticContext::new();
         let mut has_parse_errors = false;
 
@@ -142,23 +144,15 @@ impl Test {
             }
 
             let file_id = diagnostics.add_file(file_name.clone(), content.clone());
-            kestrel_semantic_tree_builder::add_file_to_tree(
-                &mut semantic_tree,
-                file_name,
-                &result.tree,
-                content,
-                &mut diagnostics,
-                file_id,
-            );
+            builder.add_file(file_name, &result.tree, content, &mut diagnostics, file_id);
         }
 
-        // Run binding phase
-        kestrel_semantic_tree_builder::bind_tree(&semantic_tree, &mut diagnostics, 0);
+        // Build the semantic tree
+        let semantic_tree = builder.build();
 
-        // Run validation passes
-        if !has_parse_errors {
-            kestrel_semantic_tree_builder::run_validation(&semantic_tree, &mut diagnostics);
-        }
+        // Run binding phase (includes validation)
+        let mut binder = SemanticBinder::new(&semantic_tree);
+        binder.bind(&mut diagnostics);
 
         let has_errors = has_parse_errors || diagnostics.len() > 0;
 

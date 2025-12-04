@@ -4,7 +4,9 @@
 //! efficient lookup by ID or by (kind, name) pairs.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
@@ -34,15 +36,11 @@ impl SymbolRegistry {
         let kind = symbol.metadata().kind();
         let name = symbol.metadata().name().value.clone();
 
-        self.symbols
-            .write()
-            .expect("RwLock poisoned")
-            .insert(id, symbol);
+        self.symbols.write().insert(id, symbol);
 
         // Add to kind+name index for O(1) lookups
         self.kind_name_index
             .write()
-            .expect("RwLock poisoned")
             .entry((kind, name))
             .or_insert_with(Vec::new)
             .push(id);
@@ -50,7 +48,7 @@ impl SymbolRegistry {
 
     /// Get symbol by ID
     pub fn get(&self, id: SymbolId) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        self.symbols.read().expect("RwLock poisoned").get(&id).cloned()
+        self.symbols.read().get(&id).cloned()
     }
 
     /// Register entire symbol tree recursively
@@ -63,18 +61,18 @@ impl SymbolRegistry {
 
     /// Get total number of registered symbols
     pub fn len(&self) -> usize {
-        self.symbols.read().expect("RwLock poisoned").len()
+        self.symbols.read().len()
     }
 
     /// Check if registry is empty
     pub fn is_empty(&self) -> bool {
-        self.symbols.read().expect("RwLock poisoned").is_empty()
+        self.symbols.read().is_empty()
     }
 
     /// Iterate over all symbols
     pub fn iter(&self) -> impl Iterator<Item = (SymbolId, Arc<dyn Symbol<KestrelLanguage>>)> + '_ {
         SymbolRegistryIter {
-            guard: self.symbols.read().expect("RwLock poisoned"),
+            guard: self.symbols.read(),
             keys: None,
         }
     }
@@ -85,8 +83,8 @@ impl SymbolRegistry {
         kind: KestrelSymbolKind,
         name: &str,
     ) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
-        let index = self.kind_name_index.read().expect("RwLock poisoned");
-        let symbols = self.symbols.read().expect("RwLock poisoned");
+        let index = self.kind_name_index.read();
+        let symbols = self.symbols.read();
 
         index
             .get(&(kind, name.to_string()))
@@ -107,7 +105,7 @@ impl Default for SymbolRegistry {
 
 /// Iterator over symbol registry
 struct SymbolRegistryIter<'a> {
-    guard: std::sync::RwLockReadGuard<'a, HashMap<SymbolId, Arc<dyn Symbol<KestrelLanguage>>>>,
+    guard: parking_lot::RwLockReadGuard<'a, HashMap<SymbolId, Arc<dyn Symbol<KestrelLanguage>>>>,
     keys: Option<Vec<SymbolId>>,
 }
 

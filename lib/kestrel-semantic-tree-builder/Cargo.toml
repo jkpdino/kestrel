@@ -12,6 +12,7 @@ kestrel-reporting = { path = "../kestrel-reporting" }
 kestrel-parser = { path = "../kestrel-parser" }
 semantic-tree = { path = "../semantic-tree" }
 downcast-rs = "2.0.2"
+parking_lot = "0.12"
 
 [dev-dependencies]
 kestrel-lexer = { path = "../kestrel-lexer" }
