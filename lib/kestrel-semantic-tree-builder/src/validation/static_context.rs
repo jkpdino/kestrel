@@ -1,68 +1,46 @@
-//! Validation pass for static modifier context
+//! Validator for static modifier context
 //!
 //! Ensures that the `static` keyword is only used inside structs or protocols.
 
-use std::sync::Arc;
-
-use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
-use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use semantic_tree::symbol::Symbol;
 
-use crate::db::SemanticDatabase;
 use crate::diagnostics::{StaticContext, StaticInWrongContextError};
-use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass that ensures static modifier is only used in valid contexts
-pub struct StaticContextPass;
+/// Validator that ensures static modifier is only used in valid contexts
+pub struct StaticContextValidator;
 
-impl StaticContextPass {
+impl StaticContextValidator {
     const NAME: &'static str = "static_context";
+
+    pub fn new() -> Self {
+        Self
+    }
 }
 
-impl ValidationPass for StaticContextPass {
+impl Default for StaticContextValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Validator for StaticContextValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        _db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        config: &ValidationConfig,
-    ) {
-        validate_symbol(root, diagnostics, config, false);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
 
-/// Recursively validate symbols
-///
-/// `in_valid_context` tracks whether we're inside a struct or protocol
-fn validate_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
-    in_valid_context: bool,
-) {
-    let kind = symbol.metadata().kind();
-    let name = &symbol.metadata().name().value;
+        // Only check functions
+        if kind != KestrelSymbolKind::Function {
+            return;
+        }
 
-    // Check if we're entering a valid context for static
-    // Skip the root symbol (which is a placeholder Module with name "<root>")
-    let is_valid_context = matches!(
-        kind,
-        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol
-    ) && name != "<root>";
-    let new_context = in_valid_context || is_valid_context;
-
-    // Check functions for invalid static usage
-    if kind == KestrelSymbolKind::Function {
         // Get the FunctionDataBehavior
-        let behaviors = symbol.metadata().behaviors();
+        let behaviors = ctx.symbol.metadata().behaviors();
         let function_data = behaviors.iter().find_map(|b| {
             if matches!(b.kind(), KestrelBehaviorKind::FunctionData) {
                 b.as_ref().downcast_ref::<FunctionDataBehavior>()
@@ -72,23 +50,22 @@ fn validate_symbol(
         });
 
         if let Some(data) = function_data {
-            if data.is_static() && !in_valid_context {
-                let name = &symbol.metadata().name().value;
-                let span = symbol.metadata().declaration_span().clone();
-                let file_id = get_file_id_for_symbol(symbol, diagnostics);
+            // Static is only valid inside structs or protocols
+            let in_valid_context = ctx.in_struct || ctx.in_protocol;
 
-                diagnostics.throw(StaticInWrongContextError {
-                    span,
-                    name: name.clone(),
-                    context: StaticContext::ModuleLevel,
-                }, file_id);
+            if data.is_static() && !in_valid_context {
+                let name = &ctx.symbol.metadata().name().value;
+                let span = ctx.symbol.metadata().declaration_span().clone();
+
+                ctx.diagnostics().get().throw(
+                    StaticInWrongContextError {
+                        span,
+                        name: name.clone(),
+                        context: StaticContext::ModuleLevel,
+                    },
+                    ctx.file_id,
+                );
             }
         }
     }
-
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        validate_symbol(&child, diagnostics, config, new_context);
-    }
 }
-

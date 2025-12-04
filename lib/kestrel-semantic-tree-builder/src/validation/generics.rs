@@ -1,4 +1,4 @@
-//! Validation pass for generics
+//! Validator for generic type parameter constraints
 //!
 //! Validates generic type declarations and usages:
 //! - Duplicate type parameter names
@@ -10,9 +10,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use kestrel_reporting::DiagnosticContext;
-use kestrel_semantic_tree::error::{DefaultOrderingError, DuplicateTypeParameterError, NonProtocolBoundError, UndeclaredTypeParameterError};
-use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::error::{
+    DefaultOrderingError, DuplicateTypeParameterError, NonProtocolBoundError,
+    UndeclaredTypeParameterError,
+};
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
@@ -23,145 +24,84 @@ use kestrel_semantic_tree::ty::{Constraint, TyKind, WhereClause};
 use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 
-use crate::db::SemanticDatabase;
-use crate::queries::{Db, TypePathResolution};
-use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass for generics
-pub struct GenericsPass;
+/// Validator for generics
+pub struct GenericsValidator;
 
-impl GenericsPass {
+impl GenericsValidator {
     const NAME: &'static str = "generics";
+
+    pub fn new() -> Self {
+        Self
+    }
 }
 
-impl ValidationPass for GenericsPass {
+impl Default for GenericsValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Validator for GenericsValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        _config: &ValidationConfig,
-    ) {
-        validate_symbol(root, db, diagnostics);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
+        let symbol_ref: &dyn Symbol<_> = ctx.symbol.as_ref();
 
-/// Recursively validate symbols for generics issues
-fn validate_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>, db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
-    let kind = symbol.metadata().kind();
-
-    // Dereference Arc to get the trait object for downcasting
-    let symbol_ref: &dyn Symbol<KestrelLanguage> = symbol.as_ref();
-
-    // Check type parameters on symbols that can have them
-    match kind {
-        KestrelSymbolKind::Struct => {
-            if let Some(struct_sym) = symbol_ref.as_any().downcast_ref::<StructSymbol>() {
-                let type_params = struct_sym.type_parameters();
-                validate_type_parameters(
-                    type_params,
-                    symbol,
-                    diagnostics,
-                );
-                validate_where_clause(
-                    struct_sym.where_clause(),
-                    type_params,
-                    symbol,
-                    db,
-                    diagnostics,
-                );
+        // Check type parameters on symbols that can have them
+        match kind {
+            KestrelSymbolKind::Struct => {
+                if let Some(struct_sym) = symbol_ref.as_any().downcast_ref::<StructSymbol>() {
+                    let type_params = struct_sym.type_parameters();
+                    validate_type_parameters(type_params, ctx);
+                    validate_where_clause(struct_sym.where_clause(), type_params, ctx);
+                }
             }
-        }
-        KestrelSymbolKind::Function => {
-            if let Some(func_sym) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
-                let type_params = func_sym.type_parameters();
-                validate_type_parameters(
-                    type_params,
-                    symbol,
-                    diagnostics,
-                );
-                validate_where_clause(
-                    func_sym.where_clause(),
-                    type_params,
-                    symbol,
-                    db,
-                    diagnostics,
-                );
+            KestrelSymbolKind::Function => {
+                if let Some(func_sym) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
+                    let type_params = func_sym.type_parameters();
+                    validate_type_parameters(type_params, ctx);
+                    validate_where_clause(func_sym.where_clause(), type_params, ctx);
+                }
             }
-        }
-        KestrelSymbolKind::Protocol => {
-            if let Some(proto_sym) = symbol_ref.as_any().downcast_ref::<ProtocolSymbol>() {
-                let type_params = proto_sym.type_parameters();
-                validate_type_parameters(
-                    type_params,
-                    symbol,
-                    diagnostics,
-                );
-                validate_where_clause(
-                    proto_sym.where_clause(),
-                    type_params,
-                    symbol,
-                    db,
-                    diagnostics,
-                );
+            KestrelSymbolKind::Protocol => {
+                if let Some(proto_sym) = symbol_ref.as_any().downcast_ref::<ProtocolSymbol>() {
+                    let type_params = proto_sym.type_parameters();
+                    validate_type_parameters(type_params, ctx);
+                    validate_where_clause(proto_sym.where_clause(), type_params, ctx);
+                }
             }
-        }
-        KestrelSymbolKind::TypeAlias => {
-            if let Some(alias_sym) = symbol_ref.as_any().downcast_ref::<TypeAliasSymbol>() {
-                let type_params = alias_sym.type_parameters();
-                validate_type_parameters(
-                    type_params,
-                    symbol,
-                    diagnostics,
-                );
-                validate_where_clause(
-                    alias_sym.where_clause(),
-                    type_params,
-                    symbol,
-                    db,
-                    diagnostics,
-                );
+            KestrelSymbolKind::TypeAlias => {
+                if let Some(alias_sym) = symbol_ref.as_any().downcast_ref::<TypeAliasSymbol>() {
+                    let type_params = alias_sym.type_parameters();
+                    validate_type_parameters(type_params, ctx);
+                    validate_where_clause(alias_sym.where_clause(), type_params, ctx);
+                }
             }
+            _ => {}
         }
-        _ => {}
-    }
-
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        validate_symbol(&child, db, diagnostics);
     }
 }
 
 /// Validate a list of type parameters
-fn validate_type_parameters(
-    type_params: &[Arc<TypeParameterSymbol>],
-    container: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-) {
+fn validate_type_parameters(type_params: &[Arc<TypeParameterSymbol>], ctx: &SymbolContext<'_>) {
     if type_params.is_empty() {
         return;
     }
 
-    let file_id = get_file_id_for_symbol(container, diagnostics);
-
     // Check for duplicates
-    check_duplicate_type_params(type_params, file_id, diagnostics);
+    check_duplicate_type_params(type_params, ctx);
 
     // Check default ordering
-    check_default_ordering(type_params, file_id, diagnostics);
+    check_default_ordering(type_params, ctx);
 }
 
 /// Check for duplicate type parameter names
-fn check_duplicate_type_params(
-    type_params: &[Arc<TypeParameterSymbol>],
-    file_id: usize,
-    diagnostics: &mut DiagnosticContext,
-) {
+fn check_duplicate_type_params(type_params: &[Arc<TypeParameterSymbol>], ctx: &SymbolContext<'_>) {
     // Map from name to first occurrence span
     let mut seen: HashMap<String, Span> = HashMap::new();
 
@@ -175,7 +115,7 @@ fn check_duplicate_type_params(
                 duplicate_span: span,
                 original_span: original_span.clone(),
             };
-            diagnostics.throw(error, file_id);
+            ctx.diagnostics().get().throw(error, ctx.file_id);
         } else {
             seen.insert(name, span);
         }
@@ -183,11 +123,7 @@ fn check_duplicate_type_params(
 }
 
 /// Check that type parameters with defaults come after those without
-fn check_default_ordering(
-    type_params: &[Arc<TypeParameterSymbol>],
-    file_id: usize,
-    diagnostics: &mut DiagnosticContext,
-) {
+fn check_default_ordering(type_params: &[Arc<TypeParameterSymbol>], ctx: &SymbolContext<'_>) {
     // Find first parameter with a default
     let mut first_with_default: Option<&Arc<TypeParameterSymbol>> = None;
 
@@ -204,7 +140,7 @@ fn check_default_ordering(
                 with_default_span: prev_with_default.metadata().name().span.clone(),
                 without_default_span: param.metadata().name().span.clone(),
             };
-            diagnostics.throw(error, file_id);
+            ctx.diagnostics().get().throw(error, ctx.file_id);
             // Only report once per ordering issue
             break;
         }
@@ -215,20 +151,15 @@ fn check_default_ordering(
 fn validate_where_clause(
     where_clause: &WhereClause,
     type_params: &[Arc<TypeParameterSymbol>],
-    container: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
+    ctx: &SymbolContext<'_>,
 ) {
     if where_clause.is_empty() {
         return;
     }
 
-    let file_id = get_file_id_for_symbol(container, diagnostics);
-    let context_id = container.metadata().id();
-
     // Validate each constraint
     for constraint in &where_clause.constraints {
-        validate_constraint(constraint, type_params, context_id, db, file_id, diagnostics);
+        validate_constraint(constraint, type_params, ctx);
     }
 }
 
@@ -236,13 +167,15 @@ fn validate_where_clause(
 fn validate_constraint(
     constraint: &Constraint,
     type_params: &[Arc<TypeParameterSymbol>],
-    context_id: semantic_tree::symbol::SymbolId,
-    db: &SemanticDatabase,
-    file_id: usize,
-    diagnostics: &mut DiagnosticContext,
+    ctx: &SymbolContext<'_>,
 ) {
     match constraint {
-        Constraint::TypeBound { param, param_name, param_span, bounds } => {
+        Constraint::TypeBound {
+            param,
+            param_name,
+            param_span,
+            bounds,
+        } => {
             // Check if the type parameter is undeclared
             if param.is_none() {
                 let available: Vec<String> = type_params
@@ -254,25 +187,19 @@ fn validate_constraint(
                     span: param_span.clone(),
                     available,
                 };
-                diagnostics.throw(error, file_id);
+                ctx.diagnostics().get().throw(error, ctx.file_id);
             }
 
             // Validate each bound type
             for bound in bounds {
-                validate_bound_type(bound, context_id, db, file_id, diagnostics);
+                validate_bound_type(bound, ctx);
             }
         }
     }
 }
 
 /// Validate that a bound type is a valid protocol
-fn validate_bound_type(
-    bound: &kestrel_semantic_tree::ty::Ty,
-    _context_id: semantic_tree::symbol::SymbolId,
-    _db: &SemanticDatabase,
-    file_id: usize,
-    diagnostics: &mut DiagnosticContext,
-) {
+fn validate_bound_type(bound: &kestrel_semantic_tree::ty::Ty, ctx: &SymbolContext<'_>) {
     match bound.kind() {
         // Protocol types are valid bounds
         TyKind::Protocol { .. } => {
@@ -289,7 +216,7 @@ fn validate_bound_type(
                 type_kind: "struct".to_string(),
                 span: bound.span().clone(),
             };
-            diagnostics.throw(error, file_id);
+            ctx.diagnostics().get().throw(error, ctx.file_id);
         }
         // Type aliases are not valid as bounds
         TyKind::TypeAlias { symbol, .. } => {
@@ -298,7 +225,7 @@ fn validate_bound_type(
                 type_kind: "type alias".to_string(),
                 span: bound.span().clone(),
             };
-            diagnostics.throw(error, file_id);
+            ctx.diagnostics().get().throw(error, ctx.file_id);
         }
         // Type parameters are not valid as bounds
         TyKind::TypeParameter(param) => {
@@ -307,7 +234,7 @@ fn validate_bound_type(
                 type_kind: "type parameter".to_string(),
                 span: bound.span().clone(),
             };
-            diagnostics.throw(error, file_id);
+            ctx.diagnostics().get().throw(error, ctx.file_id);
         }
         // All other type kinds are not valid as bounds
         _ => {
@@ -316,8 +243,7 @@ fn validate_bound_type(
                 type_kind: "invalid type".to_string(),
                 span: bound.span().clone(),
             };
-            diagnostics.throw(error, file_id);
+            ctx.diagnostics().get().throw(error, ctx.file_id);
         }
     }
 }
-

@@ -1,6 +1,6 @@
-//! Validation pass for import declarations
+//! Validator for import declarations
 //!
-//! This pass validates that:
+//! This validator validates that:
 //! - Module paths resolve to actual modules
 //! - Imported items exist in the target module
 //! - Imported items are visible from the importing scope
@@ -12,71 +12,57 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::error::*;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
-use crate::db::SemanticDatabase;
 use crate::queries::{self, Db};
 use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass for import declarations
-pub struct ImportValidationPass;
+/// Validator for import declarations
+pub struct ImportValidator;
 
-impl ImportValidationPass {
+impl ImportValidator {
     const NAME: &'static str = "imports";
+
+    pub fn new() -> Self {
+        Self
+    }
 }
 
-impl ValidationPass for ImportValidationPass {
+impl Default for ImportValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Validator for ImportValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        _config: &ValidationConfig,
-    ) {
-        // Walk the tree and validate all import symbols
-        validate_imports_in_tree(root, db, diagnostics);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
 
-/// Recursively walk the tree and validate import symbols
-fn validate_imports_in_tree(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
-) {
-    // Check if this is a scope that contains imports (Module or SourceFile)
-    match symbol.metadata().kind() {
-        KestrelSymbolKind::Module | KestrelSymbolKind::SourceFile => {
-            validate_imports_in_scope(symbol, db, diagnostics);
+        // Check if this is a scope that contains imports (Module or SourceFile)
+        if matches!(
+            kind,
+            KestrelSymbolKind::Module | KestrelSymbolKind::SourceFile
+        ) {
+            validate_imports_in_scope(ctx);
         }
-        _ => {}
-    }
-
-    // Recurse into children
-    for child in symbol.metadata().children() {
-        validate_imports_in_tree(&child, db, diagnostics);
     }
 }
 
 /// Validate all imports in a given scope
-fn validate_imports_in_scope(
-    scope_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
-) {
-    let scope_id = scope_symbol.metadata().id();
+fn validate_imports_in_scope(ctx: &SymbolContext<'_>) {
+    let scope_id = ctx.symbol.metadata().id();
 
     // Get all import symbols in this scope
-    let import_symbols: Vec<_> = scope_symbol
+    let import_symbols: Vec<_> = ctx
+        .symbol
         .metadata()
         .children()
         .into_iter()
@@ -85,19 +71,18 @@ fn validate_imports_in_scope(
 
     // Validate each import
     for import_symbol in &import_symbols {
-        validate_import(import_symbol, scope_id, db, diagnostics);
+        validate_import(import_symbol, scope_id, ctx);
     }
 
     // Check for import conflicts (whole-module imports)
-    check_import_conflicts(&import_symbols, scope_symbol, db, diagnostics);
+    check_import_conflicts(&import_symbols, ctx);
 }
 
 /// Validate a single import symbol
 fn validate_import(
     import_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    scope_id: semantic_tree::symbol::SymbolId,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
+    _scope_id: semantic_tree::symbol::SymbolId,
+    ctx: &SymbolContext<'_>,
 ) {
     // Get the import data from behavior
     let import_data = match queries::get_import_data(import_symbol) {
@@ -109,11 +94,11 @@ fn validate_import(
     };
 
     let import_id = import_symbol.metadata().id();
-    let file_id = get_file_id_for_symbol(import_symbol, diagnostics);
+    let file_id = get_file_id_for_symbol(import_symbol, &mut *ctx.diagnostics().get());
 
     // 1. Validate module path resolution
     let module_id = match queries::resolve_module_path(
-        db,
+        ctx.db,
         import_data.module_path().to_vec(),
         import_id,
     ) {
@@ -125,13 +110,13 @@ fn validate_import(
             if err.failed_segment_index < segments.len() {
                 err.failed_segment_span = segments[err.failed_segment_index].1.clone();
             }
-            diagnostics.throw(err, file_id);
+            ctx.diagnostics().get().throw(err, file_id);
             return;
         }
     };
 
     // Get the module symbol
-    let module_symbol = match db.symbol_by_id(module_id) {
+    let module_symbol = match ctx.db.symbol_by_id(module_id) {
         Some(s) => s,
         None => return,
     };
@@ -141,23 +126,24 @@ fn validate_import(
         // import A.B.C.(D, E)
         for item in import_data.items() {
             // Find the symbol in the module's visible children using query
-            let target = db.find_child_by_name(module_id, &item.name);
+            let target = ctx.db.find_child_by_name(module_id, &item.name);
 
             match target {
                 Some(target_symbol) => {
                     let target_id = target_symbol.metadata().id();
 
                     // Check visibility using query
-                    if !queries::is_visible_from(db, target_id, import_id) {
+                    if !queries::is_visible_from(ctx.db, target_id, import_id) {
                         // Get the actual visibility from the target symbol
                         let (visibility_str, _decl_span) = get_visibility_info(&target_symbol);
 
                         // Get cross-file diagnostic info
-                        let declaration_file_id = get_file_id_for_symbol(&target_symbol, diagnostics);
+                        let declaration_file_id =
+                            get_file_id_for_symbol(&target_symbol, &mut *ctx.diagnostics().get());
                         // Point to the target's name identifier, not the whole declaration
                         let declaration_span = Some(target_symbol.metadata().name().span.clone());
 
-                        diagnostics.throw(
+                        ctx.diagnostics().get().throw(
                             SymbolNotVisibleError {
                                 symbol_name: item.name.clone(),
                                 visibility: visibility_str,
@@ -170,7 +156,7 @@ fn validate_import(
                     }
                 }
                 None => {
-                    diagnostics.throw(
+                    ctx.diagnostics().get().throw(
                         SymbolNotFoundInModuleError {
                             symbol_name: item.name.clone(),
                             module_path: import_data.module_path().to_vec(),
@@ -189,16 +175,14 @@ fn validate_import(
 /// Check for conflicts when doing whole-module imports
 fn check_import_conflicts(
     import_symbols: &[Arc<dyn Symbol<KestrelLanguage>>],
-    parent: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
+    ctx: &SymbolContext<'_>,
 ) {
     // Build a map of all names that are imported or declared
     let mut name_sources: HashMap<String, Vec<NameSource>> = HashMap::new();
 
     // First, collect all specific imports and local declarations
-    for child in parent.metadata().children() {
-        let file_id = get_file_id_for_symbol(&child, diagnostics);
+    for child in ctx.symbol.metadata().children() {
+        let file_id = get_file_id_for_symbol(&child, &mut *ctx.diagnostics().get());
 
         match child.metadata().kind() {
             KestrelSymbolKind::Import => {
@@ -211,7 +195,7 @@ fn check_import_conflicts(
                         if let Some(existing_sources) = name_sources.get(&name) {
                             // Report error for duplicate import
                             if let Some(first) = existing_sources.first() {
-                                diagnostics.throw(
+                                ctx.diagnostics().get().throw(
                                     ImportConflictError {
                                         name: name.clone(),
                                         import_span: item.span.clone(),
@@ -267,11 +251,12 @@ fn check_import_conflicts(
         }
 
         let import_id = import_symbol.metadata().id();
-        let import_file_id = get_file_id_for_symbol(import_symbol, diagnostics);
+        let import_file_id =
+            get_file_id_for_symbol(import_symbol, &mut *ctx.diagnostics().get());
 
         // Resolve the module
         let module_id = match queries::resolve_module_path(
-            db,
+            ctx.db,
             import_data.module_path().to_vec(),
             import_id,
         ) {
@@ -280,14 +265,14 @@ fn check_import_conflicts(
         };
 
         // Check each visible symbol from the module using query
-        for child in db.visible_children_from(module_id, import_id) {
+        for child in ctx.db.visible_children_from(module_id, import_id) {
             let name = child.metadata().name().value.clone();
 
             // Check if this name conflicts with existing names
             if let Some(sources) = name_sources.get(&name) {
                 for source in sources {
                     // Report conflict
-                    diagnostics.throw(
+                    ctx.diagnostics().get().throw(
                         ImportConflictError {
                             name: name.clone(),
                             import_span: import_symbol.metadata().span(),
@@ -311,7 +296,9 @@ struct NameSource {
 }
 
 /// Get visibility information from a symbol for error reporting
-fn get_visibility_info(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (String, Option<kestrel_span::Span>) {
+fn get_visibility_info(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> (String, Option<kestrel_span::Span>) {
     use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 
     match symbol.visibility_behavior() {
@@ -326,4 +313,3 @@ fn get_visibility_info(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (String, Op
         None => ("internal".to_string(), Some(symbol.metadata().span())),
     }
 }
-

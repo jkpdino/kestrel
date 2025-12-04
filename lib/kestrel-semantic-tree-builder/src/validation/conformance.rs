@@ -1,12 +1,12 @@
-//! Validation pass for protocol conformance and inheritance
+//! Validator for protocol conformance and inheritance
 //!
-//! This pass checks:
+//! This validator checks:
 //! - Circular protocol inheritance (protocol A: B where protocol B: A)
 //! - Conforming types implement all required methods
 //! - Method signatures match protocol requirements
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::callable::{CallableSignature, SignatureType};
@@ -25,19 +25,46 @@ use crate::diagnostics::{
     CircularProtocolInheritanceError, MissingProtocolMethodError, WrongMethodReturnTypeError,
 };
 use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass that checks protocol conformance and inheritance rules
-pub struct ConformancePass;
+/// Validator that checks protocol conformance and inheritance rules
+pub struct ConformanceValidator {
+    /// Collected protocols during the walk
+    protocols: Mutex<Vec<CollectedProtocol>>,
+    /// Collected structs during the walk
+    structs: Mutex<Vec<CollectedStruct>>,
+}
 
-impl ConformancePass {
+/// Data collected for protocols
+struct CollectedProtocol {
+    symbol: Arc<dyn Symbol<KestrelLanguage>>,
+    protocol: Arc<ProtocolSymbol>,
+}
+
+/// Data collected for structs
+struct CollectedStruct {
+    symbol: Arc<dyn Symbol<KestrelLanguage>>,
+    struct_sym: Arc<StructSymbol>,
+}
+
+impl ConformanceValidator {
     const NAME: &'static str = "conformance";
+
+    pub fn new() -> Self {
+        Self {
+            protocols: Mutex::new(Vec::new()),
+            structs: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Default for ConformanceValidator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Get the resolved conformances from a symbol's ConformancesBehavior
-///
-/// Returns the conformances from the symbol's ConformancesBehavior.
-/// Returns an empty vec if no ConformancesBehavior exists.
 fn get_conformances(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Vec<Ty> {
     symbol
         .conformances_behavior()
@@ -45,15 +72,7 @@ fn get_conformances(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Vec<Ty> {
         .unwrap_or_default()
 }
 
-/// Check if a symbol has any conformances
-fn has_conformances(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> bool {
-    !get_conformances(symbol).is_empty()
-}
-
 /// Get the Arc<ProtocolSymbol> from a symbol's TypedBehavior
-///
-/// Protocol symbols have a TypedBehavior that stores their Ty::Protocol,
-/// which contains the Arc<ProtocolSymbol>.
 fn get_protocol_arc_from_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Arc<ProtocolSymbol>> {
     symbol.typed_behavior().and_then(|tb| {
         if let TyKind::Protocol { symbol, .. } = tb.ty().kind() {
@@ -64,51 +83,47 @@ fn get_protocol_arc_from_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Op
     })
 }
 
-impl ValidationPass for ConformancePass {
+impl Validator for ConformanceValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        config: &ValidationConfig,
-    ) {
-        validate_symbol(root, db, diagnostics, config);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
 
-/// Recursively validate symbols, looking for protocols and structs with conformances
-fn validate_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
-) {
-    let kind = symbol.metadata().kind();
+        // Collect protocols
+        if kind == KestrelSymbolKind::Protocol {
+            if let Some(protocol) = get_protocol_arc_from_symbol(ctx.symbol) {
+                self.protocols.lock().unwrap().push(CollectedProtocol {
+                    symbol: ctx.symbol.clone(),
+                    protocol,
+                });
+            }
+        }
 
-    // Check protocols for circular inheritance
-    if kind == KestrelSymbolKind::Protocol {
-        // We need Arc<ProtocolSymbol> to pass to check_circular_inheritance
-        // Try to get it via the typed behavior which stores the protocol type
-        let protocol_arc = get_protocol_arc_from_symbol(symbol);
-        if let Some(protocol) = protocol_arc {
-            check_circular_inheritance(&protocol, symbol, db, diagnostics, config);
+        // Collect structs with conformances
+        if kind == KestrelSymbolKind::Struct {
+            if !get_conformances(ctx.symbol).is_empty() {
+                if let Some(struct_sym) = ctx.symbol.clone().into_any_arc().downcast::<StructSymbol>().ok() {
+                    self.structs.lock().unwrap().push(CollectedStruct {
+                        symbol: ctx.symbol.clone(),
+                        struct_sym,
+                    });
+                }
+            }
         }
     }
 
-    // Check structs for protocol conformance
-    if kind == KestrelSymbolKind::Struct {
-        if let Some(struct_sym) = symbol.as_ref().downcast_ref::<StructSymbol>() {
-            check_struct_conformance(struct_sym, symbol, db, diagnostics, config);
+    fn finalize(&self, db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
+        // Check protocols for circular inheritance
+        for collected in self.protocols.lock().unwrap().iter() {
+            check_circular_inheritance(&collected.protocol, &collected.symbol, db, diagnostics);
         }
-    }
 
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        validate_symbol(&child, db, diagnostics, config);
+        // Check structs for protocol conformance
+        for collected in self.structs.lock().unwrap().iter() {
+            check_struct_conformance(&collected.struct_sym, &collected.symbol, db, diagnostics);
+        }
     }
 }
 
@@ -118,7 +133,6 @@ fn check_circular_inheritance(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     db: &SemanticDatabase,
     diagnostics: &mut DiagnosticContext,
-    _config: &ValidationConfig,
 ) {
     let protocol_name = &protocol.metadata().name().value;
 
@@ -170,8 +184,6 @@ fn check_inheritance_cycle(
                 return Some(cycle);
             }
         }
-        // Note: Error types are unresolved and can't be checked for cycles yet
-        // This is handled during type resolution
     }
 
     detector.exit();
@@ -184,12 +196,9 @@ fn check_struct_conformance(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     db: &SemanticDatabase,
     diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
 ) {
-    // Get conformances from ConformancesBehavior
     let conformances = get_conformances(symbol);
 
-    // Skip if no conformances
     if conformances.is_empty() {
         return;
     }
@@ -198,7 +207,7 @@ fn check_struct_conformance(
     let struct_id = struct_sym.metadata().id();
     let file_id = get_file_id_for_symbol(symbol, diagnostics);
 
-    // Collect all methods implemented by the struct (signature -> (method, return_type))
+    // Collect all methods implemented by the struct
     let struct_methods = collect_methods_from_symbol(symbol);
     let struct_method_map: HashMap<CallableSignature, (&Arc<FunctionSymbol>, SignatureType)> = struct_methods
         .iter()
@@ -207,10 +216,9 @@ fn check_struct_conformance(
 
     // Check each conformance
     for conformance_ty in &conformances {
-        // Resolve the protocol type
         let protocol_symbol = match resolve_protocol_type(conformance_ty, struct_id, db) {
             Some(proto) => proto,
-            None => continue, // Unresolved types are handled by type resolution errors
+            None => continue,
         };
 
         let protocol_name = &protocol_symbol.metadata().name().value;
@@ -225,28 +233,32 @@ fn check_struct_conformance(
 
             match struct_method_map.get(sig) {
                 None => {
-                    // Method not found - report error
                     let span = struct_sym.metadata().declaration_span().clone();
 
-                    diagnostics.throw(MissingProtocolMethodError {
-                        span,
-                        struct_name: struct_name.clone(),
-                        protocol_name: protocol_name.clone(),
-                        method_name: method_name.clone(),
-                    }, file_id);
+                    diagnostics.throw(
+                        MissingProtocolMethodError {
+                            span,
+                            struct_name: struct_name.clone(),
+                            protocol_name: protocol_name.clone(),
+                            method_name: method_name.clone(),
+                        },
+                        file_id,
+                    );
                 }
                 Some((_struct_method, struct_return_type)) => {
-                    // Method found - check return type matches
                     if struct_return_type != &required_return_type {
                         let span = struct_sym.metadata().declaration_span().clone();
 
-                        diagnostics.throw(WrongMethodReturnTypeError {
-                            span,
-                            method_name: method_name.clone(),
-                            protocol_name: protocol_name.clone(),
-                            expected_type: format!("{:?}", required_return_type),
-                            actual_type: format!("{:?}", struct_return_type),
-                        }, file_id);
+                        diagnostics.throw(
+                            WrongMethodReturnTypeError {
+                                span,
+                                method_name: method_name.clone(),
+                                protocol_name: protocol_name.clone(),
+                                expected_type: format!("{:?}", required_return_type),
+                                actual_type: format!("{:?}", struct_return_type),
+                            },
+                            file_id,
+                        );
                     }
                 }
             }
@@ -256,32 +268,24 @@ fn check_struct_conformance(
 
 /// Resolve a Ty to a ProtocolSymbol if it's a protocol type
 fn resolve_protocol_type(
-    ty: &kestrel_semantic_tree::ty::Ty,
-    context: SymbolId,
-    db: &SemanticDatabase,
+    ty: &Ty,
+    _context: SymbolId,
+    _db: &SemanticDatabase,
 ) -> Option<Arc<ProtocolSymbol>> {
     match ty.kind() {
-        // Already resolved to a protocol
         TyKind::Protocol { symbol, .. } => Some(symbol.clone()),
-
-        // Error types and other unresolved types - resolution errors are reported elsewhere
         _ => None,
     }
 }
 
 /// Collect all methods from a symbol (struct or protocol)
-fn collect_methods_from_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-) -> Vec<Arc<FunctionSymbol>> {
+fn collect_methods_from_symbol(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Vec<Arc<FunctionSymbol>> {
     symbol
         .metadata()
         .children()
         .into_iter()
         .filter(|child| child.metadata().kind() == KestrelSymbolKind::Function)
-        .filter_map(|child| {
-            // Try to downcast to FunctionSymbol
-            child.into_any_arc().downcast::<FunctionSymbol>().ok()
-        })
+        .filter_map(|child| child.into_any_arc().downcast::<FunctionSymbol>().ok())
         .collect()
 }
 
@@ -307,13 +311,12 @@ fn collect_protocol_methods_recursive(
 ) {
     let id = protocol.metadata().id();
 
-    // Avoid visiting the same protocol twice (handles diamond inheritance)
     if visited.contains(&id) {
         return;
     }
     visited.insert(id);
 
-    // First, collect methods from inherited protocols (so child methods can override)
+    // First, collect methods from inherited protocols
     let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
     for inherited_ty in get_conformances(&protocol_dyn) {
         if let Some(inherited_protocol) = resolve_protocol_type(&inherited_ty, id, db) {
@@ -321,8 +324,7 @@ fn collect_protocol_methods_recursive(
         }
     }
 
-    // Then collect methods from this protocol (overrides inherited)
-    let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
+    // Then collect methods from this protocol
     for method in collect_methods_from_symbol(&protocol_dyn) {
         let sig = method.signature();
         methods.insert(sig, method);

@@ -1,19 +1,19 @@
-//! Validation pass for detecting circular generic constraint dependencies
+//! Validator for detecting circular generic constraint dependencies
 //!
-//! This pass detects cycles in generic where clause constraints.
+//! This validator detects cycles in generic where clause constraints.
 //! Currently, direct cycles like `T: U, U: T` are already caught by the
 //! "non-protocol bound" validation (type parameters can't be used as bounds).
 //!
-//! This pass detects more subtle cycles that could occur through protocol
+//! This validator detects more subtle cycles that could occur through protocol
 //! type parameters, such as:
 //! - `func foo[T: Proto[U], U: Proto[T]]()` where the protocol constraints
 //!   create circular dependencies during instantiation.
 //!
-//! The algorithm builds a dependency graph between type parameters based on
-//! their where clause bounds and detects cycles using DFS.
+//! The algorithm collects symbols with generics during the walk, builds a
+//! dependency graph, and detects cycles in the finalize phase.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -30,87 +30,104 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::db::SemanticDatabase;
 use crate::diagnostics::{CircularConstraintError, CycleMember};
 use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass that detects circular generic constraint dependencies
-pub struct ConstraintCyclePass;
-
-impl ConstraintCyclePass {
-    const NAME: &'static str = "constraint_cycles";
+/// Validator that detects circular generic constraint dependencies
+pub struct ConstraintCycleValidator {
+    /// Collected symbols with generics during the walk
+    generic_symbols: Mutex<Vec<CollectedGeneric>>,
 }
 
-impl ValidationPass for ConstraintCyclePass {
+/// Data collected for symbols with generics
+struct CollectedGeneric {
+    symbol: Arc<dyn Symbol<KestrelLanguage>>,
+    type_params: Vec<Arc<TypeParameterSymbol>>,
+    where_clause: WhereClause,
+}
+
+impl ConstraintCycleValidator {
+    const NAME: &'static str = "constraint_cycles";
+
+    pub fn new() -> Self {
+        Self {
+            generic_symbols: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Default for ConstraintCycleValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Validator for ConstraintCycleValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        _db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        _config: &ValidationConfig,
-    ) {
-        validate_symbol(root, diagnostics);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
+        let symbol_ref: &dyn Symbol<KestrelLanguage> = ctx.symbol.as_ref();
 
-/// Recursively validate symbols for constraint cycles
-fn validate_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-) {
-    let kind = symbol.metadata().kind();
-    let symbol_ref: &dyn Symbol<KestrelLanguage> = symbol.as_ref();
+        // Collect symbols with type parameters
+        let collected = match kind {
+            KestrelSymbolKind::Struct => {
+                symbol_ref.as_any().downcast_ref::<StructSymbol>().map(|s| {
+                    CollectedGeneric {
+                        symbol: ctx.symbol.clone(),
+                        type_params: s.type_parameters().to_vec(),
+                        where_clause: s.where_clause().clone(),
+                    }
+                })
+            }
+            KestrelSymbolKind::Function => {
+                symbol_ref.as_any().downcast_ref::<FunctionSymbol>().map(|s| {
+                    CollectedGeneric {
+                        symbol: ctx.symbol.clone(),
+                        type_params: s.type_parameters().to_vec(),
+                        where_clause: s.where_clause().clone(),
+                    }
+                })
+            }
+            KestrelSymbolKind::Protocol => {
+                symbol_ref.as_any().downcast_ref::<ProtocolSymbol>().map(|s| {
+                    CollectedGeneric {
+                        symbol: ctx.symbol.clone(),
+                        type_params: s.type_parameters().to_vec(),
+                        where_clause: s.where_clause().clone(),
+                    }
+                })
+            }
+            KestrelSymbolKind::TypeAlias => {
+                symbol_ref.as_any().downcast_ref::<TypeAliasSymbol>().map(|s| {
+                    CollectedGeneric {
+                        symbol: ctx.symbol.clone(),
+                        type_params: s.type_parameters().to_vec(),
+                        where_clause: s.where_clause().clone(),
+                    }
+                })
+            }
+            _ => None,
+        };
 
-    // Check type parameters on symbols that can have them
-    match kind {
-        KestrelSymbolKind::Struct => {
-            if let Some(struct_sym) = symbol_ref.as_any().downcast_ref::<StructSymbol>() {
-                check_constraint_cycles(
-                    struct_sym.type_parameters(),
-                    struct_sym.where_clause(),
-                    symbol,
-                    diagnostics,
-                );
+        if let Some(collected) = collected {
+            if !collected.type_params.is_empty() && !collected.where_clause.is_empty() {
+                self.generic_symbols.lock().unwrap().push(collected);
             }
         }
-        KestrelSymbolKind::Function => {
-            if let Some(func_sym) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
-                check_constraint_cycles(
-                    func_sym.type_parameters(),
-                    func_sym.where_clause(),
-                    symbol,
-                    diagnostics,
-                );
-            }
-        }
-        KestrelSymbolKind::Protocol => {
-            if let Some(proto_sym) = symbol_ref.as_any().downcast_ref::<ProtocolSymbol>() {
-                check_constraint_cycles(
-                    proto_sym.type_parameters(),
-                    proto_sym.where_clause(),
-                    symbol,
-                    diagnostics,
-                );
-            }
-        }
-        KestrelSymbolKind::TypeAlias => {
-            if let Some(alias_sym) = symbol_ref.as_any().downcast_ref::<TypeAliasSymbol>() {
-                check_constraint_cycles(
-                    alias_sym.type_parameters(),
-                    alias_sym.where_clause(),
-                    symbol,
-                    diagnostics,
-                );
-            }
-        }
-        _ => {}
     }
 
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        validate_symbol(&child, diagnostics);
+    fn finalize(&self, _db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
+        // Check each collected symbol for constraint cycles
+        for collected in self.generic_symbols.lock().unwrap().iter() {
+            check_constraint_cycles(
+                &collected.type_params,
+                &collected.where_clause,
+                &collected.symbol,
+                diagnostics,
+            );
+        }
     }
 }
 
@@ -124,10 +141,6 @@ fn check_constraint_cycles(
     container: &Arc<dyn Symbol<KestrelLanguage>>,
     diagnostics: &mut DiagnosticContext,
 ) {
-    if type_params.is_empty() || where_clause.is_empty() {
-        return;
-    }
-
     let file_id = get_file_id_for_symbol(container, diagnostics);
 
     // Build dependency graph: param_id -> [param_ids it depends on]
@@ -267,4 +280,3 @@ fn collect_type_param_refs_recursive(ty: &Ty, refs: &mut Vec<SymbolId>) {
         _ => {}
     }
 }
-

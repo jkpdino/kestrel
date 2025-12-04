@@ -1,62 +1,51 @@
-//! Validation pass for function bodies
+//! Validator for function bodies
 //!
 //! Ensures that functions outside of protocols have bodies.
 
-use std::sync::Arc;
-
-use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
-use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use semantic_tree::symbol::Symbol;
 
-use crate::db::SemanticDatabase;
 use crate::diagnostics::FunctionMissingBodyError;
-use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass that ensures functions have bodies (except in protocols)
-pub struct FunctionBodyPass;
+/// Validator that ensures functions have bodies (except in protocols)
+pub struct FunctionBodyValidator;
 
-impl FunctionBodyPass {
+impl FunctionBodyValidator {
     const NAME: &'static str = "function_body";
+
+    pub fn new() -> Self {
+        Self
+    }
 }
 
-impl ValidationPass for FunctionBodyPass {
+impl Default for FunctionBodyValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Validator for FunctionBodyValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        _db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        config: &ValidationConfig,
-    ) {
-        validate_symbol(root, diagnostics, config, false);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
 
-/// Recursively validate symbols
-///
-/// `in_protocol` tracks whether we're inside a protocol (where bodies are forbidden)
-fn validate_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
-    in_protocol: bool,
-) {
-    let kind = symbol.metadata().kind();
+        // Only check functions
+        if kind != KestrelSymbolKind::Function {
+            return;
+        }
 
-    // Track if we're entering a protocol
-    let in_protocol = in_protocol || kind == KestrelSymbolKind::Protocol;
+        // Skip functions inside protocols - they're not supposed to have bodies
+        if ctx.in_protocol {
+            return;
+        }
 
-    // Check functions
-    if kind == KestrelSymbolKind::Function {
         // Get the FunctionDataBehavior
-        let behaviors = symbol.metadata().behaviors();
+        let behaviors = ctx.symbol.metadata().behaviors();
         let function_data = behaviors.iter().find_map(|b| {
             if matches!(b.kind(), KestrelBehaviorKind::FunctionData) {
                 b.as_ref().downcast_ref::<FunctionDataBehavior>()
@@ -66,23 +55,18 @@ fn validate_symbol(
         });
 
         if let Some(data) = function_data {
-            // Only check functions outside protocols
-            if !in_protocol && !data.has_body() {
-                let name = &symbol.metadata().name().value;
-                let span = symbol.metadata().declaration_span().clone();
-                let file_id = get_file_id_for_symbol(symbol, diagnostics);
+            if !data.has_body() {
+                let name = &ctx.symbol.metadata().name().value;
+                let span = ctx.symbol.metadata().declaration_span().clone();
 
-                diagnostics.throw(FunctionMissingBodyError {
-                    span,
-                    function_name: name.clone(),
-                }, file_id);
+                ctx.diagnostics().get().throw(
+                    FunctionMissingBodyError {
+                        span,
+                        function_name: name.clone(),
+                    },
+                    ctx.file_id,
+                );
             }
         }
     }
-
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        validate_symbol(&child, diagnostics, config, in_protocol);
-    }
 }
-

@@ -1,4 +1,4 @@
-//! Validation pass for duplicate symbols
+//! Validator for duplicate symbols
 //!
 //! Ensures no duplicate symbols exist within a scope:
 //! - No duplicate type names (struct, protocol, type alias)
@@ -10,81 +10,64 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
-use crate::db::SemanticDatabase;
 use crate::diagnostics::{DuplicateSymbolDifferentKindError, DuplicateSymbolError};
 use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass that ensures no duplicate symbols exist
-pub struct DuplicateSymbolPass;
+/// Validator that ensures no duplicate symbols exist
+pub struct DuplicateSymbolValidator;
 
-impl DuplicateSymbolPass {
+impl DuplicateSymbolValidator {
     const NAME: &'static str = "duplicate_symbol";
+
+    pub fn new() -> Self {
+        Self
+    }
 }
 
-impl ValidationPass for DuplicateSymbolPass {
+impl Default for DuplicateSymbolValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Validator for DuplicateSymbolValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        _db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        config: &ValidationConfig,
-    ) {
-        validate_symbol(root, diagnostics, config);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
 
-/// Recursively validate symbols for duplicates
-fn validate_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
-) {
-    let kind = symbol.metadata().kind();
+        // Check for duplicate types in scopes that can contain types
+        if matches!(
+            kind,
+            KestrelSymbolKind::Module | KestrelSymbolKind::SourceFile
+        ) {
+            check_duplicate_types(ctx);
+        }
 
-    // Check for duplicate types in scopes that can contain types
-    // (Module, SourceFile)
-    if matches!(
-        kind,
-        KestrelSymbolKind::Module | KestrelSymbolKind::SourceFile
-    ) {
-        check_duplicate_types(symbol, diagnostics, config);
-    }
-
-    // Check for duplicate members in types
-    if matches!(
-        kind,
-        KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol
-    ) {
-        check_duplicate_members(symbol, diagnostics, config);
-    }
-
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        validate_symbol(&child, diagnostics, config);
+        // Check for duplicate members in types
+        if matches!(
+            kind,
+            KestrelSymbolKind::Struct | KestrelSymbolKind::Protocol
+        ) {
+            check_duplicate_members(ctx);
+        }
     }
 }
 
 /// Check for duplicate type names within a scope
-fn check_duplicate_types(
-    scope: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
-) {
+fn check_duplicate_types(ctx: &SymbolContext<'_>) {
     // Map from name to (first symbol, kind description)
     let mut types: HashMap<String, (Arc<dyn Symbol<KestrelLanguage>>, &'static str)> =
         HashMap::new();
 
-    for child in scope.metadata().children() {
+    for child in ctx.symbol.metadata().children() {
         let child_kind = child.metadata().kind();
 
         // Only check type-like symbols
@@ -99,26 +82,32 @@ fn check_duplicate_types(
 
         if let Some((first, first_kind)) = types.get(&name) {
             // Duplicate found
-            let file_id = get_file_id_for_symbol(&child, diagnostics);
-            let first_file_id = get_file_id_for_symbol(first, diagnostics);
+            let file_id = get_file_id_for_symbol(&child, &mut *ctx.diagnostics().get());
+            let first_file_id = get_file_id_for_symbol(first, &mut *ctx.diagnostics().get());
 
             if kind_desc == *first_kind {
-                diagnostics.throw(DuplicateSymbolError {
-                    name: name.clone(),
-                    kind: kind_desc.to_string(),
-                    original_span: first.metadata().declaration_span().clone(),
-                    original_file_id: first_file_id,
-                    duplicate_span: child.metadata().declaration_span().clone(),
-                }, file_id);
+                ctx.diagnostics().get().throw(
+                    DuplicateSymbolError {
+                        name: name.clone(),
+                        kind: kind_desc.to_string(),
+                        original_span: first.metadata().declaration_span().clone(),
+                        original_file_id: first_file_id,
+                        duplicate_span: child.metadata().declaration_span().clone(),
+                    },
+                    file_id,
+                );
             } else {
-                diagnostics.throw(DuplicateSymbolDifferentKindError {
-                    name: name.clone(),
-                    new_kind: kind_desc.to_string(),
-                    original_kind: first_kind.to_string(),
-                    original_span: first.metadata().declaration_span().clone(),
-                    original_file_id: first_file_id,
-                    duplicate_span: child.metadata().declaration_span().clone(),
-                }, file_id);
+                ctx.diagnostics().get().throw(
+                    DuplicateSymbolDifferentKindError {
+                        name: name.clone(),
+                        new_kind: kind_desc.to_string(),
+                        original_kind: first_kind.to_string(),
+                        original_span: first.metadata().declaration_span().clone(),
+                        original_file_id: first_file_id,
+                        duplicate_span: child.metadata().declaration_span().clone(),
+                    },
+                    file_id,
+                );
             }
         } else {
             types.insert(name, (child.clone(), kind_desc));
@@ -127,24 +116,13 @@ fn check_duplicate_types(
 }
 
 /// Check for duplicate member names within a type (struct, protocol)
-fn check_duplicate_members(
-    type_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
-) {
-    let type_name = &type_symbol.metadata().name().value;
-    let type_kind = match type_symbol.metadata().kind() {
-        KestrelSymbolKind::Struct => "struct",
-        KestrelSymbolKind::Protocol => "protocol",
-        _ => return,
-    };
-
+fn check_duplicate_members(ctx: &SymbolContext<'_>) {
     // Map from name to (first symbol, kind description)
     // For functions, we only store the first one - signature duplicates are handled elsewhere
     let mut members: HashMap<String, (Arc<dyn Symbol<KestrelLanguage>>, &'static str)> =
         HashMap::new();
 
-    for child in type_symbol.metadata().children() {
+    for child in ctx.symbol.metadata().children() {
         let child_kind = child.metadata().kind();
 
         let kind_desc = match child_kind {
@@ -164,30 +142,35 @@ fn check_duplicate_members(
             }
 
             // Duplicate found (field-field, field-function, or function-field)
-            let file_id = get_file_id_for_symbol(&child, diagnostics);
-            let first_file_id = get_file_id_for_symbol(first, diagnostics);
+            let file_id = get_file_id_for_symbol(&child, &mut *ctx.diagnostics().get());
+            let first_file_id = get_file_id_for_symbol(first, &mut *ctx.diagnostics().get());
 
             if kind_desc == *first_kind {
-                diagnostics.throw(DuplicateSymbolError {
-                    name: name.clone(),
-                    kind: kind_desc.to_string(),
-                    original_span: first.metadata().declaration_span().clone(),
-                    original_file_id: first_file_id,
-                    duplicate_span: child.metadata().declaration_span().clone(),
-                }, file_id);
+                ctx.diagnostics().get().throw(
+                    DuplicateSymbolError {
+                        name: name.clone(),
+                        kind: kind_desc.to_string(),
+                        original_span: first.metadata().declaration_span().clone(),
+                        original_file_id: first_file_id,
+                        duplicate_span: child.metadata().declaration_span().clone(),
+                    },
+                    file_id,
+                );
             } else {
-                diagnostics.throw(DuplicateSymbolDifferentKindError {
-                    name: name.clone(),
-                    new_kind: kind_desc.to_string(),
-                    original_kind: first_kind.to_string(),
-                    original_span: first.metadata().declaration_span().clone(),
-                    original_file_id: first_file_id,
-                    duplicate_span: child.metadata().declaration_span().clone(),
-                }, file_id);
+                ctx.diagnostics().get().throw(
+                    DuplicateSymbolDifferentKindError {
+                        name: name.clone(),
+                        new_kind: kind_desc.to_string(),
+                        original_kind: first_kind.to_string(),
+                        original_span: first.metadata().declaration_span().clone(),
+                        original_file_id: first_file_id,
+                        duplicate_span: child.metadata().declaration_span().clone(),
+                    },
+                    file_id,
+                );
             }
         } else {
             members.insert(name, (child.clone(), kind_desc));
         }
     }
 }
-

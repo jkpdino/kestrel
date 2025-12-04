@@ -1,6 +1,6 @@
-//! Validation pass for initializer verification
+//! Validator for initializer verification
 //!
-//! This pass verifies that initializers correctly initialize all fields:
+//! This validator verifies that initializers correctly initialize all fields:
 //! - All fields must be assigned before the initializer returns
 //! - `let` fields can only be assigned once
 //! - Fields cannot be read before they are assigned
@@ -23,48 +23,39 @@ use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
-use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass for initializer field initialization
-pub struct InitializerVerificationPass;
+/// Validator for initializer field initialization
+pub struct InitializerVerificationValidator;
 
-impl InitializerVerificationPass {
+impl InitializerVerificationValidator {
     const NAME: &'static str = "initializer_verification";
+
+    pub fn new() -> Self {
+        Self
+    }
 }
 
-impl ValidationPass for InitializerVerificationPass {
+impl Default for InitializerVerificationValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Validator for InitializerVerificationValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        _config: &ValidationConfig,
-    ) {
-        validate_symbol(root, db, diagnostics);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
 
-/// Recursively validate symbols, looking for initializers
-fn validate_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
-) {
-    let kind = symbol.metadata().kind();
+        // Only check initializers
+        if kind != KestrelSymbolKind::Initializer {
+            return;
+        }
 
-    // Check initializers
-    if kind == KestrelSymbolKind::Initializer {
-        validate_initializer(symbol, db, diagnostics);
-    }
-
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        validate_symbol(&child, db, diagnostics);
+        validate_initializer(ctx.symbol, ctx.db, &mut *ctx.diagnostics().get());
     }
 }
 
@@ -134,7 +125,7 @@ fn validate_initializer(
         .collect();
 
     if !uninitialized.is_empty() {
-        let file_id = get_file_id_for_symbol(symbol, diagnostics);
+        let file_id = crate::utils::get_file_id_for_symbol(symbol, diagnostics);
         let span = symbol.metadata().span().clone();
 
         let field_list = uninitialized
@@ -151,7 +142,7 @@ fn validate_initializer(
     }
 
     // Report any errors collected during analysis
-    let file_id = get_file_id_for_symbol(symbol, diagnostics);
+    let file_id = crate::utils::get_file_id_for_symbol(symbol, diagnostics);
     for error in ctx.errors {
         diagnostics.add_diagnostic(error.into_diagnostic(file_id));
     }

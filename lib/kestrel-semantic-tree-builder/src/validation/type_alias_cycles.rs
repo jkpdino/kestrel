@@ -1,14 +1,14 @@
-//! Validation pass for detecting circular type alias dependencies
+//! Validator for detecting circular type alias dependencies
 //!
-//! This pass detects cycles in type aliases such as:
+//! This validator detects cycles in type aliases such as:
 //! - Direct self-references: `type A = A;`
 //! - Two-way cycles: `type A = B; type B = A;`
 //! - Longer chains: `type A = B; type B = C; type C = A;`
 //!
-//! The algorithm uses a DFS-based approach to follow type alias chains
-//! and detect cycles using a CycleDetector.
+//! The algorithm collects all type aliases during the walk, then runs cycle
+//! detection in the finalize phase using DFS.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
@@ -22,47 +22,49 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::db::SemanticDatabase;
 use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass that detects circular type alias dependencies
-pub struct TypeAliasCyclePass;
-
-impl TypeAliasCyclePass {
-    const NAME: &'static str = "type_alias_cycles";
+/// Validator that detects circular type alias dependencies
+pub struct TypeAliasCycleValidator {
+    /// Collected type aliases during the walk
+    type_aliases: Mutex<Vec<Arc<dyn Symbol<KestrelLanguage>>>>,
 }
 
-impl ValidationPass for TypeAliasCyclePass {
+impl TypeAliasCycleValidator {
+    const NAME: &'static str = "type_alias_cycles";
+
+    pub fn new() -> Self {
+        Self {
+            type_aliases: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Default for TypeAliasCycleValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Validator for TypeAliasCycleValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        _config: &ValidationConfig,
-    ) {
-        check_cycles_in_tree(root, db, diagnostics);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
 
-/// Recursively walk the symbol tree and check for cycles in type aliases
-fn check_cycles_in_tree(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
-) {
-    let kind = symbol.metadata().kind();
-
-    // If this is a type alias, check for cycles starting from it
-    if kind == KestrelSymbolKind::TypeAlias {
-        check_type_alias_for_cycles(symbol, db, diagnostics);
+        // Collect type aliases for later analysis
+        if kind == KestrelSymbolKind::TypeAlias {
+            self.type_aliases.lock().unwrap().push(ctx.symbol.clone());
+        }
     }
 
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        check_cycles_in_tree(&child, db, diagnostics);
+    fn finalize(&self, db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
+        // Check each collected type alias for cycles
+        for type_alias in self.type_aliases.lock().unwrap().iter() {
+            check_type_alias_for_cycles(type_alias, db, diagnostics);
+        }
     }
 }
 
@@ -197,4 +199,3 @@ fn follow_type_alias_chain(
         _ => None,
     }
 }
-

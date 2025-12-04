@@ -1,13 +1,14 @@
-//! Validation pass for detecting circular struct containment
+//! Validator for detecting circular struct containment
 //!
-//! This pass detects cycles in struct field types that would create infinite-size types:
+//! This validator detects cycles in struct field types that would create infinite-size types:
 //! - Direct self-references: `struct Node { let next: Node }`
 //! - Two-way cycles: `struct A { let b: B } struct B { let a: A }`
 //! - Longer chains: `struct A { let b: B } struct B { let c: C } struct C { let a: A }`
 //!
-//! The algorithm uses DFS to follow struct field types and detect cycles.
+//! The algorithm collects all structs during the walk, then runs cycle detection
+//! in the finalize phase using DFS.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
@@ -22,49 +23,60 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 use crate::db::SemanticDatabase;
 use crate::diagnostics::{CircularStructContainmentError, CycleMember, SelfContainingStructError};
 use crate::utils::get_file_id_for_symbol;
-use crate::validation::{ValidationConfig, ValidationPass};
+use crate::validation::{SymbolContext, Validator};
 
-/// Validation pass that detects circular struct containment
-pub struct StructCyclePass;
-
-impl StructCyclePass {
-    const NAME: &'static str = "struct_cycles";
+/// Validator that detects circular struct containment
+pub struct StructCycleValidator {
+    /// Collected structs during the walk
+    structs: Mutex<Vec<CollectedStruct>>,
 }
 
-impl ValidationPass for StructCyclePass {
+/// Data collected for each struct during the walk
+struct CollectedStruct {
+    symbol: Arc<dyn Symbol<KestrelLanguage>>,
+    struct_sym: Arc<StructSymbol>,
+}
+
+impl StructCycleValidator {
+    const NAME: &'static str = "struct_cycles";
+
+    pub fn new() -> Self {
+        Self {
+            structs: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Default for StructCycleValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Validator for StructCycleValidator {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
-    fn validate(
-        &self,
-        root: &Arc<dyn Symbol<KestrelLanguage>>,
-        db: &SemanticDatabase,
-        diagnostics: &mut DiagnosticContext,
-        _config: &ValidationConfig,
-    ) {
-        check_cycles_in_tree(root, db, diagnostics);
-    }
-}
+    fn validate_symbol(&self, ctx: &SymbolContext<'_>) {
+        let kind = ctx.symbol.metadata().kind();
 
-/// Recursively walk the symbol tree and check for cycles in struct containment
-fn check_cycles_in_tree(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    db: &SemanticDatabase,
-    diagnostics: &mut DiagnosticContext,
-) {
-    let kind = symbol.metadata().kind();
-
-    // If this is a struct, check for containment cycles starting from it
-    if kind == KestrelSymbolKind::Struct {
-        if let Some(struct_sym) = symbol.as_ref().downcast_ref::<StructSymbol>() {
-            check_struct_for_cycles(struct_sym, symbol, db, diagnostics);
+        // Collect structs for later analysis
+        if kind == KestrelSymbolKind::Struct {
+            if let Some(struct_sym) = ctx.symbol.clone().into_any_arc().downcast::<StructSymbol>().ok() {
+                self.structs.lock().unwrap().push(CollectedStruct {
+                    symbol: ctx.symbol.clone(),
+                    struct_sym,
+                });
+            }
         }
     }
 
-    // Recursively check children
-    for child in symbol.metadata().children() {
-        check_cycles_in_tree(&child, db, diagnostics);
+    fn finalize(&self, db: &SemanticDatabase, diagnostics: &mut DiagnosticContext) {
+        // Check each collected struct for cycles
+        for collected in self.structs.lock().unwrap().iter() {
+            check_struct_for_cycles(&collected.struct_sym, &collected.symbol, db, diagnostics);
+        }
     }
 }
 
@@ -219,4 +231,3 @@ fn check_type_for_struct_cycle(
         _ => None,
     }
 }
-

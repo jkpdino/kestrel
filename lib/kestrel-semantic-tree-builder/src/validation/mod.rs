@@ -1,11 +1,22 @@
 //! Validation pass infrastructure for semantic analysis
 //!
-//! This module provides a configurable system for running validation passes
-//! on the semantic tree after binding is complete. Passes can run either:
-//! - Individually (each walking the tree separately)
-//! - Batched (single tree walk calling all passes per node)
+//! This module provides a unified system for running validation passes
+//! on the semantic tree after binding is complete. The architecture uses
+//! a single tree walk that invokes all validators at each node type.
 //!
-//! The batched approach is more efficient for large codebases.
+//! ## Architecture
+//!
+//! Validators implement the `Validator` trait with methods for each node type:
+//! - `validate_symbol` - Called for each symbol in the tree
+//! - `validate_statement` - Called for each statement in function bodies
+//! - `validate_expression` - Called for each expression in function bodies
+//! - `validate_type` - Called for each type reference
+//! - `validate_pattern` - Called for each pattern
+//! - `finalize` - Called after the entire tree has been walked
+//!
+//! Validators only implement the methods they need - defaults are no-ops.
+//! Some validators (like cycle detection) collect data during the walk
+//! and perform analysis in `finalize`.
 
 mod assignment_validation;
 mod conformance;
@@ -21,28 +32,52 @@ mod struct_cycles;
 mod type_alias_cycles;
 mod visibility_consistency;
 
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_tree::behavior::executable::ExecutableBehavior;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::expr::{ExprKind, Expression};
 use kestrel_semantic_tree::language::KestrelLanguage;
+use kestrel_semantic_tree::pattern::Pattern;
+use kestrel_semantic_tree::stmt::{Statement, StatementKind};
+use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
 
-pub use assignment_validation::AssignmentValidationPass;
-pub use conformance::ConformancePass;
-pub use constraint_cycles::ConstraintCyclePass;
-pub use duplicate_symbol::DuplicateSymbolPass;
-pub use function_body::FunctionBodyPass;
-pub use generics::GenericsPass;
-pub use imports::ImportValidationPass;
-pub use initializer_verification::InitializerVerificationPass;
-pub use protocol_method::ProtocolMethodPass;
-pub use static_context::StaticContextPass;
-pub use struct_cycles::StructCyclePass;
-pub use type_alias_cycles::TypeAliasCyclePass;
-pub use visibility_consistency::VisibilityConsistencyPass;
+pub use assignment_validation::AssignmentValidator;
+pub use conformance::ConformanceValidator;
+pub use constraint_cycles::ConstraintCycleValidator;
+pub use duplicate_symbol::DuplicateSymbolValidator;
+pub use function_body::FunctionBodyValidator;
+pub use generics::GenericsValidator;
+pub use imports::ImportValidator;
+pub use initializer_verification::InitializerVerificationValidator;
+pub use protocol_method::ProtocolMethodValidator;
+pub use static_context::StaticContextValidator;
+pub use struct_cycles::StructCycleValidator;
+pub use type_alias_cycles::TypeAliasCycleValidator;
+pub use visibility_consistency::VisibilityConsistencyValidator;
+
+// Keep old names as aliases for backwards compatibility
+pub use AssignmentValidator as AssignmentValidationPass;
+pub use ConformanceValidator as ConformancePass;
+pub use ConstraintCycleValidator as ConstraintCyclePass;
+pub use DuplicateSymbolValidator as DuplicateSymbolPass;
+pub use FunctionBodyValidator as FunctionBodyPass;
+pub use GenericsValidator as GenericsPass;
+pub use ImportValidator as ImportValidationPass;
+pub use InitializerVerificationValidator as InitializerVerificationPass;
+pub use ProtocolMethodValidator as ProtocolMethodPass;
+pub use StaticContextValidator as StaticContextPass;
+pub use StructCycleValidator as StructCyclePass;
+pub use TypeAliasCycleValidator as TypeAliasCyclePass;
+pub use VisibilityConsistencyValidator as VisibilityConsistencyPass;
 
 /// Configuration for which validation passes to run
 #[derive(Default, Clone)]
@@ -76,21 +111,132 @@ impl ValidationConfig {
     }
 }
 
-/// Trait for validation passes
+/// Shared diagnostics context wrapper for use during tree walking
+type SharedDiagnostics = Rc<RefCell<DiagnosticsWrapper>>;
+
+/// Wrapper to hold the mutable reference to DiagnosticContext
+struct DiagnosticsWrapper {
+    inner: *mut DiagnosticContext,
+}
+
+impl DiagnosticsWrapper {
+    fn get(&self) -> &mut DiagnosticContext {
+        // SAFETY: The wrapper is only created and used within run(), and the
+        // DiagnosticContext reference is valid for the duration of the walk.
+        unsafe { &mut *self.inner }
+    }
+}
+
+/// Context passed to validators when validating symbols
+pub struct SymbolContext<'a> {
+    /// The symbol being validated
+    pub symbol: &'a Arc<dyn Symbol<KestrelLanguage>>,
+    /// Whether we're inside a protocol
+    pub in_protocol: bool,
+    /// Whether we're inside a struct
+    pub in_struct: bool,
+    /// The database for queries
+    pub db: &'a SemanticDatabase,
+    /// Diagnostics context for reporting errors
+    diagnostics: SharedDiagnostics,
+    /// The file ID for the current symbol
+    pub file_id: usize,
+}
+
+impl<'a> SymbolContext<'a> {
+    /// Get a mutable reference to the diagnostics context
+    pub fn diagnostics(&self) -> std::cell::RefMut<'_, DiagnosticsWrapper> {
+        self.diagnostics.borrow_mut()
+    }
+}
+
+/// Context passed to validators when validating body nodes (statements, expressions, patterns)
+pub struct BodyContext<'a> {
+    /// The containing symbol (function or initializer)
+    pub container: &'a Arc<dyn Symbol<KestrelLanguage>>,
+    /// The database for queries
+    pub db: &'a SemanticDatabase,
+    /// Diagnostics context for reporting errors
+    diagnostics: SharedDiagnostics,
+    /// The file ID for the current symbol
+    pub file_id: usize,
+}
+
+impl<'a> BodyContext<'a> {
+    /// Get a mutable reference to the diagnostics context
+    pub fn diagnostics(&self) -> std::cell::RefMut<'_, DiagnosticsWrapper> {
+        self.diagnostics.borrow_mut()
+    }
+}
+
+/// Context passed to validators when validating types
+pub struct TypeContext<'a> {
+    /// The containing symbol where this type appears
+    pub container: &'a Arc<dyn Symbol<KestrelLanguage>>,
+    /// The database for queries
+    pub db: &'a SemanticDatabase,
+    /// Diagnostics context for reporting errors
+    diagnostics: SharedDiagnostics,
+    /// The file ID for the current symbol
+    pub file_id: usize,
+}
+
+impl<'a> TypeContext<'a> {
+    /// Get a mutable reference to the diagnostics context
+    pub fn diagnostics(&self) -> std::cell::RefMut<'_, DiagnosticsWrapper> {
+        self.diagnostics.borrow_mut()
+    }
+}
+
+/// Unified trait for all validation passes
 ///
-/// Each validation pass implements this trait to perform semantic checks
-/// on the symbol tree after binding is complete.
+/// Validators implement only the methods they need - all have default no-op implementations.
+/// The tree walker calls each method at the appropriate point during traversal.
+pub trait Validator: Send + Sync {
+    /// Unique identifier for this validator
+    fn name(&self) -> &'static str;
+
+    /// Validate a symbol in the semantic tree
+    ///
+    /// Called for each symbol during tree traversal. Validators that need to
+    /// analyze symbol-level properties implement this method.
+    fn validate_symbol(&self, _ctx: &SymbolContext<'_>) {}
+
+    /// Validate a statement in a function/initializer body
+    ///
+    /// Called for each statement during body traversal.
+    fn validate_statement(&self, _stmt: &Statement, _ctx: &BodyContext<'_>) {}
+
+    /// Validate an expression in a function/initializer body
+    ///
+    /// Called for each expression during body traversal.
+    fn validate_expression(&self, _expr: &Expression, _ctx: &BodyContext<'_>) {}
+
+    /// Validate a type reference
+    ///
+    /// Called for type references in signatures, fields, etc.
+    fn validate_type(&self, _ty: &Ty, _ctx: &TypeContext<'_>) {}
+
+    /// Validate a pattern
+    ///
+    /// Called for patterns in variable bindings.
+    fn validate_pattern(&self, _pattern: &Pattern, _ctx: &BodyContext<'_>) {}
+
+    /// Called after the entire tree has been walked
+    ///
+    /// Validators that collect data during traversal and analyze it at the end
+    /// implement this method (e.g., cycle detection).
+    fn finalize(&self, _db: &SemanticDatabase, _diagnostics: &mut DiagnosticContext) {}
+}
+
+/// Legacy trait for backwards compatibility
+///
+/// New code should use the `Validator` trait instead.
 pub trait ValidationPass: Send + Sync {
     /// Unique identifier for this pass
     fn name(&self) -> &'static str;
 
     /// Run the validation pass on the semantic tree
-    ///
-    /// # Arguments
-    /// * `root` - The root symbol of the semantic tree
-    /// * `db` - The semantic database for queries
-    /// * `diagnostics` - Context for reporting errors
-    /// * `config` - Configuration for this validation run
     fn validate(
         &self,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
@@ -102,32 +248,32 @@ pub trait ValidationPass: Send + Sync {
 
 /// Registry and runner for all validation passes
 pub struct ValidationRunner {
-    passes: Vec<Box<dyn ValidationPass>>,
+    validators: Vec<Box<dyn Validator>>,
 }
 
 impl ValidationRunner {
-    /// Create a new validation runner with all registered passes
+    /// Create a new validation runner with all registered validators
     pub fn new() -> Self {
-        let passes: Vec<Box<dyn ValidationPass>> = vec![
-            Box::new(FunctionBodyPass),
-            Box::new(ProtocolMethodPass),
-            Box::new(StaticContextPass),
-            Box::new(DuplicateSymbolPass),
-            Box::new(VisibilityConsistencyPass),
-            Box::new(GenericsPass),
-            Box::new(TypeAliasCyclePass),
-            Box::new(StructCyclePass),
-            Box::new(ConstraintCyclePass),
-            Box::new(ImportValidationPass),
-            Box::new(ConformancePass),
-            Box::new(InitializerVerificationPass),
-            Box::new(AssignmentValidationPass),
+        let validators: Vec<Box<dyn Validator>> = vec![
+            Box::new(FunctionBodyValidator::new()),
+            Box::new(ProtocolMethodValidator::new()),
+            Box::new(StaticContextValidator::new()),
+            Box::new(DuplicateSymbolValidator::new()),
+            Box::new(VisibilityConsistencyValidator::new()),
+            Box::new(GenericsValidator::new()),
+            Box::new(TypeAliasCycleValidator::new()),
+            Box::new(StructCycleValidator::new()),
+            Box::new(ConstraintCycleValidator::new()),
+            Box::new(ImportValidator::new()),
+            Box::new(ConformanceValidator::new()),
+            Box::new(InitializerVerificationValidator::new()),
+            Box::new(AssignmentValidator::new()),
         ];
 
-        Self { passes }
+        Self { validators }
     }
 
-    /// Run all enabled validation passes
+    /// Run all enabled validation passes using a single tree walk
     pub fn run(
         &self,
         root: &Arc<dyn Symbol<KestrelLanguage>>,
@@ -135,10 +281,25 @@ impl ValidationRunner {
         diagnostics: &mut DiagnosticContext,
         config: &ValidationConfig,
     ) {
-        for pass in &self.passes {
-            if config.is_enabled(pass.name()) {
-                pass.validate(root, db, diagnostics, config);
-            }
+        // Filter to only enabled validators
+        let enabled: Vec<&dyn Validator> = self
+            .validators
+            .iter()
+            .filter(|v| config.is_enabled(v.name()))
+            .map(|v| v.as_ref())
+            .collect();
+
+        // Wrap diagnostics in shared container for the walk
+        let shared_diagnostics = Rc::new(RefCell::new(DiagnosticsWrapper {
+            inner: diagnostics as *mut DiagnosticContext,
+        }));
+
+        // Single tree walk calling all validators
+        walk_symbol(root, &enabled, db, &shared_diagnostics, false, false);
+
+        // Finalize all validators (diagnostics is still valid here)
+        for validator in &enabled {
+            validator.finalize(db, diagnostics);
         }
     }
 }
@@ -149,16 +310,173 @@ impl Default for ValidationRunner {
     }
 }
 
-// Note on batched validation:
-// The current implementation runs each pass separately, which means N tree walks for N passes.
-// A batched implementation would walk the tree once and call all validations per node.
-//
-// To implement batched validation:
-// 1. Each validation module would expose per-symbol-kind validation functions
-// 2. A single tree walk would call the appropriate functions based on symbol kind
-//
-// For now, the separate-pass approach is maintained for simplicity and maintainability.
-// The performance impact is minimal for typical codebases, as tree walks are cheap.
-// If profiling shows this is a bottleneck, batching can be implemented by:
-// - Making validate_* functions pub(crate) in each module
-// - Creating a BatchedValidationRunner that does a single tree walk
+/// Walk a symbol and all its descendants, calling validators at each node
+fn walk_symbol(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    validators: &[&dyn Validator],
+    db: &SemanticDatabase,
+    diagnostics: &SharedDiagnostics,
+    in_protocol: bool,
+    in_struct: bool,
+) {
+    let kind = symbol.metadata().kind();
+    let file_id = crate::utils::get_file_id_for_symbol(symbol, diagnostics.borrow_mut().get());
+
+    // Update context flags
+    let in_protocol = in_protocol || kind == KestrelSymbolKind::Protocol;
+    let in_struct = in_struct || kind == KestrelSymbolKind::Struct;
+
+    // Create symbol context
+    let ctx = SymbolContext {
+        symbol,
+        in_protocol,
+        in_struct,
+        db,
+        diagnostics: Rc::clone(diagnostics),
+        file_id,
+    };
+
+    // Call all validators for this symbol
+    for validator in validators {
+        validator.validate_symbol(&ctx);
+    }
+
+    // If this symbol has a body (function or initializer), walk the body
+    if matches!(
+        kind,
+        KestrelSymbolKind::Function | KestrelSymbolKind::Initializer
+    ) {
+        if let Some(body) = get_executable_body(symbol) {
+            let body_ctx = BodyContext {
+                container: symbol,
+                db,
+                diagnostics: Rc::clone(diagnostics),
+                file_id,
+            };
+
+            // Walk statements
+            for stmt in &body.statements {
+                walk_statement(stmt, validators, &body_ctx);
+            }
+
+            // Walk yield expression if present
+            if let Some(yield_expr) = body.yield_expr() {
+                walk_expression(yield_expr, validators, &body_ctx);
+            }
+        }
+    }
+
+    // Recursively walk children
+    for child in symbol.metadata().children() {
+        walk_symbol(&child, validators, db, diagnostics, in_protocol, in_struct);
+    }
+}
+
+/// Walk a statement, calling validators
+fn walk_statement(stmt: &Statement, validators: &[&dyn Validator], ctx: &BodyContext<'_>) {
+    // Call all validators for this statement
+    for validator in validators {
+        validator.validate_statement(stmt, ctx);
+    }
+
+    // Walk nested nodes
+    match &stmt.kind {
+        StatementKind::Binding { pattern, value } => {
+            walk_pattern(pattern, validators, ctx);
+            if let Some(value) = value {
+                walk_expression(value, validators, ctx);
+            }
+        }
+        StatementKind::Expr(expr) => {
+            walk_expression(expr, validators, ctx);
+        }
+    }
+}
+
+/// Walk an expression, calling validators
+fn walk_expression(expr: &Expression, validators: &[&dyn Validator], ctx: &BodyContext<'_>) {
+    // Call all validators for this expression
+    for validator in validators {
+        validator.validate_expression(expr, ctx);
+    }
+
+    // Walk nested expressions
+    match &expr.kind {
+        ExprKind::Array(elements) => {
+            for elem in elements {
+                walk_expression(elem, validators, ctx);
+            }
+        }
+        ExprKind::Tuple(elements) => {
+            for elem in elements {
+                walk_expression(elem, validators, ctx);
+            }
+        }
+        ExprKind::Grouping(inner) => {
+            walk_expression(inner, validators, ctx);
+        }
+        ExprKind::FieldAccess { object, .. } => {
+            walk_expression(object, validators, ctx);
+        }
+        ExprKind::MethodRef { receiver, .. } => {
+            walk_expression(receiver, validators, ctx);
+        }
+        ExprKind::Call { callee, arguments } => {
+            walk_expression(callee, validators, ctx);
+            for arg in arguments {
+                walk_expression(&arg.value, validators, ctx);
+            }
+        }
+        ExprKind::PrimitiveMethodCall {
+            receiver,
+            arguments,
+            ..
+        } => {
+            walk_expression(receiver, validators, ctx);
+            for arg in arguments {
+                walk_expression(&arg.value, validators, ctx);
+            }
+        }
+        ExprKind::ImplicitStructInit { arguments, .. } => {
+            for arg in arguments {
+                walk_expression(&arg.value, validators, ctx);
+            }
+        }
+        ExprKind::Assignment { target, value } => {
+            walk_expression(target, validators, ctx);
+            walk_expression(value, validators, ctx);
+        }
+        // Leaf expressions - no nested nodes
+        ExprKind::Literal(_)
+        | ExprKind::LocalRef(_)
+        | ExprKind::SymbolRef(_)
+        | ExprKind::OverloadedRef(_)
+        | ExprKind::TypeRef(_)
+        | ExprKind::Error => {}
+    }
+}
+
+/// Walk a pattern, calling validators
+fn walk_pattern(pattern: &Pattern, validators: &[&dyn Validator], ctx: &BodyContext<'_>) {
+    // Call all validators for this pattern
+    for validator in validators {
+        validator.validate_pattern(pattern, ctx);
+    }
+
+    // Future: walk nested patterns for tuple/struct patterns
+}
+
+/// Get the executable body from a symbol (function or initializer)
+fn get_executable_body(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+) -> Option<kestrel_semantic_tree::behavior::executable::CodeBlock> {
+    let behaviors = symbol.metadata().behaviors();
+    for b in behaviors.iter() {
+        if matches!(b.kind(), KestrelBehaviorKind::Executable) {
+            if let Some(exec) = b.as_ref().downcast_ref::<ExecutableBehavior>() {
+                return Some(exec.body().clone());
+            }
+        }
+    }
+    None
+}
