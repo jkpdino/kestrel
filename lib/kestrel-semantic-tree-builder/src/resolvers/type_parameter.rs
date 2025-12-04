@@ -247,27 +247,5 @@ fn parse_type_bound(
     }
 }
 
-/// Extract conformances from a syntax node that has a ConformanceList child.
-///
-/// Returns a list of Ty representing the protocols to conform to or inherit from.
-/// These are unresolved path types that will be resolved during type resolution.
-#[allow(dead_code)]
-pub fn extract_conformances(syntax: &SyntaxNode, source: &str) -> Vec<Ty> {
-    let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {
-        Some(node) => node,
-        None => return Vec::new(),
-    };
-
-    conformance_list
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::ConformanceItem)
-        .filter_map(|item| {
-            // ConformanceItem contains a Ty node
-            let ty_node = find_child(&item, SyntaxKind::Ty)?;
-            extract_ty_from_node(&ty_node, source)
-        })
-        .collect()
-}
-
 // Tests are in lib/kestrel-test-suite/tests/generics/ since they require
 // integration with the full semantic tree building pipeline.

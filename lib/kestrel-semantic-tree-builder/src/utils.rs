@@ -11,7 +11,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxElement};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
-use crate::queries::{Db, TypePathResolution};
+use crate::queries::TypePathResolution;
 use crate::resolver::BindingContext;
 
 /// Find a child node with the specified kind
@@ -163,22 +163,43 @@ pub fn find_visibility_scope(
     }
 }
 
+/// Information about a symbol's source file
+pub struct SourceFileInfo {
+    /// The file ID for diagnostics
+    pub file_id: usize,
+    /// The file name
+    pub file_name: String,
+}
+
+/// Get source file info for a symbol by walking up to its SourceFile parent.
+///
+/// Returns the file_id and file_name in a single parent-chain traversal.
+pub fn get_source_file_info(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    diagnostics: &DiagnosticContext,
+) -> Option<SourceFileInfo> {
+    let mut current = symbol.clone();
+    loop {
+        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
+            let file_name = current.metadata().name().value.clone();
+            let file_id = diagnostics.get_file_id(&file_name)?;
+            return Some(SourceFileInfo { file_id, file_name });
+        }
+        match current.metadata().parent() {
+            Some(parent) => current = parent,
+            None => return None,
+        }
+    }
+}
+
 /// Get the file_id for a symbol by walking up to its SourceFile parent
 pub fn get_file_id_for_symbol(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
     diagnostics: &DiagnosticContext,
 ) -> usize {
-    let mut current = symbol.clone();
-    loop {
-        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
-            let file_name = current.metadata().name().value.clone();
-            return diagnostics.get_file_id(&file_name).unwrap_or(0);
-        }
-        match current.metadata().parent() {
-            Some(parent) => current = parent,
-            None => return 0,
-        }
-    }
+    get_source_file_info(symbol, diagnostics)
+        .map(|info| info.file_id)
+        .unwrap_or(0)
 }
 
 /// Extract path segments from a Path syntax node

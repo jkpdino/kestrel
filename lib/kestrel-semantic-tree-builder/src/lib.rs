@@ -479,9 +479,6 @@ pub fn bind_tree_with_config(
     // Create cycle detector for type alias resolution
     let mut type_alias_cycle_detector: CycleDetector<SymbolId> = CycleDetector::new();
 
-    // Function bodies map (currently unused, could be populated during build phase)
-    let function_bodies = resolver::FunctionBodyMap::new();
-
     // Walk all symbols and call bind_declaration
     // Note: file_id is determined per-symbol based on parent SourceFile
     bind_symbol(
@@ -491,7 +488,6 @@ pub fn bind_tree_with_config(
         &resolver_registry,
         0,
         &mut type_alias_cycle_detector,
-        &function_bodies,
         tree.sources(),
         tree.syntax_map(),
     );
@@ -584,7 +580,6 @@ fn bind_symbol(
     registry: &ResolverRegistry,
     current_file_id: usize,
     type_alias_cycle_detector: &mut CycleDetector<SymbolId>,
-    function_bodies: &resolver::FunctionBodyMap,
     sources: &resolver::SourceMap,
     syntax_map: &SyntaxMap,
 ) {
@@ -623,7 +618,6 @@ fn bind_symbol(
                     diagnostics,
                     file_id,
                     type_alias_cycle_detector,
-                    function_bodies,
                     sources,
                 };
                 resolver.bind_declaration(symbol, syntax_node, &mut ctx);
@@ -633,7 +627,7 @@ fn bind_symbol(
 
     // Recursively bind children
     for child in symbol.metadata().children() {
-        bind_symbol(&child, db, diagnostics, registry, file_id, type_alias_cycle_detector, function_bodies, sources, syntax_map);
+        bind_symbol(&child, db, diagnostics, registry, file_id, type_alias_cycle_detector, sources, syntax_map);
     }
 }
 

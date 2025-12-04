@@ -6,6 +6,8 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
+use crate::utils::find_ancestor_of_kind;
+
 /// Check if a symbol is an ancestor of the context symbol
 fn is_ancestor(
     potential_ancestor: &Arc<dyn Symbol<KestrelLanguage>>,
@@ -21,25 +23,6 @@ fn is_ancestor(
     }
 
     false
-}
-
-/// Find the containing module for a symbol
-///
-/// Walks up the parent chain until it finds a Module symbol.
-/// Returns None if no module is found (e.g., for root symbols).
-fn find_containing_module(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-    let mut current = Some(symbol.clone());
-
-    while let Some(s) = current {
-        if s.metadata().kind() == KestrelSymbolKind::Module {
-            return Some(s);
-        }
-        current = s.metadata().parent();
-    }
-
-    None
 }
 
 /// Check if a symbol is visible from the given context
@@ -68,8 +51,8 @@ pub fn is_visible_from(
         }
         Some(Visibility::Internal) => {
             // Internal symbols are visible within the same module
-            let target_module = find_containing_module(symbol);
-            let context_module = find_containing_module(context);
+            let target_module = find_ancestor_of_kind(symbol, KestrelSymbolKind::Module);
+            let context_module = find_ancestor_of_kind(context, KestrelSymbolKind::Module);
 
             // If both are in the same module (or we can't determine), allow access
             match (target_module, context_module) {

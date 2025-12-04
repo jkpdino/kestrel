@@ -117,22 +117,14 @@ impl Resolver for FunctionResolver {
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
-        // Get file_id for this symbol
-        let file_id = context.file_id_for_symbol(symbol).unwrap_or(context.file_id);
-
-        // Get source file name for looking up source later
-        let source_file = context.source_file_name(symbol);
-        let source = source_file
-            .as_ref()
-            .and_then(|name| context.sources.get(name))
-            .map(|s| s.as_str())
-            .unwrap_or("");
+        // Get file_id and source for this symbol
+        let (file_id, source) = context.get_file_context(symbol);
 
         // Extract and resolve parameters from syntax
-        let resolved_params = resolve_parameters_from_syntax(syntax, source, symbol_id, context, file_id);
+        let resolved_params = resolve_parameters_from_syntax(syntax, &source, symbol_id, context, file_id);
 
         // Extract and resolve return type from syntax
-        let resolved_return = resolve_return_type_from_syntax(syntax, source, symbol_id, context, file_id);
+        let resolved_return = resolve_return_type_from_syntax(syntax, &source, symbol_id, context, file_id);
 
         // Determine receiver kind for instance methods
         let receiver_kind = determine_receiver_kind(syntax, symbol);
@@ -148,7 +140,7 @@ impl Resolver for FunctionResolver {
 
         // Resolve function body if present
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
-            resolve_function_body(symbol, &body_node, &resolved_params, context, file_id, source);
+            resolve_function_body(symbol, &body_node, &resolved_params, context, file_id, &source);
         }
     }
 }

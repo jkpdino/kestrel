@@ -118,19 +118,11 @@ impl Resolver for TypeAliasResolver {
             return;
         }
 
-        // Get file_id for this symbol
-        let file_id = context.file_id_for_symbol(symbol).unwrap_or(context.file_id);
-
-        // Get source for this symbol's file
-        let source_file = context.source_file_name(symbol);
-        let source = source_file
-            .as_ref()
-            .and_then(|name| context.sources.get(name))
-            .map(|s| s.as_str())
-            .unwrap_or("");
+        // Get file_id and source for this symbol
+        let (file_id, source) = context.get_file_context(symbol);
 
         // Extract and resolve the aliased type from syntax using unified type resolution
-        let resolved_type = resolve_aliased_type_from_syntax(syntax, source, symbol_id, context, file_id);
+        let resolved_type = resolve_aliased_type_from_syntax(syntax, &source, symbol_id, context, file_id);
 
         // Add the resolved type as a TypeAliasTypedBehavior
         let type_alias_typed_behavior = TypeAliasTypedBehavior::new(resolved_type);

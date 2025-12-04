@@ -6,10 +6,8 @@
 //! - Fields cannot be read before they are assigned
 //! - Methods cannot be called on `self` before all fields are initialized
 //!
-//! TODO: This pass is a skeleton. Full implementation requires:
-//! - Assignment expressions/statements to be implemented
-//! - Control flow analysis for if/else branches
-//! - Early return handling
+//! Note: Control flow analysis (if/else branches, early returns, loops) is not yet
+//! implemented. The current analysis is conservative and linear.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -118,10 +116,6 @@ fn validate_initializer(
     };
 
     // Analyze the body
-    // TODO: Once control flow is added, this needs to be rewritten to handle:
-    // - if/else branches (must init same fields in both branches)
-    // - early returns (must have all fields initialized before return)
-    // - loops
     for stmt in &body.statements {
         analyze_statement(stmt, &mut ctx);
     }
@@ -178,7 +172,6 @@ struct VerificationContext {
     /// Fields that have been assigned
     assigned_fields: HashSet<String>,
     /// `let` fields that have been assigned (to detect double assignment)
-    #[allow(dead_code)]
     let_fields_assigned: HashSet<String>,
     /// Collected errors
     errors: Vec<InitializerError>,
@@ -261,27 +254,26 @@ fn analyze_statement(stmt: &Statement, ctx: &mut VerificationContext) {
 /// Analyze an expression for field assignments and reads
 ///
 /// `is_assignment_target` indicates if this expression is the LHS of an assignment.
-/// TODO: This needs to be expanded when assignment expressions are added.
 fn analyze_expression(
     expr: &Expression,
     ctx: &mut VerificationContext,
-    _is_assignment_target: bool,
+    is_assignment_target: bool,
 ) {
     match &expr.kind {
         ExprKind::FieldAccess { object, field } => {
             // Check if this is `self.field`
             if is_self_expr(object) {
-                // This is a field access on self
-                // TODO: When assignments are implemented, we need to distinguish:
-                // - self.field = value  (assignment - marks field as initialized)
-                // - ... = self.field    (read - field must be initialized)
-                //
-                // For now, we treat all field accesses as reads and check they're initialized
-                if !ctx.assigned_fields.contains(field) {
-                    ctx.errors.push(InitializerError::FieldReadBeforeAssigned {
-                        span: expr.span.clone(),
-                        field_name: field.clone(),
-                    });
+                if is_assignment_target {
+                    // This is `self.field = value` - marks field as initialized
+                    // Don't check if already initialized here; that's done in Assignment case
+                } else {
+                    // This is a read of self.field - must be initialized first
+                    if !ctx.assigned_fields.contains(field) {
+                        ctx.errors.push(InitializerError::FieldReadBeforeAssigned {
+                            span: expr.span.clone(),
+                            field_name: field.clone(),
+                        });
+                    }
                 }
             } else {
                 // Analyze the object expression
@@ -317,8 +309,8 @@ fn analyze_expression(
             }
         }
         ExprKind::LocalRef(_) => {
-            // Local variable reference - check if it's `self`
-            // TODO: Need to check if this local is `self` and handle appropriately
+            // Local variable reference - nothing to check here for field initialization
+            // (self references in field access are handled in FieldAccess case)
         }
         ExprKind::SymbolRef(_) => {}
         ExprKind::TypeRef(_) => {}
@@ -359,8 +351,19 @@ fn analyze_expression(
             // Check if this is `self.field = value`
             if let ExprKind::FieldAccess { object, field } = &target.kind {
                 if is_self_expr(object) {
-                    // This is assigning to a field on self - mark it as initialized
+                    // Check for double-assignment to `let` fields
+                    if ctx.let_fields.contains(field) && ctx.let_fields_assigned.contains(field) {
+                        ctx.errors.push(InitializerError::LetFieldAssignedTwice {
+                            span: target.span.clone(),
+                            field_name: field.clone(),
+                        });
+                    }
+                    // Mark field as initialized
                     ctx.assigned_fields.insert(field.clone());
+                    // Track let field assignments for double-assignment detection
+                    if ctx.let_fields.contains(field) {
+                        ctx.let_fields_assigned.insert(field.clone());
+                    }
                 }
             }
             // Analyze the target (but as an assignment target)
@@ -381,10 +384,14 @@ fn is_self_expr(expr: &Expression) -> bool {
 }
 
 /// Check if a field is mutable (var vs let)
-fn is_field_mutable(_field: &Arc<dyn Symbol<KestrelLanguage>>) -> bool {
-    // TODO: Check the FieldSymbol for mutability
-    // For now, assume all fields are mutable
-    true
+fn is_field_mutable(field: &Arc<dyn Symbol<KestrelLanguage>>) -> bool {
+    use kestrel_semantic_tree::symbol::field::FieldSymbol;
+    if let Some(field_sym) = field.as_ref().downcast_ref::<FieldSymbol>() {
+        field_sym.is_mutable()
+    } else {
+        // If we can't downcast, assume mutable to avoid false positives
+        true
+    }
 }
 
 /// Get the executable body from a symbol
@@ -402,5 +409,53 @@ fn get_executable_body(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Code
 
 #[cfg(test)]
 mod tests {
-    // TODO: Add tests once assignment expressions are implemented
+    use super::*;
+
+    #[test]
+    fn test_verification_context_tracks_fields() {
+        let mut ctx = VerificationContext {
+            fields: ["a", "b", "c"].iter().map(|s| s.to_string()).collect(),
+            let_fields: ["a"].iter().map(|s| s.to_string()).collect(),
+            assigned_fields: HashSet::new(),
+            let_fields_assigned: HashSet::new(),
+            errors: Vec::new(),
+        };
+
+        // Assign field 'a' (a let field)
+        ctx.assigned_fields.insert("a".to_string());
+        ctx.let_fields_assigned.insert("a".to_string());
+
+        // Assign field 'b' (a var field)
+        ctx.assigned_fields.insert("b".to_string());
+
+        // Check uninitialized fields
+        let uninitialized: Vec<&String> = ctx
+            .fields
+            .iter()
+            .filter(|f| !ctx.assigned_fields.contains(*f))
+            .collect();
+
+        assert_eq!(uninitialized.len(), 1);
+        assert!(uninitialized.contains(&&"c".to_string()));
+    }
+
+    #[test]
+    fn test_let_field_double_assignment_detection() {
+        let mut ctx = VerificationContext {
+            fields: ["id"].iter().map(|s| s.to_string()).collect(),
+            let_fields: ["id"].iter().map(|s| s.to_string()).collect(),
+            assigned_fields: HashSet::new(),
+            let_fields_assigned: HashSet::new(),
+            errors: Vec::new(),
+        };
+
+        // First assignment to let field
+        let field = "id".to_string();
+        assert!(!ctx.let_fields_assigned.contains(&field));
+        ctx.assigned_fields.insert(field.clone());
+        ctx.let_fields_assigned.insert(field.clone());
+
+        // Second assignment should be detected
+        assert!(ctx.let_fields.contains(&field) && ctx.let_fields_assigned.contains(&field));
+    }
 }

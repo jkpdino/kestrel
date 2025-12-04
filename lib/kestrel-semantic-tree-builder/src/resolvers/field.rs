@@ -103,14 +103,11 @@ impl Resolver for FieldResolver {
         let symbol_id = symbol.metadata().id();
         let span = symbol.metadata().span().clone();
 
-        // Get file_id for this symbol
-        let file_id = context.file_id_for_symbol(symbol).unwrap_or(context.file_id);
-
-        // Get source file name (doesn't borrow context mutably)
-        let source_file = context.source_file_name(symbol);
+        // Get file_id and source for this symbol
+        let (file_id, source) = context.get_file_context(symbol);
 
         // Resolve the type directly from syntax
-        let resolved_type = resolve_field_type_from_syntax(syntax, source_file.as_deref(), symbol_id, context, file_id);
+        let resolved_type = resolve_field_type_from_syntax(syntax, &source, symbol_id, context, file_id);
 
         // Add a TypedBehavior with the resolved type
         let typed_behavior = TypedBehavior::new(resolved_type.clone(), span);
@@ -135,17 +132,11 @@ impl Resolver for FieldResolver {
 /// This extracts the type from syntax and immediately resolves it
 fn resolve_field_type_from_syntax(
     syntax: &SyntaxNode,
-    source_file: Option<&str>,
+    source: &str,
     context_id: semantic_tree::symbol::SymbolId,
     ctx: &mut BindingContext,
     file_id: usize,
 ) -> Ty {
-    // Get source from context
-    let source = source_file
-        .and_then(|name| ctx.sources.get(name))
-        .map(|s| s.as_str())
-        .unwrap_or("");
-
     // Find the Ty node and resolve using shared utility
     if let Some(ty_node) = syntax.children().find(|child| child.kind() == SyntaxKind::Ty) {
         let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);

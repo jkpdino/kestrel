@@ -2,15 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_semantic_tree::language::KestrelLanguage;
-use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::resolvers::{FieldResolver, FunctionResolver, ImportResolver, InitializerResolver, ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver};
-
-/// Storage for function body syntax nodes, keyed by function SymbolId
-pub type FunctionBodyMap = HashMap<SymbolId, SyntaxNode>;
 
 /// Storage for source code by file, keyed by file name
 pub type SourceMap = HashMap<String, String>;
@@ -60,48 +56,25 @@ pub struct BindingContext<'a> {
     pub file_id: usize,
     /// Cycle detector for type alias resolution
     pub type_alias_cycle_detector: &'a mut CycleDetector<SymbolId>,
-    /// Function body syntax nodes, keyed by function SymbolId
-    #[allow(dead_code)]
-    pub function_bodies: &'a FunctionBodyMap,
     /// Source code by file name
     pub sources: &'a SourceMap,
 }
 
 impl BindingContext<'_> {
-    /// Get the file_id for a symbol by walking up to its SourceFile parent.
+    /// Get file_id and source code for a symbol in one call.
     ///
-    /// This enables cross-file diagnostics - errors can reference declarations
-    /// in other files by using the correct file_id for each span.
-    pub fn file_id_for_symbol(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<usize> {
-        let mut current = Some(symbol.clone());
-        while let Some(s) = current {
-            if s.metadata().kind() == KestrelSymbolKind::SourceFile {
-                let file_name = s.metadata().name().value.clone();
-                return self.diagnostics.get_file_id(&file_name);
+    /// This is the preferred method for resolvers that need both file_id (for diagnostics)
+    /// and source code (for span calculation). It performs a single parent-chain traversal.
+    ///
+    /// Returns (file_id, source) where file_id falls back to self.file_id and source is cloned.
+    pub fn get_file_context(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (usize, String) {
+        match crate::utils::get_source_file_info(symbol, self.diagnostics) {
+            Some(info) => {
+                let source = self.sources.get(&info.file_name).cloned().unwrap_or_default();
+                (info.file_id, source)
             }
-            current = s.metadata().parent();
+            None => (self.file_id, String::new()),
         }
-        None
-    }
-
-    /// Get the source file name for a symbol
-    pub fn source_file_name(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<String> {
-        let mut current = Some(symbol.clone());
-        while let Some(s) = current {
-            if s.metadata().kind() == KestrelSymbolKind::SourceFile {
-                return Some(s.metadata().name().value.clone());
-            }
-            current = s.metadata().parent();
-        }
-        None
-    }
-
-    /// Get the source code for a symbol's file
-    #[allow(dead_code)]
-    pub fn source_for_symbol(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<&str> {
-        self.source_file_name(symbol)
-            .and_then(|name| self.sources.get(&name))
-            .map(|s| s.as_str())
     }
 }
 

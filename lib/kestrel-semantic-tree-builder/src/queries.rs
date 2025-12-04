@@ -269,16 +269,6 @@ pub fn resolve_type_path(
     db.resolve_type_path(path, context)
 }
 
-/// Resolve a value path to a symbol with ValueBehavior
-#[allow(dead_code)]
-pub fn resolve_value_path(
-    db: &dyn Db,
-    path: Vec<String>,
-    context: SymbolId,
-) -> ValuePathResolution {
-    db.resolve_value_path(path, context)
-}
-
 /// Helper to get ImportDataBehavior from a symbol
 pub fn get_import_data(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>

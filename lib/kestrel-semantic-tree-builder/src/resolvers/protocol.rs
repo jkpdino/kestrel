@@ -103,21 +103,13 @@ impl Resolver for ProtocolResolver {
 
         let symbol_id = symbol.metadata().id();
 
-        // Get file_id for this symbol
-        let file_id = context.file_id_for_symbol(symbol).unwrap_or(context.file_id);
-
-        // Get source for this symbol's file
-        let source_file = context.source_file_name(symbol);
-        let source = source_file
-            .as_ref()
-            .and_then(|name| context.sources.get(name))
-            .map(|s| s.as_str())
-            .unwrap_or("");
+        // Get file_id and source for this symbol
+        let (file_id, source) = context.get_file_context(symbol);
 
         // Resolve inherited protocols from syntax and add as behavior
         resolve_conformance_list(
             syntax,
-            source,
+            &source,
             symbol,
             symbol_id,
             context,
