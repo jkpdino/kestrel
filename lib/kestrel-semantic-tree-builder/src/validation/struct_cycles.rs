@@ -20,9 +20,9 @@ use kestrel_semantic_tree::ty::{Ty, TyKind};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::db::SemanticDatabase;
+use crate::database::{Db, SemanticDatabase};
 use crate::diagnostics::{CircularStructContainmentError, CycleMember, SelfContainingStructError};
-use crate::utils::get_file_id_for_symbol;
+use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
 
 /// Validator that detects circular struct containment

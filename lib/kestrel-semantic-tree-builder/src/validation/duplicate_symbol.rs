@@ -15,7 +15,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
 use crate::diagnostics::{DuplicateSymbolDifferentKindError, DuplicateSymbolError};
-use crate::utils::get_file_id_for_symbol;
+use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
 
 /// Validator that ensures no duplicate symbols exist

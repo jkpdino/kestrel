@@ -8,7 +8,7 @@ use kestrel_semantic_tree::expr::Expression;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::utils::get_node_span;
+use crate::syntax::get_node_span;
 
 use super::calls::resolve_call_expression;
 use super::context::BodyResolutionContext;

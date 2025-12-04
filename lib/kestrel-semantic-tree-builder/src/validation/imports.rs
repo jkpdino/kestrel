@@ -17,8 +17,8 @@ use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use semantic_tree::symbol::Symbol;
 
-use crate::queries::{self, Db};
-use crate::utils::get_file_id_for_symbol;
+use crate::database::{self, Db};
+use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
 
 /// Validator for import declarations
@@ -85,7 +85,7 @@ fn validate_import(
     ctx: &SymbolContext<'_>,
 ) {
     // Get the import data from behavior
-    let import_data = match queries::get_import_data(import_symbol) {
+    let import_data = match database::get_import_data(import_symbol) {
         Some(data) => data,
         None => {
             // Missing import data - this shouldn't happen, but don't crash
@@ -97,8 +97,7 @@ fn validate_import(
     let file_id = get_file_id_for_symbol(import_symbol, &mut *ctx.diagnostics().get());
 
     // 1. Validate module path resolution
-    let module_id = match queries::resolve_module_path(
-        ctx.db,
+    let module_id = match ctx.db.resolve_module_path(
         import_data.module_path().to_vec(),
         import_id,
     ) {
@@ -133,7 +132,7 @@ fn validate_import(
                     let target_id = target_symbol.metadata().id();
 
                     // Check visibility using query
-                    if !queries::is_visible_from(ctx.db, target_id, import_id) {
+                    if !ctx.db.is_visible_from(target_id, import_id) {
                         // Get the actual visibility from the target symbol
                         let (visibility_str, _decl_span) = get_visibility_info(&target_symbol);
 
@@ -186,7 +185,7 @@ fn check_import_conflicts(
 
         match child.metadata().kind() {
             KestrelSymbolKind::Import => {
-                if let Some(import_data) = queries::get_import_data(&child) {
+                if let Some(import_data) = database::get_import_data(&child) {
                     // For specific imports, add each item
                     for item in import_data.items() {
                         let name = item.alias.clone().unwrap_or_else(|| item.name.clone());
@@ -240,7 +239,7 @@ fn check_import_conflicts(
 
     // Now check whole-module imports for conflicts
     for import_symbol in import_symbols {
-        let import_data = match queries::get_import_data(import_symbol) {
+        let import_data = match database::get_import_data(import_symbol) {
             Some(data) => data,
             None => continue,
         };
@@ -255,8 +254,7 @@ fn check_import_conflicts(
             get_file_id_for_symbol(import_symbol, &mut *ctx.diagnostics().get());
 
         // Resolve the module
-        let module_id = match queries::resolve_module_path(
-            ctx.db,
+        let module_id = match ctx.db.resolve_module_path(
             import_data.module_path().to_vec(),
             import_id,
         ) {

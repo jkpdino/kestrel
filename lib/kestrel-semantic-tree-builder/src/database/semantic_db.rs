@@ -1,23 +1,31 @@
-//! Database for semantic analysis with query caching
+//! Semantic database implementation
+//!
+//! The `SemanticDatabase` provides the main query interface for semantic analysis,
+//! with caching for expensive queries like scope computation.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+
 use kestrel_prelude::primitives;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
+use kestrel_semantic_tree::error::ModuleNotFoundError;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
-use kestrel_semantic_tree::error::ModuleNotFoundError;
-use kestrel_semantic_tree::ty::{Ty, IntBits, FloatBits};
+use kestrel_semantic_tree::ty::{FloatBits, IntBits, Ty};
 use semantic_tree::symbol::{Symbol, SymbolId};
-use crate::queries::{self, Scope, Import, ImportItem, SymbolResolution, TypePathResolution, ValuePathResolution};
-use crate::path_resolver;
+
+use crate::resolution::VisibilityChecker;
+
+use super::queries::{
+    get_import_data, Db, Import, ImportItem, Scope, SymbolResolution, TypePathResolution,
+    ValuePathResolution,
+};
+use super::registry::SymbolRegistry;
 
 /// Resolve a primitive type name to its semantic type
-///
-/// Uses kestrel-prelude constants for consistent type name handling.
 fn resolve_primitive_type(name: &str, span: kestrel_span::Span) -> Option<Ty> {
     match name {
         primitives::INT => Some(Ty::int(IntBits::I64, span)),
@@ -35,124 +43,9 @@ fn resolve_primitive_type(name: &str, span: kestrel_span::Span) -> Option<Ty> {
     }
 }
 
-/// Thread-safe registry of all symbols in the tree
-#[derive(Debug, Clone)]
-pub struct SymbolRegistry {
-    symbols: Arc<RwLock<HashMap<SymbolId, Arc<dyn Symbol<KestrelLanguage>>>>>,
-    /// Index for O(1) lookup of symbols by (kind, name)
-    /// Used primarily for module path resolution
-    kind_name_index: Arc<RwLock<HashMap<(KestrelSymbolKind, String), Vec<SymbolId>>>>,
-}
-
-impl SymbolRegistry {
-    pub fn new() -> Self {
-        Self {
-            symbols: Arc::new(RwLock::new(HashMap::new())),
-            kind_name_index: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// Register a single symbol (called during build phase)
-    pub fn register(&self, symbol: Arc<dyn Symbol<KestrelLanguage>>) {
-        let id = symbol.metadata().id();
-        let kind = symbol.metadata().kind();
-        let name = symbol.metadata().name().value.clone();
-
-        self.symbols
-            .write()
-            .expect("RwLock poisoned")
-            .insert(id, symbol);
-
-        // Add to kind+name index for O(1) lookups
-        self.kind_name_index
-            .write()
-            .expect("RwLock poisoned")
-            .entry((kind, name))
-            .or_insert_with(Vec::new)
-            .push(id);
-    }
-
-    /// Get symbol by ID
-    pub fn get(&self, id: SymbolId) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        self.symbols.read().expect("RwLock poisoned").get(&id).cloned()
-    }
-
-    /// Register entire symbol tree recursively
-    pub fn register_tree(&self, root: &Arc<dyn Symbol<KestrelLanguage>>) {
-        self.register(root.clone());
-        for child in root.metadata().children() {
-            self.register_tree(&child);
-        }
-    }
-
-    /// Get total number of registered symbols (for debugging)
-    pub fn len(&self) -> usize {
-        self.symbols.read().expect("RwLock poisoned").len()
-    }
-
-    /// Check if registry is empty
-    pub fn is_empty(&self) -> bool {
-        self.symbols.read().expect("RwLock poisoned").is_empty()
-    }
-
-    /// Iterate over all symbols (for module path resolution)
-    pub fn iter(&self) -> impl Iterator<Item = (SymbolId, Arc<dyn Symbol<KestrelLanguage>>)> + '_ {
-        SymbolRegistryIter {
-            guard: self.symbols.read().expect("RwLock poisoned"),
-            keys: None,
-        }
-    }
-
-    /// Look up symbols by kind and name in O(1) time
-    pub fn find_by_kind_and_name(
-        &self,
-        kind: KestrelSymbolKind,
-        name: &str,
-    ) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
-        let index = self.kind_name_index.read().expect("RwLock poisoned");
-        let symbols = self.symbols.read().expect("RwLock poisoned");
-
-        index
-            .get(&(kind, name.to_string()))
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| symbols.get(id).cloned())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-}
-
-/// Iterator over symbol registry
-struct SymbolRegistryIter<'a> {
-    guard: std::sync::RwLockReadGuard<'a, HashMap<SymbolId, Arc<dyn Symbol<KestrelLanguage>>>>,
-    keys: Option<Vec<SymbolId>>,
-}
-
-impl<'a> Iterator for SymbolRegistryIter<'a> {
-    type Item = (SymbolId, Arc<dyn Symbol<KestrelLanguage>>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.keys.is_none() {
-            self.keys = Some(self.guard.keys().copied().collect());
-        }
-        let keys = self.keys.as_mut()?;
-        let id = keys.pop()?;
-        self.guard.get(&id).map(|s| (id, s.clone()))
-    }
-}
-
-impl Default for SymbolRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Database for semantic queries with caching
 pub struct SemanticDatabase {
-    /// Symbol registry (input to queries)
     registry: SymbolRegistry,
-    /// Cache for scope queries
     scope_cache: RwLock<HashMap<SymbolId, Arc<Scope>>>,
 }
 
@@ -170,36 +63,7 @@ impl SemanticDatabase {
         &self.registry
     }
 
-    /// Get symbol by ID (public delegation)
-    pub fn symbol_by_id(&self, id: SymbolId) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
-        queries::Db::symbol_by_id(self, id)
-    }
-
-    /// Get scope for a symbol (public delegation)
-    pub fn scope_for(&self, symbol_id: SymbolId) -> Arc<Scope> {
-        queries::Db::scope_for(self, symbol_id)
-    }
-
-    /// Get imports in scope (public delegation)
-    pub fn imports_in_scope(&self, symbol_id: SymbolId) -> Vec<Arc<Import>> {
-        queries::Db::imports_in_scope(self, symbol_id)
-    }
-
-    /// Check visibility (public delegation)
-    pub fn is_visible_from(&self, target: SymbolId, context: SymbolId) -> bool {
-        queries::Db::is_visible_from(self, target, context)
-    }
-
-    /// Resolve module path (public delegation)
-    pub fn resolve_module_path(
-        &self,
-        path: Vec<String>,
-        context: SymbolId,
-    ) -> Result<SymbolId, ModuleNotFoundError> {
-        queries::Db::resolve_module_path(self, path, context)
-    }
-
-    /// Compute scope for a symbol (internal implementation)
+    /// Compute scope for a symbol
     fn compute_scope(&self, symbol_id: SymbolId) -> Arc<Scope> {
         let symbol = self.symbol_by_id(symbol_id).expect("symbol must exist");
 
@@ -223,7 +87,8 @@ impl SemanticDatabase {
             if import.items.is_empty() {
                 if let Some(alias) = &import.alias {
                     // import A.B.C as D
-                    if let Ok(module_id) = self.resolve_module_path(import.module_path.clone(), symbol_id)
+                    if let Ok(module_id) =
+                        self.resolve_module_path(import.module_path.clone(), symbol_id)
                     {
                         imports
                             .entry(alias.clone())
@@ -232,14 +97,14 @@ impl SemanticDatabase {
                     }
                 } else {
                     // import A.B.C → import all visible symbols
-                    if let Ok(module_id) = self.resolve_module_path(import.module_path.clone(), symbol_id)
+                    if let Ok(module_id) =
+                        self.resolve_module_path(import.module_path.clone(), symbol_id)
                     {
                         let module_scope = self.scope_for(module_id);
 
                         // Import all visible declarations from module
                         for (name, ids) in &module_scope.declarations {
                             for &decl_id in ids {
-                                // Check visibility
                                 if self.is_visible_from(decl_id, symbol_id) {
                                     imports
                                         .entry(name.clone())
@@ -273,10 +138,58 @@ impl SemanticDatabase {
             parent: symbol.metadata().parent().map(|p| p.metadata().id()),
         })
     }
+
+    /// Helper to extract value information from resolved symbols
+    fn extract_value_from_symbols(
+        &self,
+        symbols: &[Arc<dyn Symbol<KestrelLanguage>>],
+        segment: &str,
+        index: usize,
+    ) -> ValuePathResolution {
+        if symbols.is_empty() {
+            return ValuePathResolution::NotFound {
+                segment: segment.to_string(),
+                index,
+            };
+        }
+
+        // Check if all symbols are functions (potential overloads)
+        let all_functions = symbols
+            .iter()
+            .all(|s| s.metadata().kind() == KestrelSymbolKind::Function);
+
+        if all_functions && symbols.len() > 1 {
+            return ValuePathResolution::Overloaded {
+                candidates: symbols.iter().map(|s| s.metadata().id()).collect(),
+            };
+        }
+
+        // Single symbol - try to extract value
+        let symbol = &symbols[0];
+
+        // Check for ValueBehavior
+        if let Some(value_beh) = symbol.value_behavior() {
+            return ValuePathResolution::Symbol {
+                symbol_id: symbol.metadata().id(),
+                ty: value_beh.ty().clone(),
+            };
+        }
+
+        // Check for CallableBehavior (functions are values)
+        if let Some(callable_beh) = symbol.callable_behavior() {
+            return ValuePathResolution::Symbol {
+                symbol_id: symbol.metadata().id(),
+                ty: callable_beh.function_type(),
+            };
+        }
+
+        ValuePathResolution::NotAValue {
+            symbol_id: symbol.metadata().id(),
+        }
+    }
 }
 
-// Implement the Db trait
-impl queries::Db for SemanticDatabase {
+impl Db for SemanticDatabase {
     fn symbol_by_id(&self, id: SymbolId) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         self.registry.get(id)
     }
@@ -305,7 +218,6 @@ impl queries::Db for SemanticDatabase {
     fn resolve_name(&self, name: String, context: SymbolId) -> SymbolResolution {
         let mut current = Some(context);
 
-        // Walk up scope chain
         while let Some(id) = current {
             let scope = self.scope_for(id);
 
@@ -336,14 +248,13 @@ impl queries::Db for SemanticDatabase {
     fn imports_in_scope(&self, symbol_id: SymbolId) -> Vec<Arc<Import>> {
         let symbol = self.symbol_by_id(symbol_id).expect("symbol must exist");
 
-        // Find import symbols and extract their ImportDataBehavior
         symbol
             .metadata()
             .children()
             .into_iter()
             .filter(|c| matches!(c.metadata().kind(), KestrelSymbolKind::Import))
             .filter_map(|import_symbol| {
-                queries::get_import_data(&import_symbol).map(|data| {
+                get_import_data(&import_symbol).map(|data| {
                     Arc::new(Import {
                         module_path: data.module_path().to_vec(),
                         alias: data.alias().map(|s| s.to_string()),
@@ -364,12 +275,10 @@ impl queries::Db for SemanticDatabase {
 
     fn is_visible_from(&self, target: SymbolId, context: SymbolId) -> bool {
         let target_symbol = self.symbol_by_id(target).expect("target symbol must exist");
-        let context_symbol = self
-            .symbol_by_id(context)
-            .expect("context symbol must exist");
+        let context_symbol = self.symbol_by_id(context).expect("context symbol must exist");
 
-        // Use existing visibility logic
-        path_resolver::is_visible_from(&target_symbol, &context_symbol)
+        let checker = VisibilityChecker::new(&context_symbol);
+        checker.is_visible(&target_symbol)
     }
 
     fn resolve_module_path(
@@ -386,13 +295,11 @@ impl queries::Db for SemanticDatabase {
             });
         }
 
-        // Import paths are always absolute from the root
-        // For a path like "Library", we search for a Module symbol named "Library"
-        // For a path like "Library.Sub", we find "Library" then look for "Sub" in its children
-
         // Find first segment using O(1) index lookup
         let first_segment = &path[0];
-        let modules = self.registry.find_by_kind_and_name(KestrelSymbolKind::Module, first_segment);
+        let modules = self
+            .registry
+            .find_by_kind_and_name(KestrelSymbolKind::Module, first_segment);
 
         let mut current = match modules.into_iter().next() {
             Some(s) => s,
@@ -406,13 +313,14 @@ impl queries::Db for SemanticDatabase {
             }
         };
 
-        // Resolve remaining segments by searching visible children
+        // Resolve remaining segments
         for (index, segment) in path.iter().enumerate().skip(1) {
             let found = current
                 .metadata()
                 .visible_children()
                 .into_iter()
                 .find(|child| child.metadata().name().value == *segment);
+
             match found {
                 Some(child) => current = child,
                 None => {
@@ -437,12 +345,10 @@ impl queries::Db for SemanticDatabase {
             };
         }
 
-        // Handle built-in primitive types as single-segment paths
+        // Handle built-in primitive types
         if path.len() == 1 {
             let segment = &path[0];
-            let span = 0..0; // Primitive types don't have a real span
-
-            if let Some(ty) = resolve_primitive_type(segment, span) {
+            if let Some(ty) = resolve_primitive_type(segment, 0..0) {
                 return TypePathResolution::Resolved(ty);
             }
         }
@@ -462,19 +368,16 @@ impl queries::Db for SemanticDatabase {
         let first_resolution = self.resolve_name(first.clone(), context);
 
         let mut current_symbol = match first_resolution {
-            SymbolResolution::Found(ids) if ids.len() == 1 => {
-                match self.symbol_by_id(ids[0]) {
-                    Some(s) => s,
-                    None => {
-                        return TypePathResolution::NotFound {
-                            segment: first.clone(),
-                            index: 0,
-                        };
-                    }
+            SymbolResolution::Found(ids) if ids.len() == 1 => match self.symbol_by_id(ids[0]) {
+                Some(s) => s,
+                None => {
+                    return TypePathResolution::NotFound {
+                        segment: first.clone(),
+                        index: 0,
+                    };
                 }
-            }
+            },
             SymbolResolution::Found(ids) => {
-                // Multiple matches - ambiguous
                 return TypePathResolution::Ambiguous {
                     segment: first.clone(),
                     index: 0,
@@ -496,14 +399,10 @@ impl queries::Db for SemanticDatabase {
             }
         };
 
-        // Subsequent segments: search visible children of the resolved symbol
+        // Subsequent segments: search visible children
+        let checker = VisibilityChecker::new(&context_symbol);
         for (index, segment) in path.iter().enumerate().skip(1) {
-            // Find children matching the name and visible from context
-            let matches = path_resolver::find_visible_children_by_name(
-                &current_symbol,
-                segment,
-                &context_symbol,
-            );
+            let matches = checker.find_visible_children(&current_symbol, segment);
 
             match matches.len() {
                 0 => {
@@ -525,11 +424,9 @@ impl queries::Db for SemanticDatabase {
             }
         }
 
-        // Handle TypeParameterSymbol specially - it IS a type, not something with a TypedBehavior
+        // Handle TypeParameterSymbol specially
         if current_symbol.metadata().kind() == KestrelSymbolKind::TypeParameter {
-            // Look up the symbol from registry to get the Arc
             if let Some(symbol) = self.symbol_by_id(current_symbol.metadata().id()) {
-                // Downcast the Arc<dyn Symbol> to Arc<TypeParameterSymbol>
                 if let Ok(type_param_arc) = symbol.into_any_arc().downcast::<TypeParameterSymbol>() {
                     let span = type_param_arc.metadata().span().clone();
                     let ty = Ty::type_parameter(type_param_arc, span);
@@ -538,16 +435,8 @@ impl queries::Db for SemanticDatabase {
             }
         }
 
-        // Extract type from the final symbol's TypedBehavior
-        // For type aliases, we need to return the TypeAlias type (second TypedBehavior)
-        // rather than the aliased type (first TypedBehavior)
+        // Extract type from TypedBehavior
         let behaviors = current_symbol.metadata().behaviors();
-
-        // Check if this is a TypeAlias symbol by looking for a TypedBehavior with TypeAlias kind
-        // Type aliases have two TypedBehaviors:
-        // 1. First: the syntactic aliased type (what it points to)
-        // 2. Second: the TypeAlias type (the alias itself)
-        // We want the second one for type resolution so that we can detect cycles
         let typed_behaviors: Vec<_> = behaviors
             .iter()
             .filter_map(|b| {
@@ -559,11 +448,12 @@ impl queries::Db for SemanticDatabase {
             })
             .collect();
 
-        // If there are multiple TypedBehaviors, look for one with TypeAlias kind
-        let type_alias_behavior = typed_behaviors.iter().find(|tb| tb.ty().is_type_alias()).copied();
+        let type_alias_behavior = typed_behaviors
+            .iter()
+            .find(|tb| tb.ty().is_type_alias())
+            .copied();
 
-        let typed_behavior = type_alias_behavior
-            .or_else(|| typed_behaviors.first().copied());
+        let typed_behavior = type_alias_behavior.or_else(|| typed_behaviors.first().copied());
 
         match typed_behavior {
             Some(tb) => TypePathResolution::Resolved(tb.ty().clone()),
@@ -595,22 +485,20 @@ impl queries::Db for SemanticDatabase {
         let first = &path[0];
         let first_resolution = self.resolve_name(first.clone(), context);
 
-        // Handle multiple candidates for first segment (overloads)
         let first_symbols: Vec<_> = match first_resolution {
-            SymbolResolution::Found(ids) => {
-                ids.iter()
-                    .filter_map(|id| self.symbol_by_id(*id))
-                    .collect()
-            }
+            SymbolResolution::Found(ids) => ids
+                .iter()
+                .filter_map(|id| self.symbol_by_id(*id))
+                .collect(),
             SymbolResolution::Ambiguous(ids) => {
-                // Check if all candidates are functions (overloads)
-                let symbols: Vec<_> = ids.iter()
+                let symbols: Vec<_> = ids
+                    .iter()
                     .filter_map(|id| self.symbol_by_id(*id))
                     .collect();
 
-                let all_functions = symbols.iter().all(|s| {
-                    s.metadata().kind() == KestrelSymbolKind::Function
-                });
+                let all_functions = symbols
+                    .iter()
+                    .all(|s| s.metadata().kind() == KestrelSymbolKind::Function);
 
                 if !all_functions {
                     return ValuePathResolution::Ambiguous {
@@ -636,13 +524,12 @@ impl queries::Db for SemanticDatabase {
             };
         }
 
-        // For single-segment paths, we can resolve now
+        // Single-segment paths
         if path.len() == 1 {
             return self.extract_value_from_symbols(&first_symbols, first, 0);
         }
 
-        // For multi-segment paths, the first segment must resolve to a single symbol
-        // (can't have overloaded modules)
+        // Multi-segment paths require single resolution
         if first_symbols.len() > 1 {
             return ValuePathResolution::Ambiguous {
                 segment: first.clone(),
@@ -652,22 +539,17 @@ impl queries::Db for SemanticDatabase {
         }
 
         let mut current_symbol = first_symbols.into_iter().next().unwrap();
+        let checker = VisibilityChecker::new(&context_symbol);
 
-        // Subsequent segments: search visible children of the resolved symbol
         for (index, segment) in path.iter().enumerate().skip(1) {
-            // Find children matching the name and visible from context
-            let matches = path_resolver::find_visible_children_by_name(
-                &current_symbol,
-                segment,
-                &context_symbol,
-            );
+            let matches = checker.find_visible_children(&current_symbol, segment);
 
-            // If this is the last segment, handle overloads
+            // Last segment: handle overloads
             if index == path.len() - 1 {
                 return self.extract_value_from_symbols(&matches, segment, index);
             }
 
-            // Intermediate segments must resolve to a single symbol
+            // Intermediate segments must resolve to single symbol
             match matches.len() {
                 0 => {
                     return ValuePathResolution::NotFound {
@@ -688,14 +570,17 @@ impl queries::Db for SemanticDatabase {
             }
         }
 
-        // Should not reach here (handled in loop above)
         ValuePathResolution::NotFound {
             segment: path.last().cloned().unwrap_or_default(),
             index: path.len().saturating_sub(1),
         }
     }
 
-    fn visible_children_from(&self, parent: SymbolId, context: SymbolId) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
+    fn visible_children_from(
+        &self,
+        parent: SymbolId,
+        context: SymbolId,
+    ) -> Vec<Arc<dyn Symbol<KestrelLanguage>>> {
         let parent_symbol = match self.symbol_by_id(parent) {
             Some(s) => s,
             None => return Vec::new(),
@@ -712,7 +597,11 @@ impl queries::Db for SemanticDatabase {
             .collect()
     }
 
-    fn find_child_by_name(&self, parent: SymbolId, name: &str) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
+    fn find_child_by_name(
+        &self,
+        parent: SymbolId,
+        name: &str,
+    ) -> Option<Arc<dyn Symbol<KestrelLanguage>>> {
         let parent_symbol = self.symbol_by_id(parent)?;
 
         parent_symbol
@@ -720,59 +609,5 @@ impl queries::Db for SemanticDatabase {
             .visible_children()
             .into_iter()
             .find(|child| child.metadata().name().value == name)
-    }
-}
-
-impl SemanticDatabase {
-    /// Helper to extract value information from a set of resolved symbols.
-    /// Handles the distinction between single values and overloaded functions.
-    fn extract_value_from_symbols(
-        &self,
-        symbols: &[Arc<dyn Symbol<KestrelLanguage>>],
-        segment: &str,
-        index: usize,
-    ) -> ValuePathResolution {
-        if symbols.is_empty() {
-            return ValuePathResolution::NotFound {
-                segment: segment.to_string(),
-                index,
-            };
-        }
-
-        // Check if all symbols are functions (potential overloads)
-        let all_functions = symbols.iter().all(|s| {
-            s.metadata().kind() == KestrelSymbolKind::Function
-        });
-
-        if all_functions && symbols.len() > 1 {
-            // Multiple function overloads - caller must disambiguate
-            return ValuePathResolution::Overloaded {
-                candidates: symbols.iter().map(|s| s.metadata().id()).collect(),
-            };
-        }
-
-        // Single symbol - try to extract value
-        let symbol = &symbols[0];
-
-        // First, check for ValueBehavior
-        if let Some(value_beh) = symbol.value_behavior() {
-            return ValuePathResolution::Symbol {
-                symbol_id: symbol.metadata().id(),
-                ty: value_beh.ty().clone(),
-            };
-        }
-
-        // If no ValueBehavior, check for CallableBehavior (functions are values)
-        if let Some(callable_beh) = symbol.callable_behavior() {
-            return ValuePathResolution::Symbol {
-                symbol_id: symbol.metadata().id(),
-                ty: callable_beh.function_type(),
-            };
-        }
-
-        // Symbol has no value behavior
-        ValuePathResolution::NotAValue {
-            symbol_id: symbol.metadata().id(),
-        }
     }
 }

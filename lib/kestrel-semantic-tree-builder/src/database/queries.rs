@@ -5,13 +5,13 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use semantic_tree::symbol::SymbolId;
+
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::error::ModuleNotFoundError;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::ty::Ty;
-use semantic_tree::symbol::Symbol;
+use semantic_tree::symbol::{Symbol, SymbolId};
 
 /// Result of name resolution
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,6 +65,21 @@ pub enum TypePathResolution {
     },
 }
 
+impl TypePathResolution {
+    /// Returns true if resolution succeeded
+    pub fn is_resolved(&self) -> bool {
+        matches!(self, TypePathResolution::Resolved(_))
+    }
+
+    /// Returns the resolved type if successful
+    pub fn ty(&self) -> Option<&Ty> {
+        match self {
+            TypePathResolution::Resolved(ty) => Some(ty),
+            _ => None,
+        }
+    }
+}
+
 /// Result of value path resolution (for expressions)
 #[derive(Debug, Clone)]
 pub enum ValuePathResolution {
@@ -76,7 +91,7 @@ pub enum ValuePathResolution {
         ty: Ty,
     },
     /// Resolved to multiple symbols (overloaded functions)
-    /// Caller must disambiguate based on context (e.g., call arguments or type annotation)
+    /// Caller must disambiguate based on context
     Overloaded {
         /// The candidate symbol IDs (all have CallableBehavior)
         candidates: Vec<SymbolId>,
@@ -104,25 +119,13 @@ pub enum ValuePathResolution {
     },
 }
 
-impl TypePathResolution {
+impl ValuePathResolution {
     /// Returns true if resolution succeeded
     pub fn is_resolved(&self) -> bool {
-        matches!(self, TypePathResolution::Resolved(_))
-    }
-
-    /// Returns the resolved type if successful
-    pub fn ty(&self) -> Option<&Ty> {
-        match self {
-            TypePathResolution::Resolved(ty) => Some(ty),
-            _ => None,
-        }
-    }
-}
-
-impl ValuePathResolution {
-    /// Returns true if resolution succeeded (single symbol or overloaded)
-    pub fn is_resolved(&self) -> bool {
-        matches!(self, ValuePathResolution::Symbol { .. } | ValuePathResolution::Overloaded { .. })
+        matches!(
+            self,
+            ValuePathResolution::Symbol { .. } | ValuePathResolution::Overloaded { .. }
+        )
     }
 
     /// Returns the single resolved symbol if not overloaded
@@ -214,65 +217,29 @@ pub trait Db {
         context: SymbolId,
     ) -> Result<SymbolId, ModuleNotFoundError>;
 
-    /// Resolve a type path (e.g., "Foo.Bar.Baz") to a Type.
-    ///
-    /// The first segment is resolved using scope-aware name resolution,
-    /// considering imports and local declarations. Subsequent segments
-    /// are resolved by searching children of the previously resolved symbol.
+    /// Resolve a type path (e.g., "Foo.Bar.Baz") to a Type
     fn resolve_type_path(&self, path: Vec<String>, context: SymbolId) -> TypePathResolution;
 
-    /// Resolve a value path (e.g., "module.function" or "x") to a value.
-    ///
-    /// The first segment is resolved using scope-aware name resolution,
-    /// considering imports and local declarations. Subsequent segments
-    /// are resolved by searching children of the previously resolved symbol.
-    ///
-    /// Returns `ValuePathResolution::Overloaded` if the path resolves to
-    /// multiple function overloads.
+    /// Resolve a value path (e.g., "module.function" or "x") to a value
     fn resolve_value_path(&self, path: Vec<String>, context: SymbolId) -> ValuePathResolution;
 
-    /// Get visible children of a symbol that are visible from the given context.
-    ///
-    /// This filters the symbol's children based on visibility rules,
-    /// returning only those accessible from the context scope.
-    fn visible_children_from(&self, parent: SymbolId, context: SymbolId) -> Vec<Arc<dyn Symbol<KestrelLanguage>>>;
+    /// Get visible children of a symbol that are visible from the given context
+    fn visible_children_from(
+        &self,
+        parent: SymbolId,
+        context: SymbolId,
+    ) -> Vec<Arc<dyn Symbol<KestrelLanguage>>>;
 
-    /// Find a child symbol by name (without visibility check).
-    ///
-    /// Returns the first child with the given name, or None if not found.
-    /// Use `is_visible_from` separately to check visibility.
-    fn find_child_by_name(&self, parent: SymbolId, name: &str) -> Option<Arc<dyn Symbol<KestrelLanguage>>>;
-}
-
-
-/// Check if target is visible from context
-pub fn is_visible_from(db: &dyn Db, target: SymbolId, context: SymbolId) -> bool {
-    db.is_visible_from(target, context)
-}
-
-/// Resolve a module path from a context
-pub fn resolve_module_path(
-    db: &dyn Db,
-    path: Vec<String>,
-    context: SymbolId,
-) -> Result<SymbolId, ModuleNotFoundError> {
-    db.resolve_module_path(path, context)
-}
-
-/// Resolve a type path to a Type
-#[allow(dead_code)]
-pub fn resolve_type_path(
-    db: &dyn Db,
-    path: Vec<String>,
-    context: SymbolId,
-) -> TypePathResolution {
-    db.resolve_type_path(path, context)
+    /// Find a child symbol by name (without visibility check)
+    fn find_child_by_name(
+        &self,
+        parent: SymbolId,
+        name: &str,
+    ) -> Option<Arc<dyn Symbol<KestrelLanguage>>>;
 }
 
 /// Helper to get ImportDataBehavior from a symbol
-pub fn get_import_data(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>
-) -> Option<Arc<ImportDataBehavior>> {
+pub fn get_import_data(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Arc<ImportDataBehavior>> {
     symbol
         .metadata()
         .behaviors()

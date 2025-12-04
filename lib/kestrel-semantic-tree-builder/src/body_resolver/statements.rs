@@ -9,7 +9,7 @@ use kestrel_semantic_tree::ty::Ty;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::utils::get_node_span;
+use crate::syntax::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
@@ -132,18 +132,20 @@ fn get_name_span(decl_node: &SyntaxNode, source: &str) -> Option<Span> {
 
 /// Extract type annotation from a variable declaration
 fn extract_var_type(decl_node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Option<Ty> {
+    use crate::resolution::TypeResolver;
+
     // Look for Ty node
     decl_node.children()
         .find(|c| c.kind() == SyntaxKind::Ty)
         .map(|ty_node| {
-            // Resolve the type using the database (not just extract placeholder)
-            let mut type_ctx = crate::type_syntax::TypeSyntaxContext {
-                db: ctx.db,
-                diagnostics: ctx.diagnostics,
-                file_id: ctx.file_id,
-                source: ctx.source,
-                context_id: ctx.function_id,
-            };
-            crate::type_syntax::resolve_type_from_ty_node(&ty_node, &mut type_ctx)
+            // Resolve the type using the database
+            let mut resolver = TypeResolver::new(
+                ctx.db,
+                ctx.diagnostics,
+                ctx.file_id,
+                ctx.source,
+                ctx.function_id,
+            );
+            resolver.resolve(&ty_node)
         })
 }

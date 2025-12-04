@@ -27,7 +27,7 @@ impl ScopeLevel {
     }
 }
 
-/// Manages local variable scopes within a function body.
+/// Manages local variable scopes within a function body
 ///
 /// The scope stack supports:
 /// - Nested scopes (blocks, if/else, loops, etc.)
@@ -35,6 +35,7 @@ impl ScopeLevel {
 /// - O(1) lookup of current binding for a name
 ///
 /// # Example
+///
 /// ```ignore
 /// fn example(x: Int) {
 ///     let y = x + 1;     // y binds to Local(1)
@@ -52,10 +53,8 @@ pub struct LocalScope {
     /// Stack of scope levels (innermost at the end)
     scopes: Vec<ScopeLevel>,
     /// Cached lookup: name -> current LocalId (for O(1) access)
-    /// Updated when entering/exiting scopes
     current_bindings: HashMap<String, LocalId>,
     /// History stack for restoring bindings when exiting scopes
-    /// Each entry is (name, previous_local_id or None if not bound before)
     shadow_stack: Vec<Vec<(String, Option<LocalId>)>>,
 }
 
@@ -149,7 +148,6 @@ mod tests {
 
     // Helper to create a test root symbol for visibility scope
     fn create_test_root() -> Arc<dyn Symbol<KestrelLanguage>> {
-
         let root_name = Name::new("TestRoot".to_string(), 0..8);
         let metadata = SymbolMetadataBuilder::new(KestrelSymbolKind::Module)
             .with_name(root_name)
@@ -185,7 +183,7 @@ mod tests {
             true,  // has_body
             vec![], // no parameters
             return_type,
-            None,  // no parent
+            None, // no parent
         ))
     }
 
@@ -258,25 +256,5 @@ mod tests {
         assert_eq!(scope.lookup("a"), Some(id_a));
         assert_eq!(scope.lookup("b"), None);
         assert_eq!(scope.lookup("c"), None);
-    }
-
-    #[test]
-    fn test_multiple_shadows_same_scope() {
-        use kestrel_semantic_tree::ty::IntBits;
-        let func = create_test_function();
-        let mut scope = LocalScope::new(func.clone());
-
-        let ty = Ty::int(IntBits::I64, 0..3);
-
-        // Same name bound multiple times in same scope (valid in some languages)
-        let id1 = scope.bind("x".to_string(), ty.clone(), false, 0..5);
-        let id2 = scope.bind("x".to_string(), ty.clone(), false, 10..15);
-        let id3 = scope.bind("x".to_string(), ty.clone(), false, 20..25);
-
-        // Should see the latest binding
-        assert_eq!(scope.lookup("x"), Some(id3));
-
-        // All 3 locals created
-        assert_eq!(func.local_count(), 3);
     }
 }

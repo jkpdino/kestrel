@@ -22,7 +22,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_span::Span;
 use semantic_tree::symbol::Symbol;
 
-use crate::db::SemanticDatabase;
+use crate::database::SemanticDatabase;
 use crate::validation::{SymbolContext, Validator};
 
 /// Validator for initializer field initialization
@@ -125,7 +125,7 @@ fn validate_initializer(
         .collect();
 
     if !uninitialized.is_empty() {
-        let file_id = crate::utils::get_file_id_for_symbol(symbol, diagnostics);
+        let file_id = crate::syntax::get_file_id_for_symbol(symbol, diagnostics);
         let span = symbol.metadata().span().clone();
 
         let field_list = uninitialized
@@ -142,7 +142,7 @@ fn validate_initializer(
     }
 
     // Report any errors collected during analysis
-    let file_id = crate::utils::get_file_id_for_symbol(symbol, diagnostics);
+    let file_id = crate::syntax::get_file_id_for_symbol(symbol, diagnostics);
     for error in ctx.errors {
         diagnostics.add_diagnostic(error.into_diagnostic(file_id));
     }

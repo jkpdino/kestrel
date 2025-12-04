@@ -48,7 +48,7 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::ty::Ty;
 use semantic_tree::symbol::Symbol;
 
-use crate::db::SemanticDatabase;
+use crate::database::SemanticDatabase;
 
 pub use assignment_validation::AssignmentValidator;
 pub use conformance::ConformanceValidator;
@@ -320,7 +320,7 @@ fn walk_symbol(
     in_struct: bool,
 ) {
     let kind = symbol.metadata().kind();
-    let file_id = crate::utils::get_file_id_for_symbol(symbol, diagnostics.borrow_mut().get());
+    let file_id = crate::syntax::get_file_id_for_symbol(symbol, diagnostics.borrow_mut().get());
 
     // Update context flags
     let in_protocol = in_protocol || kind == KestrelSymbolKind::Protocol;

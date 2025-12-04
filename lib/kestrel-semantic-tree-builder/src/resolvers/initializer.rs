@@ -12,8 +12,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{BindingContext, Resolver};
-use crate::type_syntax::{resolve_type_from_ty_node, TypeSyntaxContext};
-use crate::utils::{
+use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::syntax::{
     extract_identifier_from_name, extract_visibility, find_child, find_visibility_scope,
     get_node_span, get_visibility_span, parse_visibility,
 };
@@ -170,7 +170,7 @@ fn resolve_initializer_body(
         None,
     ));
 
-    let mut local_scope = crate::local_scope::LocalScope::new(temp_func);
+    let mut local_scope = crate::resolution::LocalScope::new(temp_func);
 
     // Inject `self` as the first local (with initializing semantics)
     // In initializers, self is mutable so we can assign to fields

@@ -20,9 +20,9 @@ use crate::diagnostics::{
     InstanceMethodOnTypeError, NoMatchingInitializerError, NoMatchingMethodError,
     NoMatchingOverloadError, OverloadDescription,
 };
-use crate::path_resolver::is_visible_from;
-use crate::queries::Db;
-use crate::utils::get_node_span;
+use crate::resolution::visibility::is_visible_from;
+use crate::database::Db;
+use crate::syntax::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;

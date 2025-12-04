@@ -18,7 +18,7 @@ use crate::diagnostics::{
     CannotAccessMemberOnTypeError, MemberNotAccessibleError, MemberNotVisibleError,
     NoMatchingMethodError, NoSuchMemberError, NoSuchMethodError, PrimitiveMethodNotCallableError,
 };
-use crate::path_resolver::is_visible_from;
+use crate::resolution::visibility::is_visible_from;
 
 use super::calls::collect_overload_descriptions;
 use super::context::BodyResolutionContext;

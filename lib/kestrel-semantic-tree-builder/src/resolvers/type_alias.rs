@@ -11,8 +11,8 @@ use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
-use crate::type_syntax::{resolve_type_from_ty_node, TypeSyntaxContext};
-use crate::utils::{
+use crate::resolution::type_resolver::{resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::syntax::{
     extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
     get_visibility_span, parse_visibility,
 };

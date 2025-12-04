@@ -27,9 +27,9 @@ use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::db::SemanticDatabase;
+use crate::database::SemanticDatabase;
 use crate::diagnostics::{CircularConstraintError, CycleMember};
-use crate::utils::get_file_id_for_symbol;
+use crate::syntax::get_file_id_for_symbol;
 use crate::validation::{SymbolContext, Validator};
 
 /// Validator that detects circular generic constraint dependencies

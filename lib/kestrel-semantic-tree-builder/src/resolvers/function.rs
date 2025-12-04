@@ -12,8 +12,8 @@ use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
-use crate::type_syntax::{extract_type_from_ty_node, extract_type_from_node, resolve_type_from_ty_node, TypeSyntaxContext};
-use crate::utils::{
+use crate::resolution::type_resolver::{extract_type_from_ty_node, extract_type_from_node, resolve_type_from_ty_node, TypeSyntaxContext};
+use crate::syntax::{
     extract_identifier_from_name, extract_name, extract_visibility, find_child,
     find_visibility_scope, get_node_span, get_visibility_span, parse_visibility,
 };
@@ -195,7 +195,7 @@ fn resolve_function_body(
         None,
     ));
 
-    let mut local_scope = crate::local_scope::LocalScope::new(temp_func);
+    let mut local_scope = crate::resolution::LocalScope::new(temp_func);
 
     // Get receiver kind from CallableBehavior to determine if we need to inject `self`
     let receiver_kind = symbol

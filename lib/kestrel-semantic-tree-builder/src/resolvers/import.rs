@@ -8,8 +8,8 @@ use kestrel_parser::import::ImportDeclaration;
 use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{Resolver, BindingContext};
-use crate::utils::get_node_span;
-use crate::queries;
+use crate::syntax::get_node_span;
+use crate::database;
 
 /// Resolver for import declarations
 pub struct ImportResolver;
@@ -85,9 +85,8 @@ impl Resolver for ImportResolver {
         let import_id = symbol.metadata().id();
 
         // Resolve module path using query (validation happens in ImportValidationPass)
-        let module_id = match queries::resolve_module_path(
-            ctx.db,
-            import_data.module_path(),
+        let module_id = match ctx.db.resolve_module_path(
+            import_data.module_path().to_vec(),
             import_id,
         ) {
             Ok(id) => id,
@@ -178,6 +177,6 @@ fn extract_import_items(import_decl: &ImportDeclaration, _source: &str) -> Vec<I
 fn get_import_data_behavior(
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
 ) -> Option<Arc<ImportDataBehavior>> {
-    crate::queries::get_import_data(symbol)
+    crate::database::get_import_data(symbol)
 }
 

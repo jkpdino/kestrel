@@ -14,9 +14,9 @@ use kestrel_semantic_tree::ty::Ty;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::local_scope::LocalScope;
-use crate::queries::Db;
-use crate::utils::get_node_span;
+use crate::resolution::LocalScope;
+use crate::database::Db;
+use crate::syntax::get_node_span;
 
 use super::expressions::resolve_expression;
 use super::statements::{resolve_statement, resolve_variable_declaration};

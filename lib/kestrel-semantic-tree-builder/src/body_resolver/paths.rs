@@ -11,8 +11,8 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::diagnostics::{SelfOutsideInstanceMethodError, UndefinedNameError};
-use crate::queries::ValuePathResolution;
-use crate::utils::get_node_span;
+use crate::database::ValuePathResolution;
+use crate::syntax::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;

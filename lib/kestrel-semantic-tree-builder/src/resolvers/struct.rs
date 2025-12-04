@@ -11,10 +11,10 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
-use crate::queries::TypePathResolution;
+use crate::database::TypePathResolution;
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
-use crate::utils::{
+use crate::syntax::{
     extract_name, extract_path_segments, extract_visibility, find_child, find_visibility_scope,
     get_node_span, get_visibility_span, parse_visibility, resolve_conformance_list,
 };

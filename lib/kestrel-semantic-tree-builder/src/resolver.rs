@@ -1,3 +1,8 @@
+//! Resolver trait and registry
+//!
+//! This module defines the `Resolver` trait for converting syntax nodes to symbols,
+//! and the `ResolverRegistry` which maps syntax kinds to their resolvers.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -6,13 +11,12 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
-use crate::resolvers::{FieldResolver, FunctionResolver, ImportResolver, InitializerResolver, ModuleResolver, ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver};
-
-/// Storage for source code by file, keyed by file name
-pub type SourceMap = HashMap<String, String>;
-
-/// Storage for syntax nodes by symbol ID, allowing bind phase to access syntax
-pub type SyntaxMap = HashMap<SymbolId, SyntaxNode>;
+use crate::database::Db;
+use crate::resolvers::{
+    FieldResolver, FunctionResolver, ImportResolver, InitializerResolver, ModuleResolver,
+    ProtocolResolver, StructResolver, TerminalResolver, TypeAliasResolver,
+};
+use crate::tree::SourceMap;
 
 /// Trait for resolving syntax nodes into semantic symbols
 pub trait Resolver {
@@ -48,8 +52,8 @@ pub trait Resolver {
 
 /// Context for the binding phase
 pub struct BindingContext<'a> {
-    /// Salsa database for queries
-    pub db: &'a dyn crate::queries::Db,
+    /// Database for queries
+    pub db: &'a dyn Db,
     /// Diagnostics collector
     pub diagnostics: &'a mut kestrel_reporting::DiagnosticContext,
     /// Current file ID for error reporting
@@ -68,7 +72,7 @@ impl BindingContext<'_> {
     ///
     /// Returns (file_id, source) where file_id falls back to self.file_id and source is cloned.
     pub fn get_file_context(&self, symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (usize, String) {
-        match crate::utils::get_source_file_info(symbol, self.diagnostics) {
+        match crate::syntax::get_source_file_info(symbol, self.diagnostics) {
             Some(info) => {
                 let source = self.sources.get(&info.file_name).cloned().unwrap_or_default();
                 (info.file_id, source)
@@ -89,48 +93,18 @@ impl ResolverRegistry {
         let mut resolvers: HashMap<SyntaxKind, Box<dyn Resolver>> = HashMap::new();
 
         // Register declaration resolvers
-        resolvers.insert(
-            SyntaxKind::ModuleDeclaration,
-            Box::new(ModuleResolver),
-        );
-        resolvers.insert(
-            SyntaxKind::ImportDeclaration,
-            Box::new(ImportResolver),
-        );
-        resolvers.insert(
-            SyntaxKind::TypeAliasDeclaration,
-            Box::new(TypeAliasResolver),
-        );
-        resolvers.insert(
-            SyntaxKind::ProtocolDeclaration,
-            Box::new(ProtocolResolver),
-        );
-        resolvers.insert(
-            SyntaxKind::StructDeclaration,
-            Box::new(StructResolver),
-        );
-        resolvers.insert(
-            SyntaxKind::FieldDeclaration,
-            Box::new(FieldResolver),
-        );
-        resolvers.insert(
-            SyntaxKind::FunctionDeclaration,
-            Box::new(FunctionResolver),
-        );
-        resolvers.insert(
-            SyntaxKind::InitializerDeclaration,
-            Box::new(InitializerResolver),
-        );
+        resolvers.insert(SyntaxKind::ModuleDeclaration, Box::new(ModuleResolver));
+        resolvers.insert(SyntaxKind::ImportDeclaration, Box::new(ImportResolver));
+        resolvers.insert(SyntaxKind::TypeAliasDeclaration, Box::new(TypeAliasResolver));
+        resolvers.insert(SyntaxKind::ProtocolDeclaration, Box::new(ProtocolResolver));
+        resolvers.insert(SyntaxKind::StructDeclaration, Box::new(StructResolver));
+        resolvers.insert(SyntaxKind::FieldDeclaration, Box::new(FieldResolver));
+        resolvers.insert(SyntaxKind::FunctionDeclaration, Box::new(FunctionResolver));
+        resolvers.insert(SyntaxKind::InitializerDeclaration, Box::new(InitializerResolver));
 
-        // Register terminal resolvers (separate instances for each)
-        resolvers.insert(
-            SyntaxKind::Visibility,
-            Box::new(TerminalResolver),
-        );
-        resolvers.insert(
-            SyntaxKind::Name,
-            Box::new(TerminalResolver),
-        );
+        // Register terminal resolvers
+        resolvers.insert(SyntaxKind::Visibility, Box::new(TerminalResolver));
+        resolvers.insert(SyntaxKind::Name, Box::new(TerminalResolver));
 
         ResolverRegistry { resolvers }
     }
@@ -138,5 +112,11 @@ impl ResolverRegistry {
     /// Get a resolver for a given SyntaxKind
     pub fn get(&self, kind: SyntaxKind) -> Option<&dyn Resolver> {
         self.resolvers.get(&kind).map(|b| b.as_ref())
+    }
+}
+
+impl Default for ResolverRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
