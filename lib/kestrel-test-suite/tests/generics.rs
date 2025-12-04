@@ -727,8 +727,9 @@ mod edge_cases {
     }
 
     #[test]
-    fn self_referential_generic() {
-        // A generic type that refers to itself with its own type param
+    fn self_referential_generic_error() {
+        // A generic type that refers to itself creates an infinite-size type.
+        // This is correctly rejected - use arrays or optional types to break the cycle.
         Test::new(
             r#"module Test
             struct Node[T] {
@@ -737,11 +738,27 @@ mod edge_cases {
             }
         "#,
         )
+        .expect(HasError("cannot contain itself"));
+    }
+
+    #[test]
+    fn self_referential_generic_with_array_ok() {
+        // Self-reference through array is allowed (array provides indirection)
+        Test::new(
+            r#"module Test
+            struct Node[T] {
+                let value: T
+                let children: [Node[T]]
+            }
+        "#,
+        )
         .expect(Compiles);
     }
 
     #[test]
-    fn mutually_referential_generics() {
+    fn mutually_referential_generics_error() {
+        // Mutually referential structs create infinite-size types.
+        // This is correctly rejected.
         Test::new(
             r#"module Test
             struct Tree[T] {
@@ -750,6 +767,23 @@ mod edge_cases {
             }
             struct Forest[T] {
                 let trees: Tree[T]
+            }
+        "#,
+        )
+        .expect(HasError("circular struct containment"));
+    }
+
+    #[test]
+    fn mutually_referential_generics_with_array_ok() {
+        // Mutually referential structs with array indirection are allowed
+        Test::new(
+            r#"module Test
+            struct Tree[T] {
+                let value: T
+                let forest: Forest[T]
+            }
+            struct Forest[T] {
+                let trees: [Tree[T]]
             }
         "#,
         )

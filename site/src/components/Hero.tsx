@@ -12,7 +12,7 @@ export default function Hero() {
     <section className="scroll-section relative overflow-hidden bg-[#f8f6f1]">
       {/* GitHub icon in top right */}
       <a
-        href="https://github.com/kestrel-lang/kestrel"
+        href="https://github.com/jkpdino/kestrel-lang"
         className={`absolute top-6 right-6 z-20 p-3 rounded-full text-[var(--color-slate)] hover:text-[var(--color-rust)] hover:bg-[var(--color-slate)]/5 transition-all ${
           isVisible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4"
         }`}
@@ -46,9 +46,19 @@ export default function Hero() {
             Kestrel
           </h1>
 
+          {/* Value prop */}
+          <p
+            className={`mt-4 text-xl md:text-2xl text-[var(--color-slate-light)] font-serif transition-all duration-1000 delay-100 ${
+              isVisible
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 translate-y-10"
+            }`}>
+            A programming language for humans.
+          </p>
+
           {/* Sub-tagline */}
           <p
-            className={`mt-6 text-xl md:text-2xl text-[var(--color-rust)] font-mono transition-all duration-1000 delay-200 ${
+            className={`mt-3 text-lg md:text-xl text-[var(--color-rust)] font-mono transition-all duration-1000 delay-200 ${
               isVisible
                 ? "opacity-100 translate-y-0"
                 : "opacity-0 translate-y-10"

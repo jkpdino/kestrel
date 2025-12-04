@@ -5,12 +5,12 @@ const steps = [
   {
     number: "01",
     title: "Clone",
-    code: "git clone https://github.com/kestrel-lang/kestrel",
+    code: "git clone https://github.com/jkpdino/kestrel-lang",
   },
   {
     number: "02",
     title: "Build",
-    code: "cd kestrel && cargo build --release",
+    code: "cd kestrel-lang && cargo build --release",
   },
   {
     number: "03",
@@ -130,7 +130,7 @@ export default function GetStarted() {
             isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           }`}>
           <a
-            href="https://github.com/kestrel-lang/kestrel"
+            href="https://github.com/jkpdino/kestrel-lang"
             className="inline-flex items-center gap-3 px-8 py-4 bg-[var(--color-gold)] text-[var(--color-slate)] font-serif text-lg font-bold rounded-xl hover:bg-[var(--color-cream)] transition-all shadow-lg hover:shadow-xl hover:-translate-y-1">
             <Github className="w-5 h-5" />
             View on GitHub

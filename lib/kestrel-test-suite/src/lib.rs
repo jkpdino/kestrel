@@ -9,10 +9,44 @@
 //!
 //! #[test]
 //! fn test_struct() {
-//!     Test::new("struct Foo {}")
+//!     Test::new("module Test\nstruct Foo {}")
 //!         .expect(Compiles)
 //!         .expect(Symbol::new("Foo").is(SymbolKind::Struct));
 //! }
+//! ```
+//!
+//! # Symbol Path Matching
+//!
+//! Symbols can be found by simple name or by dot-separated path:
+//!
+//! ```
+//! use kestrel_test_suite::*;
+//!
+//! // Simple name lookup (finds first match anywhere in tree)
+//! Symbol::new("Inner")
+//!
+//! // Path-based lookup (finds Outer, then Inner within it)
+//! Symbol::new("Outer.Inner")
+//!
+//! // Deeply nested paths
+//! Symbol::new("Module.Struct.Method")
+//! ```
+//!
+//! # Available Behaviors
+//!
+//! ```
+//! use kestrel_test_suite::*;
+//!
+//! Symbol::new("Foo")
+//!     .is(SymbolKind::Struct)
+//!     .has(Behavior::Visibility(Visibility::Public))
+//!     .has(Behavior::TypeParamCount(2))
+//!     .has(Behavior::IsGeneric(true))
+//!     .has(Behavior::FieldCount(3))
+//!     .has(Behavior::IsStatic(false))
+//!     .has(Behavior::HasBody(true))
+//!     .has(Behavior::ParameterCount(2))
+//!     .has(Behavior::ConformanceCount(1));
 //! ```
 
 use std::sync::Arc;
@@ -20,13 +54,17 @@ use std::sync::Arc;
 use kestrel_lexer::lex;
 use kestrel_parser::{parse_source_file, Parser};
 use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_tree::behavior::callable::ReceiverKind;
+use kestrel_semantic_tree::behavior::function_data::FunctionDataBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility as SemanticVisibility;
+use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree_builder::SemanticTree;
 use semantic_tree::symbol::Symbol as SymbolTrait;
 
 // Re-export commonly used types
+pub use kestrel_semantic_tree::behavior::callable::ReceiverKind as Receiver;
 pub use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind as SymbolKind;
 
 /// Visibility levels for test expectations
@@ -187,28 +225,75 @@ impl Expectable for HasError {
         if has_matching_error {
             Ok(())
         } else {
+            let actual_errors: Vec<_> = ctx
+                .diagnostics
+                .diagnostics()
+                .iter()
+                .map(|d| d.message.as_str())
+                .collect();
             Err(format!(
-                "Expected an error containing '{}', but no matching error was found",
-                self.0
+                "Expected an error containing '{}', but got: {:?}",
+                self.0, actual_errors
             ))
         }
     }
 }
 
+/// Expects compilation to fail with exactly N errors
+pub struct HasErrorCount(pub usize);
+
+impl Expectable for HasErrorCount {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        let actual = ctx.diagnostics.len();
+        if actual == self.0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "Expected {} error(s), but got {}",
+                self.0, actual
+            ))
+        }
+    }
+}
+
+/// Expects compilation to fail (with any error)
+pub struct Fails;
+
+impl Expectable for Fails {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        if ctx.has_errors {
+            Ok(())
+        } else {
+            Err("Expected compilation to fail, but it succeeded".to_string())
+        }
+    }
+}
+
 /// Symbol expectation with chainable behavior checks
+///
+/// Symbols can be found by simple name or by dot-separated path:
+/// - `Symbol::new("Foo")` - finds first symbol named "Foo" anywhere
+/// - `Symbol::new("Outer.Inner")` - finds "Inner" within "Outer"
+/// - `Symbol::new("Module.Struct.Method")` - finds "Method" within "Struct" within "Module"
 pub struct Symbol {
     path: String,
     kind: Option<SymbolKind>,
     behaviors: Vec<Behavior>,
+    negated_behaviors: Vec<Behavior>,
 }
 
 impl Symbol {
     /// Create a new symbol expectation
+    ///
+    /// The path can be:
+    /// - A simple name: `"Foo"` - finds first match anywhere in the tree
+    /// - A dot-separated path: `"Outer.Inner"` - finds Inner within Outer
     pub fn new(path: &str) -> Self {
         Symbol {
             path: path.to_string(),
             kind: None,
             behaviors: Vec::new(),
+            negated_behaviors: Vec::new(),
         }
     }
 
@@ -224,15 +309,36 @@ impl Symbol {
         self
     }
 
-    /// Find a symbol by name in the semantic tree
-    fn find_symbol<'a>(
-        &self,
-        root: &'a Arc<dyn SymbolTrait<KestrelLanguage>>,
-    ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
-        self.find_symbol_recursive(root, &self.path)
+    /// Assert the symbol does NOT have a specific behavior/property
+    pub fn not(mut self, behavior: Behavior) -> Self {
+        self.negated_behaviors.push(behavior);
+        self
     }
 
-    fn find_symbol_recursive(
+    /// Find a symbol by path in the semantic tree
+    ///
+    /// Supports dot-separated paths like "Outer.Inner.Method"
+    fn find_symbol(
+        &self,
+        root: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+    ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
+        let segments: Vec<&str> = self.path.split('.').collect();
+
+        if segments.is_empty() {
+            return None;
+        }
+
+        if segments.len() == 1 {
+            // Simple name lookup - find anywhere in tree
+            return self.find_by_name(root, segments[0]);
+        }
+
+        // Path-based lookup - traverse through each segment
+        self.find_by_path(root, &segments)
+    }
+
+    /// Find a symbol by simple name anywhere in the tree (depth-first)
+    fn find_by_name(
         &self,
         symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
         name: &str,
@@ -244,11 +350,55 @@ impl Symbol {
 
         // Search children
         for child in symbol.metadata().children() {
-            if let Some(found) = self.find_symbol_recursive(&child, name) {
+            if let Some(found) = self.find_by_name(&child, name) {
                 return Some(found);
             }
         }
 
+        None
+    }
+
+    /// Find a symbol by dot-separated path
+    ///
+    /// For path "A.B.C":
+    /// 1. Find "A" anywhere in tree
+    /// 2. Find "B" as direct or nested child of A
+    /// 3. Find "C" as direct or nested child of B
+    fn find_by_path(
+        &self,
+        root: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+        segments: &[&str],
+    ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
+        if segments.is_empty() {
+            return None;
+        }
+
+        // Find the first segment anywhere in the tree
+        let mut current = self.find_by_name(root, segments[0])?;
+
+        // For each remaining segment, find it within the current symbol
+        for &segment in &segments[1..] {
+            current = self.find_child_by_name(&current, segment)?;
+        }
+
+        Some(current)
+    }
+
+    /// Find a child symbol by name (searches only within the given parent)
+    fn find_child_by_name(
+        &self,
+        parent: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+        name: &str,
+    ) -> Option<Arc<dyn SymbolTrait<KestrelLanguage>>> {
+        for child in parent.metadata().children() {
+            if child.metadata().name().value == name {
+                return Some(child);
+            }
+            // Also search nested children (for cases like methods inside structs)
+            if let Some(found) = self.find_child_by_name(&child, name) {
+                return Some(found);
+            }
+        }
         None
     }
 }
@@ -271,9 +421,14 @@ impl Expectable for Symbol {
             }
         }
 
-        // Check behaviors
+        // Check positive behaviors (must match)
         for behavior in &self.behaviors {
-            behavior.check_symbol(&self.path, &symbol)?;
+            behavior.check_symbol(&self.path, &symbol, false)?;
+        }
+
+        // Check negated behaviors (must NOT match)
+        for behavior in &self.negated_behaviors {
+            behavior.check_symbol(&self.path, &symbol, true)?;
         }
 
         Ok(())
@@ -289,10 +444,48 @@ pub enum Behavior {
     TypeParamCount(usize),
     /// Check if symbol is generic (has at least one type parameter)
     IsGeneric(bool),
+    /// Expected number of fields (for structs)
+    FieldCount(usize),
+    /// Check if function is static
+    IsStatic(bool),
+    /// Check if function has a body
+    HasBody(bool),
+    /// Expected number of parameters (for functions)
+    ParameterCount(usize),
+    /// Expected number of protocol conformances
+    ConformanceCount(usize),
+    /// Check if function is an instance method
+    IsInstanceMethod(bool),
+    /// Expected receiver kind (for methods)
+    ReceiverKind(Receiver),
+    /// Check if symbol has children with a specific count
+    ChildCount(usize),
 }
 
 impl Behavior {
     fn check_symbol(
+        &self,
+        path: &str,
+        symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+        negated: bool,
+    ) -> Result<(), String> {
+        let result = self.check_symbol_inner(path, symbol);
+
+        if negated {
+            // For negated checks, Ok means the condition matched (which we don't want)
+            match result {
+                Ok(()) => Err(format!(
+                    "Symbol '{}' should NOT have {:?}, but it does",
+                    path, self
+                )),
+                Err(_) => Ok(()), // Condition didn't match, which is what we want
+            }
+        } else {
+            result
+        }
+    }
+
+    fn check_symbol_inner(
         &self,
         path: &str,
         symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
@@ -353,6 +546,104 @@ impl Behavior {
                 }
                 Ok(())
             }
+            Behavior::FieldCount(expected) => {
+                let count = get_field_count(symbol);
+                if count != *expected {
+                    return Err(format!(
+                        "Symbol '{}' has {} field(s), expected {}",
+                        path, count, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::IsStatic(expected) => {
+                let is_static = get_is_static(symbol);
+                if is_static != Some(*expected) {
+                    return Err(format!(
+                        "Symbol '{}' is_static={:?}, expected {}",
+                        path, is_static, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::HasBody(expected) => {
+                let has_body = get_has_body(symbol);
+                if has_body != Some(*expected) {
+                    return Err(format!(
+                        "Symbol '{}' has_body={:?}, expected {}",
+                        path, has_body, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::ParameterCount(expected) => {
+                let count = get_parameter_count(symbol);
+                if count != Some(*expected) {
+                    return Err(format!(
+                        "Symbol '{}' has {:?} parameter(s), expected {}",
+                        path, count, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::ConformanceCount(expected) => {
+                let count = get_conformance_count(symbol);
+                if count != *expected {
+                    return Err(format!(
+                        "Symbol '{}' has {} conformance(s), expected {}",
+                        path, count, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::IsInstanceMethod(expected) => {
+                let is_instance = get_is_instance_method(symbol);
+                if is_instance != Some(*expected) {
+                    return Err(format!(
+                        "Symbol '{}' is_instance_method={:?}, expected {}",
+                        path, is_instance, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::ReceiverKind(expected) => {
+                let receiver = get_receiver_kind(symbol);
+                if receiver != Some(*expected) {
+                    return Err(format!(
+                        "Symbol '{}' has receiver {:?}, expected {:?}",
+                        path, receiver, expected
+                    ));
+                }
+                Ok(())
+            }
+            Behavior::ChildCount(expected) => {
+                let count = symbol.metadata().children().len();
+                if count != *expected {
+                    return Err(format!(
+                        "Symbol '{}' has {} children, expected {}",
+                        path, count, expected
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for Behavior {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Behavior::Visibility(v) => write!(f, "Visibility({:?})", v),
+            Behavior::TypeParamCount(n) => write!(f, "TypeParamCount({})", n),
+            Behavior::IsGeneric(b) => write!(f, "IsGeneric({})", b),
+            Behavior::FieldCount(n) => write!(f, "FieldCount({})", n),
+            Behavior::IsStatic(b) => write!(f, "IsStatic({})", b),
+            Behavior::HasBody(b) => write!(f, "HasBody({})", b),
+            Behavior::ParameterCount(n) => write!(f, "ParameterCount({})", n),
+            Behavior::ConformanceCount(n) => write!(f, "ConformanceCount({})", n),
+            Behavior::IsInstanceMethod(b) => write!(f, "IsInstanceMethod({})", b),
+            Behavior::ReceiverKind(r) => write!(f, "ReceiverKind({:?})", r),
+            Behavior::ChildCount(n) => write!(f, "ChildCount({})", n),
         }
     }
 }
@@ -364,7 +655,6 @@ fn get_type_param_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize
     use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
     use kestrel_semantic_tree::symbol::type_alias::TypeAliasSymbol;
 
-    // Dereference Arc to get the trait object, then use as_any
     let symbol_ref: &dyn SymbolTrait<KestrelLanguage> = symbol.as_ref();
 
     if let Some(s) = symbol_ref.as_any().downcast_ref::<StructSymbol>() {
@@ -380,4 +670,78 @@ fn get_type_param_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize
         return a.type_parameters().len();
     }
     0
+}
+
+/// Helper to get field count for a symbol (struct only)
+fn get_field_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize {
+    // Fields are children with kind Field
+    symbol
+        .metadata()
+        .children()
+        .iter()
+        .filter(|c| c.metadata().kind() == SymbolKind::Field)
+        .count()
+}
+
+/// Helper to check if a function is static
+fn get_is_static(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> {
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+
+    let symbol_ref: &dyn SymbolTrait<KestrelLanguage> = symbol.as_ref();
+
+    if let Some(f) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
+        return Some(f.is_static());
+    }
+
+    // Also check via FunctionDataBehavior
+    get_function_data_behavior(symbol).map(|fdb| fdb.is_static())
+}
+
+/// Helper to check if a function has a body
+fn get_has_body(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> {
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+
+    let symbol_ref: &dyn SymbolTrait<KestrelLanguage> = symbol.as_ref();
+
+    if let Some(f) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
+        return Some(f.has_body());
+    }
+
+    // Also check via FunctionDataBehavior
+    get_function_data_behavior(symbol).map(|fdb| fdb.has_body())
+}
+
+/// Helper to get parameter count for a callable
+fn get_parameter_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<usize> {
+    symbol.callable_behavior().map(|cb| cb.arity())
+}
+
+/// Helper to get conformance count
+fn get_conformance_count(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> usize {
+    symbol
+        .conformances_behavior()
+        .map(|cb| cb.conformances().len())
+        .unwrap_or(0)
+}
+
+/// Helper to check if a function is an instance method
+fn get_is_instance_method(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<bool> {
+    symbol.callable_behavior().map(|cb| cb.is_instance_method())
+}
+
+/// Helper to get the receiver kind for a function
+fn get_receiver_kind(symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>) -> Option<ReceiverKind> {
+    symbol.callable_behavior().and_then(|cb| cb.receiver())
+}
+
+/// Helper to get FunctionDataBehavior from a symbol
+fn get_function_data_behavior(
+    symbol: &Arc<dyn SymbolTrait<KestrelLanguage>>,
+) -> Option<FunctionDataBehavior> {
+    symbol
+        .metadata()
+        .behaviors()
+        .into_iter()
+        .find(|b| matches!(b.kind(), KestrelBehaviorKind::FunctionData))
+        .and_then(|b| b.as_ref().downcast_ref::<FunctionDataBehavior>().cloned())
 }

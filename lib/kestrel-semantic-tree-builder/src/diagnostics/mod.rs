@@ -12,9 +12,11 @@
 //! - `call` - Function and method call errors
 //! - `assignment` - Assignment validation errors
 //! - `operators` - Operator resolution errors
+//! - `cycles` - Cycle detection errors (struct containment, generic constraints)
 
 mod assignment;
 mod call;
+mod cycles;
 mod declaration;
 mod member_access;
 mod module;
@@ -26,6 +28,7 @@ mod visibility;
 
 pub use assignment::*;
 pub use call::*;
+pub use cycles::*;
 pub use declaration::*;
 pub use member_access::*;
 pub use module::*;

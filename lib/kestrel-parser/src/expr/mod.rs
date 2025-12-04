@@ -9,8 +9,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::event::{EventSink, TreeBuilder};
 use crate::common::skip_trivia;
+use crate::event::{EventSink, TreeBuilder};
 
 /// Represents an expression
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,11 +235,13 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             .then(
                 skip_trivia()
                     .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
-                    .then(skip_trivia().ignore_then(filter_map(|span, token| match token {
-                        Token::Identifier => Ok(span),
-                        _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-                    })))
-                    .repeated()
+                    .then(
+                        skip_trivia().ignore_then(filter_map(|span, token| match token {
+                            Token::Identifier => Ok(span),
+                            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                        })),
+                    )
+                    .repeated(),
             )
             .map(|(first, rest)| {
                 let mut segments = vec![first];
@@ -260,12 +262,12 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                         skip_trivia()
                             .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
                             .then(skip_trivia().ignore_then(expr.clone()))
-                            .repeated()
+                            .repeated(),
                     )
                     .then(
                         skip_trivia()
                             .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
-                            .or_not()
+                            .or_not(),
                     )
                     .map(|((first, rest), trailing)| {
                         let mut elements = vec![first];
@@ -279,7 +281,7 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                         }
                         (elements, commas)
                     })
-                    .or_not()
+                    .or_not(),
             )
             .then(skip_trivia().ignore_then(just(Token::RBracket).map_with_span(|_, span| span)))
             .map(|((lbracket, contents), rbracket)| {
@@ -295,69 +297,82 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 skip_trivia()
                     .ignore_then(just(Token::RParen).map_with_span(|_, span| span))
                     .map(|rparen| ParenContent::Unit(rparen))
-                .or(
-                    // Non-empty: expr followed by optional comma and more
-                    expr.clone()
-                        .then(
-                            skip_trivia()
-                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
-                                .then(
-                                    skip_trivia()
-                                        .ignore_then(expr.clone())
-                                        .then(
-                                            skip_trivia()
-                                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
-                                                .then(skip_trivia().ignore_then(expr.clone()))
-                                                .repeated()
-                                        )
-                                        .then(
-                                            skip_trivia()
-                                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
-                                                .or_not()
-                                        )
-                                        .map(|((second, rest), trailing)| {
-                                            let mut elements = vec![second];
-                                            let mut commas = Vec::new();
-                                            for (comma, elem) in rest {
-                                                commas.push(comma);
-                                                elements.push(elem);
-                                            }
-                                            if let Some(tc) = trailing {
-                                                commas.push(tc);
-                                            }
-                                            (elements, commas)
-                                        })
-                                        .or_not()
-                                )
-                                .or_not()
-                        )
-                        .then(skip_trivia().ignore_then(just(Token::RParen).map_with_span(|_, span| span)))
-                        .map(|((first, comma_rest), rparen)| {
-                            match comma_rest {
-                                None => {
-                                    // (expr) - grouping
-                                    ParenContent::Grouping(first, rparen)
+                    .or(
+                        // Non-empty: expr followed by optional comma and more
+                        expr.clone()
+                            .then(
+                                skip_trivia()
+                                    .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                                    .then(
+                                        skip_trivia()
+                                            .ignore_then(expr.clone())
+                                            .then(
+                                                skip_trivia()
+                                                    .ignore_then(
+                                                        just(Token::Comma)
+                                                            .map_with_span(|_, span| span),
+                                                    )
+                                                    .then(skip_trivia().ignore_then(expr.clone()))
+                                                    .repeated(),
+                                            )
+                                            .then(
+                                                skip_trivia()
+                                                    .ignore_then(
+                                                        just(Token::Comma)
+                                                            .map_with_span(|_, span| span),
+                                                    )
+                                                    .or_not(),
+                                            )
+                                            .map(|((second, rest), trailing)| {
+                                                let mut elements = vec![second];
+                                                let mut commas = Vec::new();
+                                                for (comma, elem) in rest {
+                                                    commas.push(comma);
+                                                    elements.push(elem);
+                                                }
+                                                if let Some(tc) = trailing {
+                                                    commas.push(tc);
+                                                }
+                                                (elements, commas)
+                                            })
+                                            .or_not(),
+                                    )
+                                    .or_not(),
+                            )
+                            .then(
+                                skip_trivia()
+                                    .ignore_then(just(Token::RParen).map_with_span(|_, span| span)),
+                            )
+                            .map(|((first, comma_rest), rparen)| {
+                                match comma_rest {
+                                    None => {
+                                        // (expr) - grouping
+                                        ParenContent::Grouping(first, rparen)
+                                    }
+                                    Some((first_comma, None)) => {
+                                        // (expr,) - single-element tuple
+                                        ParenContent::Tuple(vec![first], vec![first_comma], rparen)
+                                    }
+                                    Some((first_comma, Some((more_elems, more_commas)))) => {
+                                        // (expr, expr, ...) - multi-element tuple
+                                        let mut elements = vec![first];
+                                        elements.extend(more_elems);
+                                        let mut commas = vec![first_comma];
+                                        commas.extend(more_commas);
+                                        ParenContent::Tuple(elements, commas, rparen)
+                                    }
                                 }
-                                Some((first_comma, None)) => {
-                                    // (expr,) - single-element tuple
-                                    ParenContent::Tuple(vec![first], vec![first_comma], rparen)
-                                }
-                                Some((first_comma, Some((more_elems, more_commas)))) => {
-                                    // (expr, expr, ...) - multi-element tuple
-                                    let mut elements = vec![first];
-                                    elements.extend(more_elems);
-                                    let mut commas = vec![first_comma];
-                                    commas.extend(more_commas);
-                                    ParenContent::Tuple(elements, commas, rparen)
-                                }
-                            }
-                        })
-                )
+                            }),
+                    ),
             )
             .map(|(lparen, content)| match content {
                 ParenContent::Unit(rparen) => ExprVariant::Unit(lparen, rparen),
-                ParenContent::Grouping(inner, rparen) => ExprVariant::Grouping(lparen, Box::new(inner), rparen),
-                ParenContent::Tuple(elements, commas, rparen) => ExprVariant::Tuple(lparen, elements, commas, rparen),
+                ParenContent::Grouping(inner, rparen) => {
+                    ExprVariant::Grouping(lparen, Box::new(inner), rparen)
+                }
+                ParenContent::Tuple(elements, commas, rparen) => {
+                    ExprVariant::Tuple(lparen, elements, commas, rparen)
+                }
             });
 
         // Unary operators: -expr, !expr
@@ -374,29 +389,26 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         // Argument parser for call expressions: unlabeled or labeled
         // labeled: identifier: expr
         // unlabeled: expr
-        let argument = skip_trivia()
-            .ignore_then(
-                // Try labeled argument: identifier: expr
-                filter_map(|span, token| match token {
-                    Token::Identifier => Ok(span),
-                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-                })
-                .then(skip_trivia().ignore_then(just(Token::Colon).map_with_span(|_, span| span)))
-                .then(skip_trivia().ignore_then(expr.clone()))
-                .map(|((label, colon), value)| CallArg {
-                    label: Some(label),
-                    colon: Some(colon),
-                    value,
-                })
-                // Or unlabeled: just expr
-                .or(
-                    expr.clone().map(|value| CallArg {
-                        label: None,
-                        colon: None,
-                        value,
-                    })
-                )
-            );
+        let argument = skip_trivia().ignore_then(
+            // Try labeled argument: identifier: expr
+            filter_map(|span, token| match token {
+                Token::Identifier => Ok(span),
+                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+            })
+            .then(skip_trivia().ignore_then(just(Token::Colon).map_with_span(|_, span| span)))
+            .then(skip_trivia().ignore_then(expr.clone()))
+            .map(|((label, colon), value)| CallArg {
+                label: Some(label),
+                colon: Some(colon),
+                value,
+            })
+            // Or unlabeled: just expr
+            .or(expr.clone().map(|value| CallArg {
+                label: None,
+                colon: None,
+                value,
+            })),
+        );
 
         // Argument list: (arg, arg, ...)
         let arg_list = skip_trivia()
@@ -406,94 +418,111 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 skip_trivia()
                     .ignore_then(just(Token::RParen).map_with_span(|_, span| span))
                     .map(|rparen| (vec![], vec![], rparen))
-                .or(
-                    // Non-empty: arg followed by optional commas and more
-                    argument.clone()
-                        .then(
-                            skip_trivia()
-                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
-                                .then(skip_trivia().ignore_then(argument.clone()))
-                                .repeated()
-                        )
-                        .then(
-                            skip_trivia()
-                                .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
-                                .or_not()
-                        )
-                        .then(skip_trivia().ignore_then(just(Token::RParen).map_with_span(|_, span| span)))
-                        .map(|(((first, rest), trailing), rparen)| {
-                            let mut arguments = vec![first];
-                            let mut commas = Vec::new();
-                            for (comma, arg) in rest {
-                                commas.push(comma);
-                                arguments.push(arg);
-                            }
-                            if let Some(tc) = trailing {
-                                commas.push(tc);
-                            }
-                            (arguments, commas, rparen)
-                        })
-                )
+                    .or(
+                        // Non-empty: arg followed by optional commas and more
+                        argument
+                            .clone()
+                            .then(
+                                skip_trivia()
+                                    .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                                    .then(skip_trivia().ignore_then(argument.clone()))
+                                    .repeated(),
+                            )
+                            .then(
+                                skip_trivia()
+                                    .ignore_then(just(Token::Comma).map_with_span(|_, span| span))
+                                    .or_not(),
+                            )
+                            .then(
+                                skip_trivia()
+                                    .ignore_then(just(Token::RParen).map_with_span(|_, span| span)),
+                            )
+                            .map(|(((first, rest), trailing), rparen)| {
+                                let mut arguments = vec![first];
+                                let mut commas = Vec::new();
+                                for (comma, arg) in rest {
+                                    commas.push(comma);
+                                    arguments.push(arg);
+                                }
+                                if let Some(tc) = trailing {
+                                    commas.push(tc);
+                                }
+                                (arguments, commas, rparen)
+                            }),
+                    ),
             )
-            .map(|(lparen, (arguments, commas, rparen))| PostfixOp::Call { lparen, arguments, commas, rparen });
+            .map(|(lparen, (arguments, commas, rparen))| PostfixOp::Call {
+                lparen,
+                arguments,
+                commas,
+                rparen,
+            });
 
         // Member access: .identifier
         let member_access = skip_trivia()
             .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
-            .then(skip_trivia().ignore_then(filter_map(|span, token| match token {
-                Token::Identifier => Ok(span),
-                _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-            })))
+            .then(
+                skip_trivia().ignore_then(filter_map(|span, token| match token {
+                    Token::Identifier => Ok(span),
+                    _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
+                })),
+            )
             .map(|(dot, member)| PostfixOp::MemberAccess { dot, member });
 
         // Postfix unwrap operator: expr!
         let postfix_bang = skip_trivia()
             .ignore_then(just(Token::Bang).map_with_span(|tok, span| (tok, span)))
-            .map(|(tok, span)| PostfixOp::PostfixOperator { operator: tok, operator_span: span });
+            .map(|(tok, span)| PostfixOp::PostfixOperator {
+                operator: tok,
+                operator_span: span,
+            });
 
         // Postfix operations: can be call (args), member access .identifier, or postfix !
         // These can be chained: a.b().c.d()!
         let postfix_op = arg_list.or(member_access).or(postfix_bang);
 
         // Postfix expression: primary followed by zero or more postfix operations
-        let postfix = primary.clone()
+        let postfix = primary
+            .clone()
             .then(postfix_op.repeated())
             .map(|(base, ops)| {
                 ops.into_iter().fold(base, |acc, op| match op {
-                    PostfixOp::Call { lparen, arguments, commas, rparen } => {
-                        ExprVariant::Call {
-                            callee: Box::new(acc),
-                            lparen,
-                            arguments,
-                            commas,
-                            rparen,
-                        }
-                    }
-                    PostfixOp::MemberAccess { dot, member } => {
-                        ExprVariant::MemberAccess {
-                            base: Box::new(acc),
-                            dot,
-                            member,
-                        }
-                    }
-                    PostfixOp::PostfixOperator { operator, operator_span } => {
-                        ExprVariant::Postfix {
-                            operand: Box::new(acc),
-                            operator,
-                            operator_span,
-                        }
-                    }
+                    PostfixOp::Call {
+                        lparen,
+                        arguments,
+                        commas,
+                        rparen,
+                    } => ExprVariant::Call {
+                        callee: Box::new(acc),
+                        lparen,
+                        arguments,
+                        commas,
+                        rparen,
+                    },
+                    PostfixOp::MemberAccess { dot, member } => ExprVariant::MemberAccess {
+                        base: Box::new(acc),
+                        dot,
+                        member,
+                    },
+                    PostfixOp::PostfixOperator {
+                        operator,
+                        operator_span,
+                    } => ExprVariant::Postfix {
+                        operand: Box::new(acc),
+                        operator,
+                        operator_span,
+                    },
                 })
             });
 
         // Prefix unary operators: -, +, !, not
-        let unary_op = skip_trivia()
-            .ignore_then(
-                just(Token::Minus).map_with_span(|tok, span| (tok, span))
-                    .or(just(Token::Plus).map_with_span(|tok, span| (tok, span)))
-                    .or(just(Token::Bang).map_with_span(|tok, span| (tok, span)))
-                    .or(just(Token::Not).map_with_span(|tok, span| (tok, span)))
-            );
+        let unary_op = skip_trivia().ignore_then(
+            just(Token::Minus)
+                .map_with_span(|tok, span| (tok, span))
+                .or(just(Token::Plus).map_with_span(|tok, span| (tok, span)))
+                .or(just(Token::Bang).map_with_span(|tok, span| (tok, span)))
+                .or(just(Token::Not).map_with_span(|tok, span| (tok, span))),
+        );
 
         let unary = unary_op
             .then(expr.clone())
@@ -504,54 +533,50 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         let non_assignment = unary.or(postfix);
 
         // Binary operator parser - matches any binary operator token
-        let binary_op = skip_trivia()
-            .ignore_then(filter_map(|span, token: Token| {
-                if is_binary_operator(&token) {
-                    Ok((token, span))
-                } else {
-                    Err(Simple::expected_input_found(span, vec![], Some(token)))
-                }
-            }));
+        let binary_op = skip_trivia().ignore_then(filter_map(|span, token: Token| {
+            if is_binary_operator(&token) {
+                Ok((token, span))
+            } else {
+                Err(Simple::expected_input_found(span, vec![], Some(token)))
+            }
+        }));
 
         // Binary expression: lhs op rhs op rhs ...
         // We parse as a flat left-to-right chain, precedence is handled in semantic phase
-        let binary = non_assignment.clone()
-            .then(
-                binary_op
-                    .then(non_assignment.clone())
-                    .repeated()
-            )
+        let binary = non_assignment
+            .clone()
+            .then(binary_op.then(non_assignment.clone()).repeated())
             .map(|(first, rest)| {
-                rest.into_iter().fold(first, |lhs, ((op_token, op_span), rhs)| {
-                    ExprVariant::Binary {
-                        lhs: Box::new(lhs),
-                        operator: op_token,
-                        operator_span: op_span,
-                        rhs: Box::new(rhs),
-                    }
-                })
+                rest.into_iter()
+                    .fold(first, |lhs, ((op_token, op_span), rhs)| {
+                        ExprVariant::Binary {
+                            lhs: Box::new(lhs),
+                            operator: op_token,
+                            operator_span: op_span,
+                            rhs: Box::new(rhs),
+                        }
+                    })
             });
 
         // Assignment expression: lhs = rhs
         // Assignment is right-associative, so rhs recursively parses as expr (which includes assignment)
         // This gives us: a = b = c parses as a = (b = c)
         // Assignment has lowest precedence
-        binary.clone()
+        binary
+            .clone()
             .then(
                 skip_trivia()
                     .ignore_then(just(Token::Equals).map_with_span(|_, span| span))
                     .then(expr.clone())
-                    .or_not()
+                    .or_not(),
             )
-            .map(|(lhs, rhs_opt)| {
-                match rhs_opt {
-                    Some((equals, rhs)) => ExprVariant::Assignment {
-                        lhs: Box::new(lhs),
-                        equals,
-                        rhs: Box::new(rhs),
-                    },
-                    None => lhs,
-                }
+            .map(|(lhs, rhs_opt)| match rhs_opt {
+                Some((equals, rhs)) => ExprVariant::Assignment {
+                    lhs: Box::new(lhs),
+                    equals,
+                    rhs: Box::new(rhs),
+                },
+                None => lhs,
             })
     })
 }
@@ -575,10 +600,7 @@ enum PostfixOp {
         rparen: Span,
     },
     /// Member access: .identifier
-    MemberAccess {
-        dot: Span,
-        member: Span,
-    },
+    MemberAccess { dot: Span, member: Span },
     /// Postfix operator: expr!
     PostfixOperator {
         operator: Token,
@@ -653,16 +675,38 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         ExprVariant::Unary(tok, span, operand) => {
             emit_unary_expr(sink, tok.clone(), span.clone(), operand);
         }
-        ExprVariant::Call { callee, lparen, arguments, commas, rparen } => {
-            emit_call_expr(sink, callee, lparen.clone(), arguments, commas, rparen.clone());
+        ExprVariant::Call {
+            callee,
+            lparen,
+            arguments,
+            commas,
+            rparen,
+        } => {
+            emit_call_expr(
+                sink,
+                callee,
+                lparen.clone(),
+                arguments,
+                commas,
+                rparen.clone(),
+            );
         }
         ExprVariant::Assignment { lhs, equals, rhs } => {
             emit_assignment_expr(sink, lhs, equals.clone(), rhs);
         }
-        ExprVariant::Postfix { operand, operator, operator_span } => {
+        ExprVariant::Postfix {
+            operand,
+            operator,
+            operator_span,
+        } => {
             emit_postfix_expr(sink, operand, operator.clone(), operator_span.clone());
         }
-        ExprVariant::Binary { lhs, operator, operator_span, rhs } => {
+        ExprVariant::Binary {
+            lhs,
+            operator,
+            operator_span,
+            rhs,
+        } => {
             emit_binary_expr(sink, lhs, operator.clone(), operator_span.clone(), rhs);
         }
     }
@@ -724,7 +768,13 @@ fn emit_null_expr(sink: &mut EventSink, span: Span) {
 }
 
 /// Emit events for an array literal expression
-fn emit_array_expr(sink: &mut EventSink, lbracket: Span, elements: &[ExprVariant], commas: &[Span], rbracket: Span) {
+fn emit_array_expr(
+    sink: &mut EventSink,
+    lbracket: Span,
+    elements: &[ExprVariant],
+    commas: &[Span],
+    rbracket: Span,
+) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprArray);
     sink.add_token(SyntaxKind::LBracket, lbracket);
@@ -741,7 +791,13 @@ fn emit_array_expr(sink: &mut EventSink, lbracket: Span, elements: &[ExprVariant
 }
 
 /// Emit events for a tuple literal expression
-fn emit_tuple_expr(sink: &mut EventSink, lparen: Span, elements: &[ExprVariant], commas: &[Span], rparen: Span) {
+fn emit_tuple_expr(
+    sink: &mut EventSink,
+    lparen: Span,
+    elements: &[ExprVariant],
+    commas: &[Span],
+    rparen: Span,
+) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprTuple);
     sink.add_token(SyntaxKind::LParen, lparen);
@@ -895,7 +951,12 @@ fn emit_assignment_expr(sink: &mut EventSink, lhs: &ExprVariant, equals: Span, r
 }
 
 /// Emit events for a postfix expression (e.g., expr!)
-fn emit_postfix_expr(sink: &mut EventSink, operand: &ExprVariant, operator: Token, operator_span: Span) {
+fn emit_postfix_expr(
+    sink: &mut EventSink,
+    operand: &ExprVariant,
+    operator: Token,
+    operator_span: Span,
+) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprPostfix);
     emit_expr_variant(sink, operand);
@@ -905,7 +966,13 @@ fn emit_postfix_expr(sink: &mut EventSink, operand: &ExprVariant, operator: Toke
 }
 
 /// Emit events for a binary expression (e.g., a + b)
-fn emit_binary_expr(sink: &mut EventSink, lhs: &ExprVariant, operator: Token, operator_span: Span, rhs: &ExprVariant) {
+fn emit_binary_expr(
+    sink: &mut EventSink,
+    lhs: &ExprVariant,
+    operator: Token,
+    operator_span: Span,
+    rhs: &ExprVariant,
+) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprBinary);
     emit_expr_variant(sink, lhs);

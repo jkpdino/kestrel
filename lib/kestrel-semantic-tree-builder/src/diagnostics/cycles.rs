@@ -1,0 +1,165 @@
+//! Cycle-related diagnostic error types.
+//!
+//! This module provides error types for various cycle detection scenarios:
+//! - Struct containment cycles (infinite-size types)
+//! - Generic constraint cycles
+
+use kestrel_reporting::{Diagnostic, IntoDiagnostic, Label};
+use kestrel_span::Span;
+
+/// A participant in a cycle chain
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycleMember {
+    /// Name of the type/symbol
+    pub name: String,
+    /// Span of the declaration or reference
+    pub span: Span,
+    /// File ID where this member is declared
+    pub file_id: Option<usize>,
+}
+
+/// Error when structs form a containment cycle (infinite-size type)
+///
+/// Example:
+/// ```ignore
+/// struct A { let b: B }
+/// struct B { let a: A }  // Error: A contains B contains A
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CircularStructContainmentError {
+    /// The struct where the cycle was detected
+    pub origin: CycleMember,
+    /// The chain of structs that form the cycle
+    pub cycle: Vec<CycleMember>,
+    /// The field that causes the cycle
+    pub field_name: String,
+    /// Span of the field declaration
+    pub field_span: Span,
+}
+
+impl IntoDiagnostic for CircularStructContainmentError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let cycle_names: Vec<_> = std::iter::once(&self.origin)
+            .chain(self.cycle.iter())
+            .map(|p| p.name.as_str())
+            .collect();
+        let cycle_display = cycle_names.join(" -> ");
+
+        let mut labels = vec![
+            Label::primary(file_id, self.field_span.clone())
+                .with_message(format!(
+                    "field '{}' creates infinite-size type",
+                    self.field_name
+                )),
+            Label::secondary(file_id, self.origin.span.clone())
+                .with_message("cycle starts here"),
+        ];
+
+        // Add secondary labels for each participant in the cycle
+        for participant in &self.cycle {
+            let participant_file_id = participant.file_id.unwrap_or(file_id);
+            labels.push(
+                Label::secondary(participant_file_id, participant.span.clone())
+                    .with_message(format!("'{}' is part of the cycle", participant.name)),
+            );
+        }
+
+        Diagnostic::error()
+            .with_message(format!(
+                "circular struct containment: {} -> {}",
+                cycle_display, self.origin.name
+            ))
+            .with_labels(labels)
+            .with_notes(vec![
+                "structs cannot contain themselves directly or indirectly".to_string(),
+                "consider using an optional type, array, or reference to break the cycle"
+                    .to_string(),
+            ])
+    }
+}
+
+/// Error when generic constraints form a cycle
+///
+/// Example:
+/// ```ignore
+/// func foo[T: U, U: T]() -> ()  // Error: T requires U requires T
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CircularConstraintError {
+    /// The type parameter where the cycle was detected
+    pub origin: CycleMember,
+    /// The chain of constraints that form the cycle
+    pub cycle: Vec<CycleMember>,
+}
+
+impl IntoDiagnostic for CircularConstraintError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let cycle_names: Vec<_> = std::iter::once(&self.origin)
+            .chain(self.cycle.iter())
+            .map(|p| p.name.as_str())
+            .collect();
+        let cycle_display = cycle_names.join(" -> ");
+
+        let mut labels = vec![Label::primary(file_id, self.origin.span.clone())
+            .with_message("cycle starts here")];
+
+        // Add secondary labels for each participant in the cycle
+        for participant in &self.cycle {
+            let participant_file_id = participant.file_id.unwrap_or(file_id);
+            labels.push(
+                Label::secondary(participant_file_id, participant.span.clone())
+                    .with_message(format!("'{}' is part of the cycle", participant.name)),
+            );
+        }
+
+        Diagnostic::error()
+            .with_message(format!(
+                "circular generic constraint: {} -> {}",
+                cycle_display, self.origin.name
+            ))
+            .with_labels(labels)
+            .with_notes(vec![
+                "type parameter constraints cannot reference each other cyclically".to_string(),
+            ])
+    }
+}
+
+/// Error when a struct directly contains itself
+///
+/// Example:
+/// ```ignore
+/// struct Node { let next: Node }  // Error: Node contains Node
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelfContainingStructError {
+    /// The struct that contains itself
+    pub struct_name: String,
+    /// Span of the struct declaration
+    pub struct_span: Span,
+    /// The field that contains the struct itself
+    pub field_name: String,
+    /// Span of the field declaration
+    pub field_span: Span,
+}
+
+impl IntoDiagnostic for SelfContainingStructError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "struct '{}' cannot contain itself",
+                self.struct_name
+            ))
+            .with_labels(vec![
+                Label::primary(file_id, self.field_span.clone()).with_message(format!(
+                    "field '{}' has type '{}', creating infinite-size type",
+                    self.field_name, self.struct_name
+                )),
+                Label::secondary(file_id, self.struct_span.clone())
+                    .with_message("struct declared here"),
+            ])
+            .with_notes(vec![
+                "a struct cannot directly contain a value of its own type".to_string(),
+                "consider using an optional type, array, or reference".to_string(),
+            ])
+    }
+}

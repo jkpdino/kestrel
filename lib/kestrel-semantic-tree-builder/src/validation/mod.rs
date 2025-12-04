@@ -9,6 +9,7 @@
 
 mod assignment_validation;
 mod conformance;
+mod constraint_cycles;
 mod duplicate_symbol;
 mod function_body;
 mod generics;
@@ -16,6 +17,7 @@ mod imports;
 mod initializer_verification;
 mod protocol_method;
 mod static_context;
+mod struct_cycles;
 mod type_alias_cycles;
 mod visibility_consistency;
 
@@ -30,6 +32,7 @@ use crate::db::SemanticDatabase;
 
 pub use assignment_validation::AssignmentValidationPass;
 pub use conformance::ConformancePass;
+pub use constraint_cycles::ConstraintCyclePass;
 pub use duplicate_symbol::DuplicateSymbolPass;
 pub use function_body::FunctionBodyPass;
 pub use generics::GenericsPass;
@@ -37,6 +40,7 @@ pub use imports::ImportValidationPass;
 pub use initializer_verification::InitializerVerificationPass;
 pub use protocol_method::ProtocolMethodPass;
 pub use static_context::StaticContextPass;
+pub use struct_cycles::StructCyclePass;
 pub use type_alias_cycles::TypeAliasCyclePass;
 pub use visibility_consistency::VisibilityConsistencyPass;
 
@@ -112,6 +116,8 @@ impl ValidationRunner {
             Box::new(VisibilityConsistencyPass),
             Box::new(GenericsPass),
             Box::new(TypeAliasCyclePass),
+            Box::new(StructCyclePass),
+            Box::new(ConstraintCyclePass),
             Box::new(ImportValidationPass),
             Box::new(ConformancePass),
             Box::new(InitializerVerificationPass),

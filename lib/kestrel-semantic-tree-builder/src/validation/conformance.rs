@@ -17,13 +17,13 @@ use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
 use kestrel_semantic_tree::ty::{Ty, TyKind};
+use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::db::SemanticDatabase;
 use crate::diagnostics::{
     CircularProtocolInheritanceError, MissingProtocolMethodError, WrongMethodReturnTypeError,
 };
-use crate::queries::{Db, TypePathResolution};
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass that checks protocol conformance and inheritance rules
@@ -90,11 +90,11 @@ fn validate_symbol(
 
     // Check protocols for circular inheritance
     if kind == KestrelSymbolKind::Protocol {
-        // We need Arc<ProtocolSymbol> to pass to has_inheritance_cycle
+        // We need Arc<ProtocolSymbol> to pass to check_circular_inheritance
         // Try to get it via the typed behavior which stores the protocol type
         let protocol_arc = get_protocol_arc_from_symbol(symbol);
         if let Some(protocol) = protocol_arc {
-            check_circular_inheritance(&protocol, symbol, diagnostics, config);
+            check_circular_inheritance(&protocol, symbol, db, diagnostics, config);
         }
     }
 
@@ -115,62 +115,66 @@ fn validate_symbol(
 fn check_circular_inheritance(
     protocol: &Arc<ProtocolSymbol>,
     symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    db: &SemanticDatabase,
     diagnostics: &mut DiagnosticContext,
-    config: &ValidationConfig,
+    _config: &ValidationConfig,
 ) {
     let protocol_name = &protocol.metadata().name().value;
 
-    // Track visited protocols to detect cycles
-    let mut visited = HashSet::new();
-    let mut path = Vec::new();
+    // Use CycleDetector for consistent cycle detection
+    let mut detector: CycleDetector<SymbolId> = CycleDetector::new();
 
-    if has_inheritance_cycle(protocol, &mut visited, &mut path) {
+    if let Some(cycle) = check_inheritance_cycle(protocol, &mut detector) {
         let span = protocol.metadata().declaration_span().clone();
         let file_id = get_file_id_for_symbol(symbol, diagnostics);
 
-        diagnostics.throw(CircularProtocolInheritanceError {
-            span,
-            protocol_name: protocol_name.to_string(),
-            cycle: path.iter().map(|_| protocol_name.to_string()).collect(), // Simplified for now
-        }, file_id);
+        // Build cycle path names for error message
+        let cycle_names: Vec<String> = cycle
+            .cycle()
+            .iter()
+            .filter_map(|&id| {
+                db.symbol_by_id(id).map(|s| s.metadata().name().value.clone())
+            })
+            .collect();
+
+        diagnostics.throw(
+            CircularProtocolInheritanceError {
+                span,
+                protocol_name: protocol_name.to_string(),
+                cycle: cycle_names,
+            },
+            file_id,
+        );
     }
 }
 
-/// Recursively check for inheritance cycles
-fn has_inheritance_cycle(
+/// Recursively check for inheritance cycles using CycleDetector
+fn check_inheritance_cycle(
     protocol: &Arc<ProtocolSymbol>,
-    visited: &mut HashSet<SymbolId>,
-    path: &mut Vec<SymbolId>,
-) -> bool {
+    detector: &mut CycleDetector<SymbolId>,
+) -> Option<semantic_tree::cycle::Cycle<SymbolId>> {
     let id = protocol.metadata().id();
 
-    // Check if we've encountered this protocol in the current path (cycle)
-    if path.contains(&id) {
-        return true;
+    // Try to enter - if it fails, we found a cycle
+    if let Err(cycle) = detector.enter(id) {
+        return Some(cycle);
     }
-
-    // Check if we've already fully visited this protocol (no cycle from here)
-    if visited.contains(&id) {
-        return false;
-    }
-
-    path.push(id);
 
     // Check all inherited protocols (via ConformancesBehavior)
     let protocol_dyn = protocol.clone() as Arc<dyn Symbol<KestrelLanguage>>;
     for inherited_ty in get_conformances(&protocol_dyn) {
         if let TyKind::Protocol { symbol, .. } = inherited_ty.kind() {
-            if has_inheritance_cycle(symbol, visited, path) {
-                return true;
+            if let Some(cycle) = check_inheritance_cycle(symbol, detector) {
+                detector.exit();
+                return Some(cycle);
             }
         }
         // Note: Error types are unresolved and can't be checked for cycles yet
         // This is handled during type resolution
     }
 
-    path.pop();
-    visited.insert(id);
-    false
+    detector.exit();
+    None
 }
 
 /// Get the file_id for a symbol by walking up to its SourceFile parent

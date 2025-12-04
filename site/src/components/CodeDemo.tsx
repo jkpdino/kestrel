@@ -1,4 +1,4 @@
-import { Play, RotateCcw, X } from "lucide-react";
+import { FastForward, Play, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface CodeExample {
@@ -217,7 +217,7 @@ function tokenize(code: string): React.ReactNode[] {
       if (char === "-" && code[i + 1] === ">") {
         tokens.push(
           <span key={key++} className="token-operator">
-            -&gt;
+            {"->"}
           </span>
         );
         i += 2;
@@ -226,7 +226,7 @@ function tokenize(code: string): React.ReactNode[] {
       if (char === "=" && code[i + 1] === ">") {
         tokens.push(
           <span key={key++} className="token-operator">
-            =&gt;
+            {"=>"}
           </span>
         );
         i += 2;
@@ -345,6 +345,15 @@ export default function CodeDemo() {
   };
 
   const example = codeExamples[currentExample];
+
+  const skipTyping = useCallback(() => {
+    if (typingRef.current) {
+      clearTimeout(typingRef.current);
+    }
+    setDisplayedCode(example.code);
+    setIsTyping(false);
+    setTimeout(() => setShowOutput(true), 300);
+  }, [example.code]);
 
   return (
     <section
@@ -466,18 +475,26 @@ export default function CodeDemo() {
           </div>
         </div>
 
-        {/* Replay button */}
+        {/* Controls */}
         <div
-          className={`mt-6 transition-all duration-1000 delay-400 ${
+          className={`mt-6 flex gap-4 transition-all duration-1000 delay-400 ${
             isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           }`}>
-          <button
-            onClick={() => typeCode(example.code)}
-            disabled={isTyping}
-            className="inline-flex items-center gap-2 px-4 py-2 text-white/70 font-mono text-sm hover:text-[var(--color-gold)] transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-            <RotateCcw className="w-4 h-4" />
-            {isTyping ? "Typing..." : "Replay"}
-          </button>
+          {isTyping ? (
+            <button
+              onClick={skipTyping}
+              className="inline-flex items-center gap-2 px-4 py-2 text-white/70 font-mono text-sm hover:text-[var(--color-gold)] transition-all">
+              <FastForward className="w-4 h-4" />
+              Skip
+            </button>
+          ) : (
+            <button
+              onClick={() => typeCode(example.code)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-white/70 font-mono text-sm hover:text-[var(--color-gold)] transition-all">
+              <RotateCcw className="w-4 h-4" />
+              Replay
+            </button>
+          )}
         </div>
       </div>
 

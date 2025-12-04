@@ -29,28 +29,37 @@ body {
   overflow-x: hidden;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - Webkit */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px !important;
+  background: transparent !important;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-cream);
+  background: transparent !important;
+  border-radius: 0 !important;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-rust);
-  border-radius: 4px;
+  background: var(--color-rust) !important;
+  border-radius: 0 !important;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-rust-dark);
+  background: var(--color-rust-dark) !important;
+}
+
+/* Firefox scrollbar */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-rust) transparent;
 }
 
 /* Scroll snap container */
 .scroll-container {
   height: 100vh;
   overflow-y: auto;
+  overflow-x: hidden;
   scroll-snap-type: y mandatory;
 }
 
