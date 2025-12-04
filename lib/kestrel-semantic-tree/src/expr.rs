@@ -57,24 +57,156 @@ pub enum PrimitiveMethod {
     /// Int.abs() -> Int
     IntAbs,
 
+    // Int arithmetic operators
+    /// Int.add(Int) -> Int
+    IntAdd,
+    /// Int.sub(Int) -> Int
+    IntSub,
+    /// Int.mul(Int) -> Int
+    IntMul,
+    /// Int.div(Int) -> Int
+    IntDiv,
+    /// Int.rem(Int) -> Int
+    IntRem,
+    /// Int.neg() -> Int (unary -)
+    IntNeg,
+    /// Int.identity() -> Int (unary +)
+    IntIdentity,
+
+    // Int comparison operators
+    /// Int.eq(Int) -> Bool
+    IntEq,
+    /// Int.ne(Int) -> Bool
+    IntNe,
+    /// Int.lt(Int) -> Bool
+    IntLt,
+    /// Int.le(Int) -> Bool
+    IntLe,
+    /// Int.gt(Int) -> Bool
+    IntGt,
+    /// Int.ge(Int) -> Bool
+    IntGe,
+
+    // Int bitwise operators
+    /// Int.bitAnd(Int) -> Int
+    IntBitAnd,
+    /// Int.bitOr(Int) -> Int
+    IntBitOr,
+    /// Int.bitXor(Int) -> Int
+    IntBitXor,
+    /// Int.bitNot() -> Int (unary !)
+    IntBitNot,
+    /// Int.shl(Int) -> Int
+    IntShl,
+    /// Int.shr(Int) -> Int
+    IntShr,
+
+    // Float methods
+    /// Float.add(Float) -> Float
+    FloatAdd,
+    /// Float.sub(Float) -> Float
+    FloatSub,
+    /// Float.mul(Float) -> Float
+    FloatMul,
+    /// Float.div(Float) -> Float
+    FloatDiv,
+    /// Float.neg() -> Float
+    FloatNeg,
+    /// Float.identity() -> Float
+    FloatIdentity,
+
+    // Float comparison
+    /// Float.eq(Float) -> Bool
+    FloatEq,
+    /// Float.ne(Float) -> Bool
+    FloatNe,
+    /// Float.lt(Float) -> Bool
+    FloatLt,
+    /// Float.le(Float) -> Bool
+    FloatLe,
+    /// Float.gt(Float) -> Bool
+    FloatGt,
+    /// Float.ge(Float) -> Bool
+    FloatGe,
+
+    // Bool operators
+    /// Bool.logicalAnd(Bool) -> Bool
+    BoolAnd,
+    /// Bool.logicalOr(Bool) -> Bool
+    BoolOr,
+    /// Bool.logicalNot() -> Bool
+    BoolNot,
+    /// Bool.eq(Bool) -> Bool
+    BoolEq,
+    /// Bool.ne(Bool) -> Bool
+    BoolNe,
+
     // String methods
     /// String.length() -> Int
     StringLength,
     /// String.isEmpty() -> Bool
     StringIsEmpty,
-
-    // Future: more methods as needed
+    /// String.eq(String) -> Bool
+    StringEq,
+    /// String.ne(String) -> Bool
+    StringNe,
 }
 
 impl PrimitiveMethod {
     /// Get the return type of this primitive method.
     pub fn return_type(&self, span: Span) -> Ty {
-        use crate::ty::IntBits;
+        use crate::ty::{FloatBits, IntBits};
         match self {
+            // Int -> String
             PrimitiveMethod::IntToString => Ty::string(span),
-            PrimitiveMethod::IntAbs => Ty::int(IntBits::I64, span),
+            // Int -> Int
+            PrimitiveMethod::IntAbs
+            | PrimitiveMethod::IntAdd
+            | PrimitiveMethod::IntSub
+            | PrimitiveMethod::IntMul
+            | PrimitiveMethod::IntDiv
+            | PrimitiveMethod::IntRem
+            | PrimitiveMethod::IntNeg
+            | PrimitiveMethod::IntIdentity
+            | PrimitiveMethod::IntBitAnd
+            | PrimitiveMethod::IntBitOr
+            | PrimitiveMethod::IntBitXor
+            | PrimitiveMethod::IntBitNot
+            | PrimitiveMethod::IntShl
+            | PrimitiveMethod::IntShr => Ty::int(IntBits::I64, span),
+            // Int -> Bool
+            PrimitiveMethod::IntEq
+            | PrimitiveMethod::IntNe
+            | PrimitiveMethod::IntLt
+            | PrimitiveMethod::IntLe
+            | PrimitiveMethod::IntGt
+            | PrimitiveMethod::IntGe => Ty::bool(span),
+            // Float -> Float
+            PrimitiveMethod::FloatAdd
+            | PrimitiveMethod::FloatSub
+            | PrimitiveMethod::FloatMul
+            | PrimitiveMethod::FloatDiv
+            | PrimitiveMethod::FloatNeg
+            | PrimitiveMethod::FloatIdentity => Ty::float(FloatBits::F64, span),
+            // Float -> Bool
+            PrimitiveMethod::FloatEq
+            | PrimitiveMethod::FloatNe
+            | PrimitiveMethod::FloatLt
+            | PrimitiveMethod::FloatLe
+            | PrimitiveMethod::FloatGt
+            | PrimitiveMethod::FloatGe => Ty::bool(span),
+            // Bool -> Bool
+            PrimitiveMethod::BoolAnd
+            | PrimitiveMethod::BoolOr
+            | PrimitiveMethod::BoolNot
+            | PrimitiveMethod::BoolEq
+            | PrimitiveMethod::BoolNe => Ty::bool(span),
+            // String -> Int
             PrimitiveMethod::StringLength => Ty::int(IntBits::I64, span),
-            PrimitiveMethod::StringIsEmpty => Ty::bool(span),
+            // String -> Bool
+            PrimitiveMethod::StringIsEmpty
+            | PrimitiveMethod::StringEq
+            | PrimitiveMethod::StringNe => Ty::bool(span),
         }
     }
 
@@ -83,8 +215,46 @@ impl PrimitiveMethod {
         match self {
             PrimitiveMethod::IntToString => "toString",
             PrimitiveMethod::IntAbs => "abs",
+            PrimitiveMethod::IntAdd => "add",
+            PrimitiveMethod::IntSub => "sub",
+            PrimitiveMethod::IntMul => "mul",
+            PrimitiveMethod::IntDiv => "div",
+            PrimitiveMethod::IntRem => "rem",
+            PrimitiveMethod::IntNeg => "neg",
+            PrimitiveMethod::IntIdentity => "identity",
+            PrimitiveMethod::IntEq => "eq",
+            PrimitiveMethod::IntNe => "ne",
+            PrimitiveMethod::IntLt => "lt",
+            PrimitiveMethod::IntLe => "le",
+            PrimitiveMethod::IntGt => "gt",
+            PrimitiveMethod::IntGe => "ge",
+            PrimitiveMethod::IntBitAnd => "bitAnd",
+            PrimitiveMethod::IntBitOr => "bitOr",
+            PrimitiveMethod::IntBitXor => "bitXor",
+            PrimitiveMethod::IntBitNot => "bitNot",
+            PrimitiveMethod::IntShl => "shl",
+            PrimitiveMethod::IntShr => "shr",
+            PrimitiveMethod::FloatAdd => "add",
+            PrimitiveMethod::FloatSub => "sub",
+            PrimitiveMethod::FloatMul => "mul",
+            PrimitiveMethod::FloatDiv => "div",
+            PrimitiveMethod::FloatNeg => "neg",
+            PrimitiveMethod::FloatIdentity => "identity",
+            PrimitiveMethod::FloatEq => "eq",
+            PrimitiveMethod::FloatNe => "ne",
+            PrimitiveMethod::FloatLt => "lt",
+            PrimitiveMethod::FloatLe => "le",
+            PrimitiveMethod::FloatGt => "gt",
+            PrimitiveMethod::FloatGe => "ge",
+            PrimitiveMethod::BoolAnd => "logicalAnd",
+            PrimitiveMethod::BoolOr => "logicalOr",
+            PrimitiveMethod::BoolNot => "logicalNot",
+            PrimitiveMethod::BoolEq => "eq",
+            PrimitiveMethod::BoolNe => "ne",
             PrimitiveMethod::StringLength => "length",
             PrimitiveMethod::StringIsEmpty => "isEmpty",
+            PrimitiveMethod::StringEq => "eq",
+            PrimitiveMethod::StringNe => "ne",
         }
     }
 
@@ -95,11 +265,55 @@ impl PrimitiveMethod {
             TyKind::Int(_) => match name {
                 "toString" => Some(PrimitiveMethod::IntToString),
                 "abs" => Some(PrimitiveMethod::IntAbs),
+                "add" => Some(PrimitiveMethod::IntAdd),
+                "sub" => Some(PrimitiveMethod::IntSub),
+                "mul" => Some(PrimitiveMethod::IntMul),
+                "div" => Some(PrimitiveMethod::IntDiv),
+                "rem" => Some(PrimitiveMethod::IntRem),
+                "neg" => Some(PrimitiveMethod::IntNeg),
+                "identity" => Some(PrimitiveMethod::IntIdentity),
+                "eq" => Some(PrimitiveMethod::IntEq),
+                "ne" => Some(PrimitiveMethod::IntNe),
+                "lt" => Some(PrimitiveMethod::IntLt),
+                "le" => Some(PrimitiveMethod::IntLe),
+                "gt" => Some(PrimitiveMethod::IntGt),
+                "ge" => Some(PrimitiveMethod::IntGe),
+                "bitAnd" => Some(PrimitiveMethod::IntBitAnd),
+                "bitOr" => Some(PrimitiveMethod::IntBitOr),
+                "bitXor" => Some(PrimitiveMethod::IntBitXor),
+                "bitNot" => Some(PrimitiveMethod::IntBitNot),
+                "shl" => Some(PrimitiveMethod::IntShl),
+                "shr" => Some(PrimitiveMethod::IntShr),
+                _ => None,
+            },
+            TyKind::Float(_) => match name {
+                "add" => Some(PrimitiveMethod::FloatAdd),
+                "sub" => Some(PrimitiveMethod::FloatSub),
+                "mul" => Some(PrimitiveMethod::FloatMul),
+                "div" => Some(PrimitiveMethod::FloatDiv),
+                "neg" => Some(PrimitiveMethod::FloatNeg),
+                "identity" => Some(PrimitiveMethod::FloatIdentity),
+                "eq" => Some(PrimitiveMethod::FloatEq),
+                "ne" => Some(PrimitiveMethod::FloatNe),
+                "lt" => Some(PrimitiveMethod::FloatLt),
+                "le" => Some(PrimitiveMethod::FloatLe),
+                "gt" => Some(PrimitiveMethod::FloatGt),
+                "ge" => Some(PrimitiveMethod::FloatGe),
+                _ => None,
+            },
+            TyKind::Bool => match name {
+                "logicalAnd" => Some(PrimitiveMethod::BoolAnd),
+                "logicalOr" => Some(PrimitiveMethod::BoolOr),
+                "logicalNot" => Some(PrimitiveMethod::BoolNot),
+                "eq" => Some(PrimitiveMethod::BoolEq),
+                "ne" => Some(PrimitiveMethod::BoolNe),
                 _ => None,
             },
             TyKind::String => match name {
                 "length" => Some(PrimitiveMethod::StringLength),
                 "isEmpty" => Some(PrimitiveMethod::StringIsEmpty),
+                "eq" => Some(PrimitiveMethod::StringEq),
+                "ne" => Some(PrimitiveMethod::StringNe),
                 _ => None,
             },
             _ => None,

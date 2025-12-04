@@ -1,0 +1,153 @@
+@import "tailwindcss";
+
+@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Source+Code+Pro:ital,wght@0,200..900;1,200..900&display=swap");
+
+:root {
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-mono: "Source Code Pro", monospace;
+
+  /* Kestrel brand colors - warm earth tones inspired by the bird */
+  --color-rust: #c45a3b;
+  --color-rust-light: #e07b5c;
+  --color-rust-dark: #9a3f28;
+  --color-cream: #fdf8f3;
+  --color-slate: #2c3e50;
+  --color-slate-light: #4a6274;
+  --color-gold: #d4a844;
+  --color-forest: #2d5a47;
+}
+
+* {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-serif);
+  background-color: var(--color-cream);
+  color: var(--color-slate);
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-cream);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-rust);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-rust-dark);
+}
+
+/* Scroll snap container */
+.scroll-container {
+  height: 100vh;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+}
+
+.scroll-section {
+  height: 100vh;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+/* Typography */
+.font-serif {
+  font-family: var(--font-serif);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Code syntax highlighting */
+.token-keyword {
+  color: #c45a3b;
+  font-weight: 600;
+}
+.token-type {
+  color: #d4a844;
+}
+.token-function {
+  color: #2d5a47;
+}
+.token-string {
+  color: #6b8e23;
+}
+.token-number {
+  color: #b58900;
+}
+.token-comment {
+  color: #93a1a1;
+  font-style: italic;
+}
+.token-punctuation {
+  color: #586e75;
+}
+.token-operator {
+  color: #c45a3b;
+}
+.token-property {
+  color: #268bd2;
+}
+
+/* Animations */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(196, 90, 59, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(196, 90, 59, 0.5);
+  }
+}
+
+@keyframes typewriter {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+}

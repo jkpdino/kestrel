@@ -3,6 +3,7 @@ pub mod behavior_ext;
 pub mod error;
 pub mod expr;
 pub mod language;
+pub mod operators;
 pub mod pattern;
 pub mod stmt;
 pub mod symbol;

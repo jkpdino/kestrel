@@ -92,9 +92,6 @@ pub enum Token {
     Null,
 
     // ===== Declaration Keywords =====
-    #[token("and")]
-    And,
-
     #[token("fileprivate")]
     Fileprivate,
 
@@ -142,6 +139,16 @@ pub enum Token {
 
     #[token("where")]
     Where,
+
+    // ===== Logical Keywords =====
+    #[token("and")]
+    And,
+
+    #[token("not")]
+    Not,
+
+    #[token("or")]
+    Or,
 
     // ===== Statement Keywords =====
     #[token("as")]
@@ -192,6 +199,40 @@ pub enum Token {
     Bang,
 
     // ===== Operators =====
+    // Note: Longer tokens must come before shorter ones for correct matching
+
+    // Multi-character operators (longest first)
+    #[token("..=")]
+    DotDotEquals,
+
+    #[token("..<")]
+    DotDotLess,
+
+    #[token("<<")]
+    LessLess,
+
+    #[token(">>")]
+    GreaterGreater,
+
+    #[token("<=")]
+    LessEquals,
+
+    #[token(">=")]
+    GreaterEquals,
+
+    #[token("==")]
+    EqualsEquals,
+
+    #[token("!=")]
+    BangEquals,
+
+    #[token("??")]
+    QuestionQuestion,
+
+    #[token("->")]
+    Arrow,
+
+    // Single-character operators
     #[token("=")]
     Equals,
 
@@ -201,14 +242,29 @@ pub enum Token {
     #[token("-")]
     Minus,
 
-    #[token("->")]
-    Arrow,
-
     #[token("*")]
     Star,
 
     #[token("/")]
     Slash,
+
+    #[token("%")]
+    Percent,
+
+    #[token("&")]
+    Ampersand,
+
+    #[token("|")]
+    Pipe,
+
+    #[token("^")]
+    Caret,
+
+    #[token("<")]
+    Less,
+
+    #[token(">")]
+    Greater,
 }
 
 pub type SpannedToken = Spanned<Token>;

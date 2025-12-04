@@ -323,6 +323,7 @@ dependencies = [
  "downcast-rs",
  "kestrel-reporting",
  "kestrel-span",
+ "kestrel-syntax-tree",
  "semantic-tree",
 ]
 

@@ -142,8 +142,21 @@ pub enum ExprVariant {
         dot: Span,
         member: Span,
     },
-    /// Unary expression: -expr, !expr
+    /// Unary prefix expression: -expr, !expr, not expr, +expr
     Unary(Token, Span, Box<ExprVariant>), // (operator_token, operator_span, operand)
+    /// Postfix expression: expr!
+    Postfix {
+        operand: Box<ExprVariant>,
+        operator: Token,
+        operator_span: Span,
+    },
+    /// Binary expression: a + b (flat, no precedence applied yet)
+    Binary {
+        lhs: Box<ExprVariant>,
+        operator: Token,
+        operator_span: Span,
+        rhs: Box<ExprVariant>,
+    },
     /// Call expression: callee(args)
     Call {
         callee: Box<ExprVariant>,
@@ -433,9 +446,14 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             })))
             .map(|(dot, member)| PostfixOp::MemberAccess { dot, member });
 
-        // Postfix operations: can be call (args) or member access .identifier
-        // These can be chained: a.b().c.d()
-        let postfix_op = arg_list.or(member_access);
+        // Postfix unwrap operator: expr!
+        let postfix_bang = skip_trivia()
+            .ignore_then(just(Token::Bang).map_with_span(|tok, span| (tok, span)))
+            .map(|(tok, span)| PostfixOp::PostfixOperator { operator: tok, operator_span: span });
+
+        // Postfix operations: can be call (args), member access .identifier, or postfix !
+        // These can be chained: a.b().c.d()!
+        let postfix_op = arg_list.or(member_access).or(postfix_bang);
 
         // Postfix expression: primary followed by zero or more postfix operations
         let postfix = primary.clone()
@@ -458,14 +476,26 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                             member,
                         }
                     }
+                    PostfixOp::PostfixOperator { operator, operator_span } => {
+                        ExprVariant::Postfix {
+                            operand: Box::new(acc),
+                            operator,
+                            operator_span,
+                        }
+                    }
                 })
             });
 
-        let unary = skip_trivia()
+        // Prefix unary operators: -, +, !, not
+        let unary_op = skip_trivia()
             .ignore_then(
                 just(Token::Minus).map_with_span(|tok, span| (tok, span))
+                    .or(just(Token::Plus).map_with_span(|tok, span| (tok, span)))
                     .or(just(Token::Bang).map_with_span(|tok, span| (tok, span)))
-            )
+                    .or(just(Token::Not).map_with_span(|tok, span| (tok, span)))
+            );
+
+        let unary = unary_op
             .then(expr.clone())
             .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
 
@@ -473,11 +503,40 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         // Order matters: try unary first to handle -42, then postfix expressions
         let non_assignment = unary.or(postfix);
 
+        // Binary operator parser - matches any binary operator token
+        let binary_op = skip_trivia()
+            .ignore_then(filter_map(|span, token: Token| {
+                if is_binary_operator(&token) {
+                    Ok((token, span))
+                } else {
+                    Err(Simple::expected_input_found(span, vec![], Some(token)))
+                }
+            }));
+
+        // Binary expression: lhs op rhs op rhs ...
+        // We parse as a flat left-to-right chain, precedence is handled in semantic phase
+        let binary = non_assignment.clone()
+            .then(
+                binary_op
+                    .then(non_assignment.clone())
+                    .repeated()
+            )
+            .map(|(first, rest)| {
+                rest.into_iter().fold(first, |lhs, ((op_token, op_span), rhs)| {
+                    ExprVariant::Binary {
+                        lhs: Box::new(lhs),
+                        operator: op_token,
+                        operator_span: op_span,
+                        rhs: Box::new(rhs),
+                    }
+                })
+            });
+
         // Assignment expression: lhs = rhs
         // Assignment is right-associative, so rhs recursively parses as expr (which includes assignment)
         // This gives us: a = b = c parses as a = (b = c)
         // Assignment has lowest precedence
-        non_assignment.clone()
+        binary.clone()
             .then(
                 skip_trivia()
                     .ignore_then(just(Token::Equals).map_with_span(|_, span| span))
@@ -505,7 +564,7 @@ enum ParenContent {
     Tuple(Vec<ExprVariant>, Vec<Span>, Span),
 }
 
-/// Helper enum for postfix operations (calls and member access)
+/// Helper enum for postfix operations (calls, member access, and postfix operators)
 #[derive(Debug, Clone)]
 enum PostfixOp {
     /// Function call: (args)
@@ -520,6 +579,39 @@ enum PostfixOp {
         dot: Span,
         member: Span,
     },
+    /// Postfix operator: expr!
+    PostfixOperator {
+        operator: Token,
+        operator_span: Span,
+    },
+}
+
+/// Check if a token is a binary operator
+fn is_binary_operator(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Plus
+            | Token::Minus
+            | Token::Star
+            | Token::Slash
+            | Token::Percent
+            | Token::Ampersand
+            | Token::Pipe
+            | Token::Caret
+            | Token::LessLess
+            | Token::GreaterGreater
+            | Token::Less
+            | Token::Greater
+            | Token::LessEquals
+            | Token::GreaterEquals
+            | Token::EqualsEquals
+            | Token::BangEquals
+            | Token::And
+            | Token::Or
+            | Token::QuestionQuestion
+            | Token::DotDotEquals
+            | Token::DotDotLess
+    )
 }
 
 /// Emit events for any expression variant
@@ -566,6 +658,12 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::Assignment { lhs, equals, rhs } => {
             emit_assignment_expr(sink, lhs, equals.clone(), rhs);
+        }
+        ExprVariant::Postfix { operand, operator, operator_span } => {
+            emit_postfix_expr(sink, operand, operator.clone(), operator_span.clone());
+        }
+        ExprVariant::Binary { lhs, operator, operator_span, rhs } => {
+            emit_binary_expr(sink, lhs, operator.clone(), operator_span.clone(), rhs);
         }
     }
 }
@@ -793,6 +891,27 @@ fn emit_assignment_expr(sink: &mut EventSink, lhs: &ExprVariant, equals: Span, r
     sink.add_token(SyntaxKind::Equals, equals);
     emit_expr_variant(sink, rhs);
     sink.finish_node(); // ExprAssignment
+    sink.finish_node(); // Expression
+}
+
+/// Emit events for a postfix expression (e.g., expr!)
+fn emit_postfix_expr(sink: &mut EventSink, operand: &ExprVariant, operator: Token, operator_span: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprPostfix);
+    emit_expr_variant(sink, operand);
+    sink.add_token(SyntaxKind::from(operator), operator_span);
+    sink.finish_node(); // ExprPostfix
+    sink.finish_node(); // Expression
+}
+
+/// Emit events for a binary expression (e.g., a + b)
+fn emit_binary_expr(sink: &mut EventSink, lhs: &ExprVariant, operator: Token, operator_span: Span, rhs: &ExprVariant) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprBinary);
+    emit_expr_variant(sink, lhs);
+    sink.add_token(SyntaxKind::from(operator), operator_span);
+    emit_expr_variant(sink, rhs);
+    sink.finish_node(); // ExprBinary
     sink.finish_node(); // Expression
 }
 

@@ -106,7 +106,9 @@ pub enum SyntaxKind {
     ExprTuple,           // (1, 2, 3)
     ExprGrouping,        // (expr)
     ExprPath,            // a.b.c (path expression)
-    ExprUnary,           // -expr, !expr
+    ExprUnary,           // -expr, !expr (prefix)
+    ExprPostfix,         // expr! (postfix)
+    ExprBinary,          // a + b, a * b, etc.
     ExprNull,            // null
     ExprCall,            // foo(1, 2) or expr(args)
     ExprAssignment,      // lhs = rhs
@@ -123,7 +125,6 @@ pub enum SyntaxKind {
     Null,
 
     // Keywords
-    And,
     As,
     Consuming,
     Else,
@@ -145,6 +146,11 @@ pub enum SyntaxKind {
     Var,
     Where,
 
+    // Logical keywords
+    And,
+    Not,
+    Or,
+
     // Braces
     LParen,
     RParen,
@@ -161,12 +167,29 @@ pub enum SyntaxKind {
     Bang,
 
     // Operators
+    // Multi-character
+    DotDotEquals,
+    DotDotLess,
+    LessLess,
+    GreaterGreater,
+    LessEquals,
+    GreaterEquals,
+    EqualsEquals,
+    BangEquals,
+    QuestionQuestion,
+    Arrow,
+    // Single-character
     Equals,
     Plus,
     Minus,
-    Arrow,
     Star,
     Slash,
+    Percent,
+    Ampersand,
+    Pipe,
+    Caret,
+    Less,
+    Greater,
 
     // Trivia (whitespace and comments)
     Whitespace,
@@ -198,7 +221,6 @@ impl From<Token> for SyntaxKind {
             Token::Boolean => SyntaxKind::Boolean,
             Token::Null => SyntaxKind::Null,
             // Keywords
-            Token::And => SyntaxKind::And,
             Token::As => SyntaxKind::As,
             Token::Consuming => SyntaxKind::Consuming,
             Token::Else => SyntaxKind::Else,
@@ -219,6 +241,10 @@ impl From<Token> for SyntaxKind {
             Token::Type => SyntaxKind::Type,
             Token::Var => SyntaxKind::Var,
             Token::Where => SyntaxKind::Where,
+            // Logical keywords
+            Token::And => SyntaxKind::And,
+            Token::Not => SyntaxKind::Not,
+            Token::Or => SyntaxKind::Or,
             // Braces
             Token::LParen => SyntaxKind::LParen,
             Token::RParen => SyntaxKind::RParen,
@@ -233,12 +259,27 @@ impl From<Token> for SyntaxKind {
             Token::Colon => SyntaxKind::Colon,
             Token::Bang => SyntaxKind::Bang,
             // Operators
+            Token::DotDotEquals => SyntaxKind::DotDotEquals,
+            Token::DotDotLess => SyntaxKind::DotDotLess,
+            Token::LessLess => SyntaxKind::LessLess,
+            Token::GreaterGreater => SyntaxKind::GreaterGreater,
+            Token::LessEquals => SyntaxKind::LessEquals,
+            Token::GreaterEquals => SyntaxKind::GreaterEquals,
+            Token::EqualsEquals => SyntaxKind::EqualsEquals,
+            Token::BangEquals => SyntaxKind::BangEquals,
+            Token::QuestionQuestion => SyntaxKind::QuestionQuestion,
+            Token::Arrow => SyntaxKind::Arrow,
             Token::Equals => SyntaxKind::Equals,
             Token::Plus => SyntaxKind::Plus,
             Token::Minus => SyntaxKind::Minus,
-            Token::Arrow => SyntaxKind::Arrow,
             Token::Star => SyntaxKind::Star,
             Token::Slash => SyntaxKind::Slash,
+            Token::Percent => SyntaxKind::Percent,
+            Token::Ampersand => SyntaxKind::Ampersand,
+            Token::Pipe => SyntaxKind::Pipe,
+            Token::Caret => SyntaxKind::Caret,
+            Token::Less => SyntaxKind::Less,
+            Token::Greater => SyntaxKind::Greater,
         }
     }
 }
@@ -308,6 +349,8 @@ impl Language for KestrelLanguage {
         const EXPR_GROUPING: u16 = SyntaxKind::ExprGrouping as u16;
         const EXPR_PATH: u16 = SyntaxKind::ExprPath as u16;
         const EXPR_UNARY: u16 = SyntaxKind::ExprUnary as u16;
+        const EXPR_POSTFIX: u16 = SyntaxKind::ExprPostfix as u16;
+        const EXPR_BINARY: u16 = SyntaxKind::ExprBinary as u16;
         const EXPR_NULL: u16 = SyntaxKind::ExprNull as u16;
         const EXPR_CALL: u16 = SyntaxKind::ExprCall as u16;
         const EXPR_ASSIGNMENT: u16 = SyntaxKind::ExprAssignment as u16;
@@ -319,7 +362,6 @@ impl Language for KestrelLanguage {
         const FLOAT: u16 = SyntaxKind::Float as u16;
         const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
         const NULL: u16 = SyntaxKind::Null as u16;
-        const AND: u16 = SyntaxKind::And as u16;
         const AS: u16 = SyntaxKind::As as u16;
         const CONSUMING: u16 = SyntaxKind::Consuming as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
@@ -340,6 +382,10 @@ impl Language for KestrelLanguage {
         const TYPE: u16 = SyntaxKind::Type as u16;
         const VAR: u16 = SyntaxKind::Var as u16;
         const WHERE: u16 = SyntaxKind::Where as u16;
+        // Logical keywords
+        const AND: u16 = SyntaxKind::And as u16;
+        const NOT: u16 = SyntaxKind::Not as u16;
+        const OR: u16 = SyntaxKind::Or as u16;
         const LPAREN: u16 = SyntaxKind::LParen as u16;
         const RPAREN: u16 = SyntaxKind::RParen as u16;
         const LBRACE: u16 = SyntaxKind::LBrace as u16;
@@ -351,12 +397,28 @@ impl Language for KestrelLanguage {
         const DOT: u16 = SyntaxKind::Dot as u16;
         const COLON: u16 = SyntaxKind::Colon as u16;
         const BANG: u16 = SyntaxKind::Bang as u16;
+        // Operators
+        const DOT_DOT_EQUALS: u16 = SyntaxKind::DotDotEquals as u16;
+        const DOT_DOT_LESS: u16 = SyntaxKind::DotDotLess as u16;
+        const LESS_LESS: u16 = SyntaxKind::LessLess as u16;
+        const GREATER_GREATER: u16 = SyntaxKind::GreaterGreater as u16;
+        const LESS_EQUALS: u16 = SyntaxKind::LessEquals as u16;
+        const GREATER_EQUALS: u16 = SyntaxKind::GreaterEquals as u16;
+        const EQUALS_EQUALS: u16 = SyntaxKind::EqualsEquals as u16;
+        const BANG_EQUALS: u16 = SyntaxKind::BangEquals as u16;
+        const QUESTION_QUESTION: u16 = SyntaxKind::QuestionQuestion as u16;
+        const ARROW: u16 = SyntaxKind::Arrow as u16;
         const EQUALS: u16 = SyntaxKind::Equals as u16;
         const PLUS: u16 = SyntaxKind::Plus as u16;
         const MINUS: u16 = SyntaxKind::Minus as u16;
-        const ARROW: u16 = SyntaxKind::Arrow as u16;
         const STAR: u16 = SyntaxKind::Star as u16;
         const SLASH: u16 = SyntaxKind::Slash as u16;
+        const PERCENT: u16 = SyntaxKind::Percent as u16;
+        const AMPERSAND: u16 = SyntaxKind::Ampersand as u16;
+        const PIPE: u16 = SyntaxKind::Pipe as u16;
+        const CARET: u16 = SyntaxKind::Caret as u16;
+        const LESS: u16 = SyntaxKind::Less as u16;
+        const GREATER: u16 = SyntaxKind::Greater as u16;
         const WHITESPACE: u16 = SyntaxKind::Whitespace as u16;
         const LINE_COMMENT: u16 = SyntaxKind::LineComment as u16;
         const BLOCK_COMMENT: u16 = SyntaxKind::BlockComment as u16;
@@ -419,6 +481,8 @@ impl Language for KestrelLanguage {
             EXPR_GROUPING => SyntaxKind::ExprGrouping,
             EXPR_PATH => SyntaxKind::ExprPath,
             EXPR_UNARY => SyntaxKind::ExprUnary,
+            EXPR_POSTFIX => SyntaxKind::ExprPostfix,
+            EXPR_BINARY => SyntaxKind::ExprBinary,
             EXPR_NULL => SyntaxKind::ExprNull,
             EXPR_CALL => SyntaxKind::ExprCall,
             EXPR_ASSIGNMENT => SyntaxKind::ExprAssignment,
@@ -430,7 +494,6 @@ impl Language for KestrelLanguage {
             FLOAT => SyntaxKind::Float,
             BOOLEAN => SyntaxKind::Boolean,
             NULL => SyntaxKind::Null,
-            AND => SyntaxKind::And,
             AS => SyntaxKind::As,
             CONSUMING => SyntaxKind::Consuming,
             ELSE => SyntaxKind::Else,
@@ -451,6 +514,10 @@ impl Language for KestrelLanguage {
             TYPE => SyntaxKind::Type,
             VAR => SyntaxKind::Var,
             WHERE => SyntaxKind::Where,
+            // Logical keywords
+            AND => SyntaxKind::And,
+            NOT => SyntaxKind::Not,
+            OR => SyntaxKind::Or,
             LPAREN => SyntaxKind::LParen,
             RPAREN => SyntaxKind::RParen,
             LBRACE => SyntaxKind::LBrace,
@@ -462,12 +529,28 @@ impl Language for KestrelLanguage {
             DOT => SyntaxKind::Dot,
             COLON => SyntaxKind::Colon,
             BANG => SyntaxKind::Bang,
+            // Operators
+            DOT_DOT_EQUALS => SyntaxKind::DotDotEquals,
+            DOT_DOT_LESS => SyntaxKind::DotDotLess,
+            LESS_LESS => SyntaxKind::LessLess,
+            GREATER_GREATER => SyntaxKind::GreaterGreater,
+            LESS_EQUALS => SyntaxKind::LessEquals,
+            GREATER_EQUALS => SyntaxKind::GreaterEquals,
+            EQUALS_EQUALS => SyntaxKind::EqualsEquals,
+            BANG_EQUALS => SyntaxKind::BangEquals,
+            QUESTION_QUESTION => SyntaxKind::QuestionQuestion,
+            ARROW => SyntaxKind::Arrow,
             EQUALS => SyntaxKind::Equals,
             PLUS => SyntaxKind::Plus,
             MINUS => SyntaxKind::Minus,
-            ARROW => SyntaxKind::Arrow,
             STAR => SyntaxKind::Star,
             SLASH => SyntaxKind::Slash,
+            PERCENT => SyntaxKind::Percent,
+            AMPERSAND => SyntaxKind::Ampersand,
+            PIPE => SyntaxKind::Pipe,
+            CARET => SyntaxKind::Caret,
+            LESS => SyntaxKind::Less,
+            GREATER => SyntaxKind::Greater,
             WHITESPACE => SyntaxKind::Whitespace,
             LINE_COMMENT => SyntaxKind::LineComment,
             BLOCK_COMMENT => SyntaxKind::BlockComment,
