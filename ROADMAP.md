@@ -155,9 +155,19 @@
 
 - [x] Member Access - `struct.field` (via MemberAccessBehavior)
 - [x] Chained Member Access - `obj.method().field` (parser fix for postfix member access)
-- [ ] Binary Operators - `+`, `-`, `*`, `/`, `%`
-- [ ] Comparison Operators - `==`, `!=`, `<`, `>`, `<=`, `>=`
-- [ ] Logical Operators - `and`, `or`, `!`
+- [x] Binary Operators - `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `<<`, `>>`
+  - [x] Pratt parsing for precedence handling
+  - [x] Desugar to method calls (`a + b` → `a.add(b)`)
+  - [x] Primitive method lookup (Int, Float)
+- [x] Comparison Operators - `==`, `!=`, `<`, `>`, `<=`, `>=`
+  - [x] Desugar to `eq`, `ne`, `lt`, `gt`, `le`, `ge` methods
+  - [x] Primitive methods for Int, Float, Bool, String
+- [x] Logical Operators - `and`, `or`, `not`
+  - [x] Desugar to `logicalAnd`, `logicalOr`, `logicalNot` methods
+  - [x] Primitive methods on Bool type
+- [x] Unary Operators - `-x`, `+x`, `!x`, `not x`, `x!`
+  - [x] Prefix: `neg`, `identity`, `bitNot`, `logicalNot`
+  - [x] Postfix: `unwrap` (for optionals, not yet implemented)
 - [ ] Block Expressions - `{ stmt; stmt; expr }`
 
 ### Struct Operations
@@ -232,15 +242,16 @@
 - Assignment expressions (`x = 5`, `point.x = 10`)
 - Initializer body resolution with field initialization verification
 - Expression mutability tracking
+- Binary operators (`+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `<<`, `>>`)
+- Comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`)
+- Logical operators (`and`, `or`, `not`)
+- Unary operators (`-x`, `+x`, `!x`, `not x`, `x!`)
 
 **Next Tasks**:
 
-1. Binary operators (`+`, `-`, `*`, `/`, `%`)
-2. Comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`)
-3. Logical operators (`and`, `or`, `not`)
-4. If/else expressions
-5. While loops
-6. Return/break/continue
+1. If/else expressions
+2. While loops
+3. Return/break/continue
 
 ## Notes
 

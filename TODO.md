@@ -2,12 +2,12 @@
 
 This file tracks immediate next steps and their dependencies.
 
-## Current Priority: Binary Operators
+## Current Priority: Control Flow
 
 ## Operators
 
 ### 1. Binary Operators
-**Status**: Not started
+**Status**: ✅ Complete
 
 ```kestrel
 a + b
@@ -18,17 +18,18 @@ a % b
 ```
 
 **Implementation**:
-- [ ] Parser: Binary expression with precedence
-- [ ] AST: `ExprKind::Binary { op, lhs, rhs }`
-- [ ] Semantic: Type check operands (both must be numeric for arithmetic)
-- [ ] Semantic: Result type inference (Int op Int -> Int, etc.)
+- [x] Parser: Binary expression with precedence (Pratt parsing)
+- [x] AST: `ExprBinary` syntax node
+- [x] Semantic: Desugar to method calls (`a + b` → `a.add(b)`)
+- [x] Semantic: Primitive method lookup for Int, Float types
+- [x] Semantic: Bitwise operators (`&`, `|`, `^`, `<<`, `>>`)
 
 **Design Decision**: Operator overloading?
-- For now: Built-in operators on primitive types only
+- Current: Built-in operators on primitive types via `PrimitiveMethod`
 - Later: Protocol-based overloading (`Addable`, `Comparable`, etc.)
 
 ### 2. Comparison Operators
-**Status**: Not started
+**Status**: ✅ Complete
 **Depends on**: Binary operator infrastructure
 
 ```kestrel
@@ -41,12 +42,12 @@ a >= b
 ```
 
 **Implementation**:
-- [ ] Parser: Same as binary, different precedence
-- [ ] Semantic: Result type is always `Bool`
-- [ ] Semantic: Operands must be comparable
+- [x] Parser: Same infrastructure as binary operators
+- [x] Semantic: Desugar to `eq`, `ne`, `lt`, `gt`, `le`, `ge` methods
+- [x] Semantic: Primitive methods for Int, Float, Bool, String
 
 ### 3. Logical Operators
-**Status**: Not started
+**Status**: ✅ Complete
 **Depends on**: Comparison operators (for useful conditions)
 
 ```kestrel
@@ -56,9 +57,25 @@ not a
 ```
 
 **Implementation**:
-- [ ] Parser: `and`/`or` as binary, `not` as unary prefix
-- [ ] Semantic: Operands must be `Bool`
+- [x] Parser: `and`/`or` as binary, `not` as unary prefix
+- [x] Semantic: Desugar to `logicalAnd`, `logicalOr`, `logicalNot` methods
+- [x] Semantic: Primitive methods on Bool type
 - [ ] Semantic: Short-circuit evaluation (later, for codegen)
+
+### 4. Unary Operators
+**Status**: ✅ Complete
+
+```kestrel
+-x      // negation
++x      // identity
+!x      // bitwise not (prefix) / unwrap (postfix)
+not x   // logical not
+```
+
+**Implementation**:
+- [x] Parser: Prefix and postfix unary operators
+- [x] Semantic: Desugar to `neg`, `identity`, `bitNot`, `logicalNot` methods
+- [x] Semantic: Primitive methods for Int, Float, Bool
 
 ---
 
@@ -142,7 +159,7 @@ continue
 ## Suggested Implementation Order
 
 ```
-1. Binary Operators ──┬─> 2. Comparison ──┬─> 3. Logical
+1. Binary Operators ──┬─> 2. Comparison ──┬─> 3. Logical     ✅ DONE
                       │                   │        │
                       │                   └────────┴─> 4. If Expressions
                       │                                      │
@@ -153,13 +170,14 @@ continue
 7. Type Checking (incremental, alongside each feature)
 ```
 
-**Next**:
-1. Binary operators (+, -, *, /, %)
-2. Comparison operators
-3. Logical operators
+**Completed**:
+1. ✅ Binary operators (+, -, *, /, %, &, |, ^, <<, >>)
+2. ✅ Comparison operators (==, !=, <, >, <=, >=)
+3. ✅ Logical operators (and, or, not)
+4. ✅ Unary operators (+, -, !, not, postfix !)
 
-**Then**:
-4. If expressions
-5. While loops
-6. Return/break/continue
+**Next**:
+1. If expressions
+2. While loops
+3. Return/break/continue
 
