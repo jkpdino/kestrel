@@ -20,6 +20,7 @@ use semantic_tree::symbol::Symbol;
 
 use crate::db::SemanticDatabase;
 use crate::queries::{self, Db};
+use crate::utils::get_file_id_for_symbol;
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass for import declarations
@@ -326,20 +327,3 @@ fn get_visibility_info(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> (String, Op
     }
 }
 
-/// Get the file_id for a symbol by walking up to its SourceFile parent
-fn get_file_id_for_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &DiagnosticContext,
-) -> usize {
-    let mut current = symbol.clone();
-    loop {
-        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
-            let file_name = current.metadata().name().value.clone();
-            return diagnostics.get_file_id(&file_name).unwrap_or(0);
-        }
-        match current.metadata().parent() {
-            Some(parent) => current = parent,
-            None => return 0,
-        }
-    }
-}

@@ -21,6 +21,7 @@ use semantic_tree::cycle::CycleDetector;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::db::SemanticDatabase;
+use crate::utils::get_file_id_for_symbol;
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass that detects circular type alias dependencies
@@ -197,20 +198,3 @@ fn follow_type_alias_chain(
     }
 }
 
-/// Get the file_id for a symbol by walking up to its SourceFile parent
-fn get_file_id_for_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &DiagnosticContext,
-) -> usize {
-    let mut current = symbol.clone();
-    loop {
-        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
-            let file_name = current.metadata().name().value.clone();
-            return diagnostics.get_file_id(&file_name).unwrap_or(0);
-        }
-        match current.metadata().parent() {
-            Some(parent) => current = parent,
-            None => return 0,
-        }
-    }
-}

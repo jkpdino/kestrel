@@ -1,11 +1,18 @@
 use std::sync::Arc;
 
+use kestrel_reporting::DiagnosticContext;
+use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::visibility::Visibility;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxElement};
-use semantic_tree::symbol::Symbol;
+use semantic_tree::symbol::{Symbol, SymbolId};
+
+use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
+use crate::queries::{Db, TypePathResolution};
+use crate::resolver::BindingContext;
 
 /// Find a child node with the specified kind
 pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
@@ -154,4 +161,151 @@ pub fn find_visibility_scope(
             root.clone()
         }
     }
+}
+
+/// Get the file_id for a symbol by walking up to its SourceFile parent
+pub fn get_file_id_for_symbol(
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    diagnostics: &DiagnosticContext,
+) -> usize {
+    let mut current = symbol.clone();
+    loop {
+        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
+            let file_name = current.metadata().name().value.clone();
+            return diagnostics.get_file_id(&file_name).unwrap_or(0);
+        }
+        match current.metadata().parent() {
+            Some(parent) => current = parent,
+            None => return 0,
+        }
+    }
+}
+
+/// Extract path segments from a Path syntax node
+pub fn extract_path_segments(path_node: &SyntaxNode) -> Vec<String> {
+    path_node
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::PathElement)
+        .filter_map(|path_elem| {
+            path_elem
+                .children_with_tokens()
+                .filter_map(|elem| elem.into_token())
+                .find(|tok| tok.kind() == SyntaxKind::Identifier)
+                .map(|tok| tok.text().to_string())
+        })
+        .collect()
+}
+
+/// Extract identifier text from a Name syntax node
+pub fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
+    name_node
+        .children_with_tokens()
+        .filter_map(|elem| elem.into_token())
+        .find(|tok| tok.kind() == SyntaxKind::Identifier)
+        .map(|tok| tok.text().to_string())
+}
+
+/// Resolve conformances/inheritance from syntax and add them as a ConformancesBehavior.
+///
+/// This is a shared function used by both struct (for conformances) and protocol (for inheritance).
+/// The `context` parameter determines the error context used in diagnostics.
+pub fn resolve_conformance_list(
+    syntax: &SyntaxNode,
+    source: &str,
+    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    context_id: SymbolId,
+    ctx: &mut BindingContext,
+    file_id: usize,
+    error_context: NotAProtocolContext,
+) {
+    // Find the ConformanceList node
+    let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {
+        Some(node) => node,
+        None => return,
+    };
+
+    let mut resolved = Vec::new();
+
+    // Process each ConformanceItem
+    for item in conformance_list.children() {
+        if item.kind() != SyntaxKind::ConformanceItem {
+            continue;
+        }
+
+        // ConformanceItem contains a Ty node
+        let ty_node = match find_child(&item, SyntaxKind::Ty) {
+            Some(node) => node,
+            None => continue,
+        };
+
+        let span = get_node_span(&ty_node, source);
+
+        // Find the TyPath inside Ty
+        let ty_path = match ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
+            Some(node) => node,
+            None => continue,
+        };
+
+        // Extract path from TyPath
+        let path_node = match find_child(&ty_path, SyntaxKind::Path) {
+            Some(node) => node,
+            None => continue,
+        };
+
+        // Extract path segments
+        let segments = extract_path_segments(&path_node);
+
+        if segments.is_empty() {
+            continue;
+        }
+
+        let type_name = segments.join(".");
+
+        // Resolve the path
+        match ctx.db.resolve_type_path(segments.clone(), context_id) {
+            TypePathResolution::Resolved(resolved_ty) => {
+                match resolved_ty.kind() {
+                    TyKind::Protocol { .. } => {
+                        // Valid protocol - add to resolved list
+                        resolved.push(resolved_ty);
+                    }
+                    TyKind::Struct { symbol, .. } => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: symbol.metadata().name().value.clone(),
+                            context: error_context,
+                        }, file_id);
+                        resolved.push(Ty::error(span));
+                    }
+                    _ => {
+                        ctx.diagnostics.throw(NotAProtocolError {
+                            span: span.clone(),
+                            name: type_name.clone(),
+                            context: error_context,
+                        }, file_id);
+                        resolved.push(Ty::error(span));
+                    }
+                }
+            }
+            TypePathResolution::NotFound { .. } => {
+                ctx.diagnostics.throw(UnresolvedTypeError {
+                    span: span.clone(),
+                    type_name: type_name.clone(),
+                }, file_id);
+                resolved.push(Ty::error(span));
+            }
+            TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
+                ctx.diagnostics.throw(NotAProtocolError {
+                    span: span.clone(),
+                    name: type_name.clone(),
+                    context: error_context,
+                }, file_id);
+                resolved.push(Ty::error(span));
+            }
+        }
+    }
+
+    // Add ConformancesBehavior with resolved conformances
+    let conformances_behavior = ConformancesBehavior::new(resolved);
+    symbol.metadata().add_behavior(conformances_behavior);
 }

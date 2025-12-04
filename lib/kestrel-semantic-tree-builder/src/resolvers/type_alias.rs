@@ -162,12 +162,6 @@ fn resolve_aliased_type_from_syntax(
         .unwrap_or_else(|| aliased_type_node.clone());
 
     // Use unified type resolution
-    let mut type_ctx = TypeSyntaxContext {
-        db: ctx.db,
-        diagnostics: ctx.diagnostics,
-        file_id,
-        source,
-        context_id,
-    };
+    let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
     resolve_type_from_ty_node(&ty_node, &mut type_ctx)
 }

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -16,8 +15,8 @@ use crate::queries::TypePathResolution;
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
 use crate::utils::{
-    extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
-    get_visibility_span, parse_visibility,
+    extract_name, extract_path_segments, extract_visibility, find_child, find_visibility_scope,
+    get_node_span, get_visibility_span, parse_visibility, resolve_conformance_list,
 };
 
 /// Resolver for struct declarations
@@ -120,7 +119,15 @@ impl Resolver for StructResolver {
         resolve_where_clause_bounds(syntax, source, symbol_id, context, file_id);
 
         // Resolve conformances from syntax and store them
-        resolve_conformances(syntax, source, symbol, symbol_id, context, file_id);
+        resolve_conformance_list(
+            syntax,
+            source,
+            symbol,
+            symbol_id,
+            context,
+            file_id,
+            NotAProtocolContext::Conformance,
+        );
     }
 }
 
@@ -160,16 +167,7 @@ fn resolve_type_bound(
             let span = get_node_span(&child, source);
 
             // Extract path segments
-            let segments: Vec<String> = child
-                .children()
-                .filter(|c| c.kind() == SyntaxKind::PathElement)
-                .filter_map(|elem| {
-                    elem.children_with_tokens()
-                        .filter_map(|e| e.into_token())
-                        .find(|t| t.kind() == SyntaxKind::Identifier)
-                        .map(|t| t.text().to_string())
-                })
-                .collect();
+            let segments = extract_path_segments(&child);
 
             if segments.is_empty() {
                 continue;
@@ -227,114 +225,3 @@ fn resolve_type_bound(
     }
 }
 
-/// Resolve conformances from syntax and add them as a ConformancesBehavior
-fn resolve_conformances(
-    syntax: &SyntaxNode,
-    source: &str,
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-    file_id: usize,
-) {
-    // Find the ConformanceList node
-    let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {
-        Some(node) => node,
-        None => return,
-    };
-
-    let mut resolved_conformances = Vec::new();
-
-    // Process each ConformanceItem
-    for item in conformance_list.children() {
-        if item.kind() != SyntaxKind::ConformanceItem {
-            continue;
-        }
-
-        // ConformanceItem contains a Ty node
-        let ty_node = match find_child(&item, SyntaxKind::Ty) {
-            Some(node) => node,
-            None => continue,
-        };
-
-        let span = get_node_span(&ty_node, source);
-
-        // Find the TyPath inside Ty
-        let ty_path = match ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
-            Some(node) => node,
-            None => continue,
-        };
-
-        // Extract path from TyPath
-        let path_node = match find_child(&ty_path, SyntaxKind::Path) {
-            Some(node) => node,
-            None => continue,
-        };
-
-        // Extract path segments
-        let segments: Vec<String> = path_node
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::PathElement)
-            .filter_map(|elem| {
-                elem.children_with_tokens()
-                    .filter_map(|e| e.into_token())
-                    .find(|t| t.kind() == SyntaxKind::Identifier)
-                    .map(|t| t.text().to_string())
-            })
-            .collect();
-
-        if segments.is_empty() {
-            continue;
-        }
-
-        let conformance_name = segments.join(".");
-
-        // Resolve the path
-        match ctx.db.resolve_type_path(segments.clone(), context_id) {
-            TypePathResolution::Resolved(resolved_ty) => {
-                use kestrel_semantic_tree::ty::TyKind;
-                match resolved_ty.kind() {
-                    TyKind::Protocol { .. } => {
-                        // Valid protocol - add to resolved conformances
-                        resolved_conformances.push(resolved_ty);
-                    }
-                    TyKind::Struct { symbol, .. } => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: symbol.metadata().name().value.clone(),
-                            context: NotAProtocolContext::Conformance,
-                        }, file_id);
-                        // Add error type as placeholder
-                        resolved_conformances.push(Ty::error(span));
-                    }
-                    _ => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: conformance_name.clone(),
-                            context: NotAProtocolContext::Conformance,
-                        }, file_id);
-                        resolved_conformances.push(Ty::error(span));
-                    }
-                }
-            }
-            TypePathResolution::NotFound { .. } => {
-                ctx.diagnostics.throw(UnresolvedTypeError {
-                    span: span.clone(),
-                    type_name: conformance_name.clone(),
-                }, file_id);
-                resolved_conformances.push(Ty::error(span));
-            }
-            TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
-                ctx.diagnostics.throw(NotAProtocolError {
-                    span: span.clone(),
-                    name: conformance_name.clone(),
-                    context: NotAProtocolContext::Conformance,
-                }, file_id);
-                resolved_conformances.push(Ty::error(span));
-            }
-        }
-    }
-
-    // Add ConformancesBehavior with resolved conformances
-    let conformances_behavior = ConformancesBehavior::new(resolved_conformances);
-    symbol.metadata().add_behavior(conformances_behavior);
-}

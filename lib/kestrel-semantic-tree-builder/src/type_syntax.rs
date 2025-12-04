@@ -17,7 +17,7 @@ use crate::diagnostics::{
     TooFewTypeArgumentsError, TooManyTypeArgumentsError, UnresolvedTypeError,
 };
 use crate::queries::{Db, TypePathResolution};
-use crate::utils::get_node_span;
+use crate::utils::{extract_path_segments, get_node_span};
 
 /// Context for type resolution from syntax during the bind phase
 pub struct TypeSyntaxContext<'a> {
@@ -31,6 +31,25 @@ pub struct TypeSyntaxContext<'a> {
     pub source: &'a str,
     /// Symbol ID of the context for resolution
     pub context_id: SymbolId,
+}
+
+impl<'a> TypeSyntaxContext<'a> {
+    /// Create a new TypeSyntaxContext
+    pub fn new(
+        db: &'a dyn Db,
+        diagnostics: &'a mut DiagnosticContext,
+        file_id: usize,
+        source: &'a str,
+        context_id: SymbolId,
+    ) -> Self {
+        Self {
+            db,
+            diagnostics,
+            file_id,
+            source,
+            context_id,
+        }
+    }
 }
 
 /// Extract a type from a Ty syntax node without resolution (placeholder types).
@@ -183,21 +202,6 @@ pub fn resolve_type_from_ty_node(ty_node: &SyntaxNode, ctx: &mut TypeSyntaxConte
 
     // Fallback: error type
     Ty::error(ty_span)
-}
-
-/// Extract path segments from a Path syntax node
-fn extract_path_segments(path_node: &SyntaxNode) -> Vec<String> {
-    path_node
-        .children()
-        .filter(|child| child.kind() == SyntaxKind::PathElement)
-        .filter_map(|path_elem| {
-            path_elem
-                .children_with_tokens()
-                .filter_map(|elem| elem.into_token())
-                .find(|tok| tok.kind() == SyntaxKind::Identifier)
-                .map(|tok| tok.text().to_string())
-        })
-        .collect()
 }
 
 /// Resolve a type path and emit diagnostics on failure

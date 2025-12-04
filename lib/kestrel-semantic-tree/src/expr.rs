@@ -45,216 +45,185 @@ impl CallArgument {
     }
 }
 
-/// Built-in methods on primitive types.
+/// Return type category for primitive methods.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReturnType {
+    /// Returns the same type as the receiver (Int -> Int, Float -> Float)
+    SameAsReceiver,
+    /// Always returns Bool
+    Bool,
+    /// Always returns String
+    String,
+    /// Always returns Int64
+    Int,
+}
+
+/// Macro to define primitive methods with their metadata in one place.
 ///
-/// These methods have no symbol representation - the compiler has
-/// built-in knowledge of their signatures and semantics.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PrimitiveMethod {
+/// Each entry specifies:
+/// - The enum variant name
+/// - The primitive type it applies to (Int, Float, Bool, String)
+/// - The method name string
+/// - The return type category
+macro_rules! define_primitive_methods {
+    (
+        $(
+            $variant:ident {
+                ty: $prim_ty:ident,
+                name: $name:literal,
+                returns: $returns:ident
+            }
+        ),* $(,)?
+    ) => {
+        /// Built-in methods on primitive types.
+        ///
+        /// These methods have no symbol representation - the compiler has
+        /// built-in knowledge of their signatures and semantics.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum PrimitiveMethod {
+            $(
+                $variant,
+            )*
+        }
+
+        impl PrimitiveMethod {
+            /// Get the method name.
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $(
+                        PrimitiveMethod::$variant => $name,
+                    )*
+                }
+            }
+
+            /// Get the return type category.
+            pub fn return_type_category(&self) -> ReturnType {
+                match self {
+                    $(
+                        PrimitiveMethod::$variant => ReturnType::$returns,
+                    )*
+                }
+            }
+
+            /// Look up a method on an Int type.
+            pub fn lookup_int(name: &str) -> Option<PrimitiveMethod> {
+                match name {
+                    $(
+                        $name if stringify!($prim_ty) == "Int" => Some(PrimitiveMethod::$variant),
+                    )*
+                    _ => None,
+                }
+            }
+
+            /// Look up a method on a Float type.
+            pub fn lookup_float(name: &str) -> Option<PrimitiveMethod> {
+                match name {
+                    $(
+                        $name if stringify!($prim_ty) == "Float" => Some(PrimitiveMethod::$variant),
+                    )*
+                    _ => None,
+                }
+            }
+
+            /// Look up a method on a Bool type.
+            pub fn lookup_bool(name: &str) -> Option<PrimitiveMethod> {
+                match name {
+                    $(
+                        $name if stringify!($prim_ty) == "Bool" => Some(PrimitiveMethod::$variant),
+                    )*
+                    _ => None,
+                }
+            }
+
+            /// Look up a method on a String type.
+            pub fn lookup_string(name: &str) -> Option<PrimitiveMethod> {
+                match name {
+                    $(
+                        $name if stringify!($prim_ty) == "String" => Some(PrimitiveMethod::$variant),
+                    )*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+define_primitive_methods! {
     // Int methods
-    /// Int.toString() -> String
-    IntToString,
-    /// Int.abs() -> Int
-    IntAbs,
+    IntToString   { ty: Int, name: "toString", returns: String },
+    IntAbs        { ty: Int, name: "abs", returns: SameAsReceiver },
 
-    // Int arithmetic operators
-    /// Int.add(Int) -> Int
-    IntAdd,
-    /// Int.sub(Int) -> Int
-    IntSub,
-    /// Int.mul(Int) -> Int
-    IntMul,
-    /// Int.div(Int) -> Int
-    IntDiv,
-    /// Int.rem(Int) -> Int
-    IntRem,
-    /// Int.neg() -> Int (unary -)
-    IntNeg,
-    /// Int.identity() -> Int (unary +)
-    IntIdentity,
+    // Int arithmetic
+    IntAdd        { ty: Int, name: "add", returns: SameAsReceiver },
+    IntSub        { ty: Int, name: "sub", returns: SameAsReceiver },
+    IntMul        { ty: Int, name: "mul", returns: SameAsReceiver },
+    IntDiv        { ty: Int, name: "div", returns: SameAsReceiver },
+    IntRem        { ty: Int, name: "rem", returns: SameAsReceiver },
+    IntNeg        { ty: Int, name: "neg", returns: SameAsReceiver },
+    IntIdentity   { ty: Int, name: "identity", returns: SameAsReceiver },
 
-    // Int comparison operators
-    /// Int.eq(Int) -> Bool
-    IntEq,
-    /// Int.ne(Int) -> Bool
-    IntNe,
-    /// Int.lt(Int) -> Bool
-    IntLt,
-    /// Int.le(Int) -> Bool
-    IntLe,
-    /// Int.gt(Int) -> Bool
-    IntGt,
-    /// Int.ge(Int) -> Bool
-    IntGe,
+    // Int comparison
+    IntEq         { ty: Int, name: "eq", returns: Bool },
+    IntNe         { ty: Int, name: "ne", returns: Bool },
+    IntLt         { ty: Int, name: "lt", returns: Bool },
+    IntLe         { ty: Int, name: "le", returns: Bool },
+    IntGt         { ty: Int, name: "gt", returns: Bool },
+    IntGe         { ty: Int, name: "ge", returns: Bool },
 
-    // Int bitwise operators
-    /// Int.bitAnd(Int) -> Int
-    IntBitAnd,
-    /// Int.bitOr(Int) -> Int
-    IntBitOr,
-    /// Int.bitXor(Int) -> Int
-    IntBitXor,
-    /// Int.bitNot() -> Int (unary !)
-    IntBitNot,
-    /// Int.shl(Int) -> Int
-    IntShl,
-    /// Int.shr(Int) -> Int
-    IntShr,
+    // Int bitwise
+    IntBitAnd     { ty: Int, name: "bitAnd", returns: SameAsReceiver },
+    IntBitOr      { ty: Int, name: "bitOr", returns: SameAsReceiver },
+    IntBitXor     { ty: Int, name: "bitXor", returns: SameAsReceiver },
+    IntBitNot     { ty: Int, name: "bitNot", returns: SameAsReceiver },
+    IntShl        { ty: Int, name: "shl", returns: SameAsReceiver },
+    IntShr        { ty: Int, name: "shr", returns: SameAsReceiver },
 
-    // Float methods
-    /// Float.add(Float) -> Float
-    FloatAdd,
-    /// Float.sub(Float) -> Float
-    FloatSub,
-    /// Float.mul(Float) -> Float
-    FloatMul,
-    /// Float.div(Float) -> Float
-    FloatDiv,
-    /// Float.neg() -> Float
-    FloatNeg,
-    /// Float.identity() -> Float
-    FloatIdentity,
+    // Float arithmetic
+    FloatAdd      { ty: Float, name: "add", returns: SameAsReceiver },
+    FloatSub      { ty: Float, name: "sub", returns: SameAsReceiver },
+    FloatMul      { ty: Float, name: "mul", returns: SameAsReceiver },
+    FloatDiv      { ty: Float, name: "div", returns: SameAsReceiver },
+    FloatNeg      { ty: Float, name: "neg", returns: SameAsReceiver },
+    FloatIdentity { ty: Float, name: "identity", returns: SameAsReceiver },
 
     // Float comparison
-    /// Float.eq(Float) -> Bool
-    FloatEq,
-    /// Float.ne(Float) -> Bool
-    FloatNe,
-    /// Float.lt(Float) -> Bool
-    FloatLt,
-    /// Float.le(Float) -> Bool
-    FloatLe,
-    /// Float.gt(Float) -> Bool
-    FloatGt,
-    /// Float.ge(Float) -> Bool
-    FloatGe,
+    FloatEq       { ty: Float, name: "eq", returns: Bool },
+    FloatNe       { ty: Float, name: "ne", returns: Bool },
+    FloatLt       { ty: Float, name: "lt", returns: Bool },
+    FloatLe       { ty: Float, name: "le", returns: Bool },
+    FloatGt       { ty: Float, name: "gt", returns: Bool },
+    FloatGe       { ty: Float, name: "ge", returns: Bool },
 
     // Bool operators
-    /// Bool.logicalAnd(Bool) -> Bool
-    BoolAnd,
-    /// Bool.logicalOr(Bool) -> Bool
-    BoolOr,
-    /// Bool.logicalNot() -> Bool
-    BoolNot,
-    /// Bool.eq(Bool) -> Bool
-    BoolEq,
-    /// Bool.ne(Bool) -> Bool
-    BoolNe,
+    BoolAnd       { ty: Bool, name: "logicalAnd", returns: Bool },
+    BoolOr        { ty: Bool, name: "logicalOr", returns: Bool },
+    BoolNot       { ty: Bool, name: "logicalNot", returns: Bool },
+    BoolEq        { ty: Bool, name: "eq", returns: Bool },
+    BoolNe        { ty: Bool, name: "ne", returns: Bool },
 
     // String methods
-    /// String.length() -> Int
-    StringLength,
-    /// String.isEmpty() -> Bool
-    StringIsEmpty,
-    /// String.eq(String) -> Bool
-    StringEq,
-    /// String.ne(String) -> Bool
-    StringNe,
+    StringLength  { ty: String, name: "length", returns: Int },
+    StringIsEmpty { ty: String, name: "isEmpty", returns: Bool },
+    StringEq      { ty: String, name: "eq", returns: Bool },
+    StringNe      { ty: String, name: "ne", returns: Bool },
 }
 
 impl PrimitiveMethod {
     /// Get the return type of this primitive method.
-    pub fn return_type(&self, span: Span) -> Ty {
-        use crate::ty::{FloatBits, IntBits};
-        match self {
-            // Int -> String
-            PrimitiveMethod::IntToString => Ty::string(span),
-            // Int -> Int
-            PrimitiveMethod::IntAbs
-            | PrimitiveMethod::IntAdd
-            | PrimitiveMethod::IntSub
-            | PrimitiveMethod::IntMul
-            | PrimitiveMethod::IntDiv
-            | PrimitiveMethod::IntRem
-            | PrimitiveMethod::IntNeg
-            | PrimitiveMethod::IntIdentity
-            | PrimitiveMethod::IntBitAnd
-            | PrimitiveMethod::IntBitOr
-            | PrimitiveMethod::IntBitXor
-            | PrimitiveMethod::IntBitNot
-            | PrimitiveMethod::IntShl
-            | PrimitiveMethod::IntShr => Ty::int(IntBits::I64, span),
-            // Int -> Bool
-            PrimitiveMethod::IntEq
-            | PrimitiveMethod::IntNe
-            | PrimitiveMethod::IntLt
-            | PrimitiveMethod::IntLe
-            | PrimitiveMethod::IntGt
-            | PrimitiveMethod::IntGe => Ty::bool(span),
-            // Float -> Float
-            PrimitiveMethod::FloatAdd
-            | PrimitiveMethod::FloatSub
-            | PrimitiveMethod::FloatMul
-            | PrimitiveMethod::FloatDiv
-            | PrimitiveMethod::FloatNeg
-            | PrimitiveMethod::FloatIdentity => Ty::float(FloatBits::F64, span),
-            // Float -> Bool
-            PrimitiveMethod::FloatEq
-            | PrimitiveMethod::FloatNe
-            | PrimitiveMethod::FloatLt
-            | PrimitiveMethod::FloatLe
-            | PrimitiveMethod::FloatGt
-            | PrimitiveMethod::FloatGe => Ty::bool(span),
-            // Bool -> Bool
-            PrimitiveMethod::BoolAnd
-            | PrimitiveMethod::BoolOr
-            | PrimitiveMethod::BoolNot
-            | PrimitiveMethod::BoolEq
-            | PrimitiveMethod::BoolNe => Ty::bool(span),
-            // String -> Int
-            PrimitiveMethod::StringLength => Ty::int(IntBits::I64, span),
-            // String -> Bool
-            PrimitiveMethod::StringIsEmpty
-            | PrimitiveMethod::StringEq
-            | PrimitiveMethod::StringNe => Ty::bool(span),
-        }
-    }
-
-    /// Get the method name.
-    pub fn name(&self) -> &'static str {
-        match self {
-            PrimitiveMethod::IntToString => "toString",
-            PrimitiveMethod::IntAbs => "abs",
-            PrimitiveMethod::IntAdd => "add",
-            PrimitiveMethod::IntSub => "sub",
-            PrimitiveMethod::IntMul => "mul",
-            PrimitiveMethod::IntDiv => "div",
-            PrimitiveMethod::IntRem => "rem",
-            PrimitiveMethod::IntNeg => "neg",
-            PrimitiveMethod::IntIdentity => "identity",
-            PrimitiveMethod::IntEq => "eq",
-            PrimitiveMethod::IntNe => "ne",
-            PrimitiveMethod::IntLt => "lt",
-            PrimitiveMethod::IntLe => "le",
-            PrimitiveMethod::IntGt => "gt",
-            PrimitiveMethod::IntGe => "ge",
-            PrimitiveMethod::IntBitAnd => "bitAnd",
-            PrimitiveMethod::IntBitOr => "bitOr",
-            PrimitiveMethod::IntBitXor => "bitXor",
-            PrimitiveMethod::IntBitNot => "bitNot",
-            PrimitiveMethod::IntShl => "shl",
-            PrimitiveMethod::IntShr => "shr",
-            PrimitiveMethod::FloatAdd => "add",
-            PrimitiveMethod::FloatSub => "sub",
-            PrimitiveMethod::FloatMul => "mul",
-            PrimitiveMethod::FloatDiv => "div",
-            PrimitiveMethod::FloatNeg => "neg",
-            PrimitiveMethod::FloatIdentity => "identity",
-            PrimitiveMethod::FloatEq => "eq",
-            PrimitiveMethod::FloatNe => "ne",
-            PrimitiveMethod::FloatLt => "lt",
-            PrimitiveMethod::FloatLe => "le",
-            PrimitiveMethod::FloatGt => "gt",
-            PrimitiveMethod::FloatGe => "ge",
-            PrimitiveMethod::BoolAnd => "logicalAnd",
-            PrimitiveMethod::BoolOr => "logicalOr",
-            PrimitiveMethod::BoolNot => "logicalNot",
-            PrimitiveMethod::BoolEq => "eq",
-            PrimitiveMethod::BoolNe => "ne",
-            PrimitiveMethod::StringLength => "length",
-            PrimitiveMethod::StringIsEmpty => "isEmpty",
-            PrimitiveMethod::StringEq => "eq",
-            PrimitiveMethod::StringNe => "ne",
+    pub fn return_type(&self, receiver_ty: &Ty, span: Span) -> Ty {
+        use crate::ty::{IntBits, TyKind};
+        match self.return_type_category() {
+            ReturnType::SameAsReceiver => match receiver_ty.kind() {
+                TyKind::Int(bits) => Ty::int(*bits, span),
+                TyKind::Float(bits) => Ty::float(*bits, span),
+                TyKind::Bool => Ty::bool(span),
+                TyKind::String => Ty::string(span),
+                // Fallback for error cases
+                _ => Ty::error(span),
+            },
+            ReturnType::Bool => Ty::bool(span),
+            ReturnType::String => Ty::string(span),
+            ReturnType::Int => Ty::int(IntBits::I64, span),
         }
     }
 
@@ -262,60 +231,10 @@ impl PrimitiveMethod {
     pub fn lookup(ty: &Ty, name: &str) -> Option<PrimitiveMethod> {
         use crate::ty::TyKind;
         match ty.kind() {
-            TyKind::Int(_) => match name {
-                "toString" => Some(PrimitiveMethod::IntToString),
-                "abs" => Some(PrimitiveMethod::IntAbs),
-                "add" => Some(PrimitiveMethod::IntAdd),
-                "sub" => Some(PrimitiveMethod::IntSub),
-                "mul" => Some(PrimitiveMethod::IntMul),
-                "div" => Some(PrimitiveMethod::IntDiv),
-                "rem" => Some(PrimitiveMethod::IntRem),
-                "neg" => Some(PrimitiveMethod::IntNeg),
-                "identity" => Some(PrimitiveMethod::IntIdentity),
-                "eq" => Some(PrimitiveMethod::IntEq),
-                "ne" => Some(PrimitiveMethod::IntNe),
-                "lt" => Some(PrimitiveMethod::IntLt),
-                "le" => Some(PrimitiveMethod::IntLe),
-                "gt" => Some(PrimitiveMethod::IntGt),
-                "ge" => Some(PrimitiveMethod::IntGe),
-                "bitAnd" => Some(PrimitiveMethod::IntBitAnd),
-                "bitOr" => Some(PrimitiveMethod::IntBitOr),
-                "bitXor" => Some(PrimitiveMethod::IntBitXor),
-                "bitNot" => Some(PrimitiveMethod::IntBitNot),
-                "shl" => Some(PrimitiveMethod::IntShl),
-                "shr" => Some(PrimitiveMethod::IntShr),
-                _ => None,
-            },
-            TyKind::Float(_) => match name {
-                "add" => Some(PrimitiveMethod::FloatAdd),
-                "sub" => Some(PrimitiveMethod::FloatSub),
-                "mul" => Some(PrimitiveMethod::FloatMul),
-                "div" => Some(PrimitiveMethod::FloatDiv),
-                "neg" => Some(PrimitiveMethod::FloatNeg),
-                "identity" => Some(PrimitiveMethod::FloatIdentity),
-                "eq" => Some(PrimitiveMethod::FloatEq),
-                "ne" => Some(PrimitiveMethod::FloatNe),
-                "lt" => Some(PrimitiveMethod::FloatLt),
-                "le" => Some(PrimitiveMethod::FloatLe),
-                "gt" => Some(PrimitiveMethod::FloatGt),
-                "ge" => Some(PrimitiveMethod::FloatGe),
-                _ => None,
-            },
-            TyKind::Bool => match name {
-                "logicalAnd" => Some(PrimitiveMethod::BoolAnd),
-                "logicalOr" => Some(PrimitiveMethod::BoolOr),
-                "logicalNot" => Some(PrimitiveMethod::BoolNot),
-                "eq" => Some(PrimitiveMethod::BoolEq),
-                "ne" => Some(PrimitiveMethod::BoolNe),
-                _ => None,
-            },
-            TyKind::String => match name {
-                "length" => Some(PrimitiveMethod::StringLength),
-                "isEmpty" => Some(PrimitiveMethod::StringIsEmpty),
-                "eq" => Some(PrimitiveMethod::StringEq),
-                "ne" => Some(PrimitiveMethod::StringNe),
-                _ => None,
-            },
+            TyKind::Int(_) => Self::lookup_int(name),
+            TyKind::Float(_) => Self::lookup_float(name),
+            TyKind::Bool => Self::lookup_bool(name),
+            TyKind::String => Self::lookup_string(name),
             _ => None,
         }
     }
@@ -422,7 +341,6 @@ pub enum ExprKind {
     },
 
     // Future: If, While, Block, BinaryOp, UnaryOp, etc.
-
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
     Error,
@@ -458,12 +376,22 @@ pub struct Expression {
 impl Expression {
     /// Create a new expression with explicit mutability.
     pub fn new(kind: ExprKind, ty: Ty, span: Span, mutable: bool) -> Self {
-        Expression { kind, ty, span, mutable }
+        Expression {
+            kind,
+            ty,
+            span,
+            mutable,
+        }
     }
 
     /// Create a new immutable expression (convenience for most cases).
     pub fn new_immutable(kind: ExprKind, ty: Ty, span: Span) -> Self {
-        Expression { kind, ty, span, mutable: false }
+        Expression {
+            kind,
+            ty,
+            span,
+            mutable: false,
+        }
     }
 
     /// Create a unit literal expression.
@@ -600,7 +528,13 @@ impl Expression {
 
     /// Create a field access expression.
     /// Mutability is computed as: field_mutable AND object.mutable
-    pub fn field_access(object: Expression, field: String, field_mutable: bool, ty: Ty, span: Span) -> Self {
+    pub fn field_access(
+        object: Expression,
+        field: String,
+        field_mutable: bool,
+        ty: Ty,
+        span: Span,
+    ) -> Self {
         let mutable = field_mutable && object.mutable;
         Expression {
             kind: ExprKind::FieldAccess {
@@ -636,7 +570,12 @@ impl Expression {
 
     /// Create a call expression.
     /// Return values are not mutable lvalues.
-    pub fn call(callee: Expression, arguments: Vec<CallArgument>, return_ty: Ty, span: Span) -> Self {
+    pub fn call(
+        callee: Expression,
+        arguments: Vec<CallArgument>,
+        return_ty: Ty,
+        span: Span,
+    ) -> Self {
         Expression {
             kind: ExprKind::Call {
                 callee: Box::new(callee),
@@ -656,7 +595,7 @@ impl Expression {
         arguments: Vec<CallArgument>,
         span: Span,
     ) -> Self {
-        let return_ty = method.return_type(span.clone());
+        let return_ty = method.return_type(&receiver.ty, span.clone());
         Expression {
             kind: ExprKind::PrimitiveMethodCall {
                 receiver: Box::new(receiver),

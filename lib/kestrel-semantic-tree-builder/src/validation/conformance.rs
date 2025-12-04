@@ -24,6 +24,7 @@ use crate::db::SemanticDatabase;
 use crate::diagnostics::{
     CircularProtocolInheritanceError, MissingProtocolMethodError, WrongMethodReturnTypeError,
 };
+use crate::utils::get_file_id_for_symbol;
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass that checks protocol conformance and inheritance rules
@@ -175,24 +176,6 @@ fn check_inheritance_cycle(
 
     detector.exit();
     None
-}
-
-/// Get the file_id for a symbol by walking up to its SourceFile parent
-fn get_file_id_for_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &DiagnosticContext,
-) -> usize {
-    let mut current = symbol.clone();
-    loop {
-        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
-            let file_name = current.metadata().name().value.clone();
-            return diagnostics.get_file_id(&file_name).unwrap_or(0);
-        }
-        match current.metadata().parent() {
-            Some(parent) => current = parent,
-            None => return 0,
-        }
-    }
 }
 
 /// Check that a struct implements all required methods from its conformances

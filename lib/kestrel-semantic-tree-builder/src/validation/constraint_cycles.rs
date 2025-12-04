@@ -29,6 +29,7 @@ use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::db::SemanticDatabase;
 use crate::diagnostics::{CircularConstraintError, CycleMember};
+use crate::utils::get_file_id_for_symbol;
 use crate::validation::{ValidationConfig, ValidationPass};
 
 /// Validation pass that detects circular generic constraint dependencies
@@ -267,20 +268,3 @@ fn collect_type_param_refs_recursive(ty: &Ty, refs: &mut Vec<SymbolId>) {
     }
 }
 
-/// Get the file_id for a symbol by walking up to its SourceFile parent
-fn get_file_id_for_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &DiagnosticContext,
-) -> usize {
-    let mut current = symbol.clone();
-    loop {
-        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
-            let file_name = current.metadata().name().value.clone();
-            return diagnostics.get_file_id(&file_name).unwrap_or(0);
-        }
-        match current.metadata().parent() {
-            Some(parent) => current = parent,
-            None => return 0,
-        }
-    }
-}

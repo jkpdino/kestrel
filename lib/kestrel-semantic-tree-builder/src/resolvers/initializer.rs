@@ -14,8 +14,8 @@ use semantic_tree::symbol::Symbol;
 use crate::resolver::{BindingContext, Resolver};
 use crate::type_syntax::{resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::utils::{
-    extract_visibility, find_child, find_visibility_scope, get_node_span,
-    get_visibility_span, parse_visibility,
+    extract_identifier_from_name, extract_visibility, find_child, find_visibility_scope,
+    get_node_span, get_visibility_span, parse_visibility,
 };
 
 /// Resolver for initializer declarations
@@ -276,20 +276,10 @@ fn resolve_single_parameter(
         return None;
     }
 
-    // Helper function to extract identifier text from a Name node
-    fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
-        name_node
-            .children_with_tokens()
-            .filter_map(|elem| elem.into_token())
-            .find(|tok| tok.kind() == SyntaxKind::Identifier)
-            .map(|tok| tok.text().to_string())
-    }
-
     // Get span helper
-    fn get_name_span(name_node: &SyntaxNode, source: &str) -> kestrel_span::Span {
+    fn get_name_span(name_node: &SyntaxNode) -> kestrel_span::Span {
         let start = name_node.text_range().start().into();
         let end = name_node.text_range().end().into();
-        let _ = source; // Span is byte range, not dependent on source content
         start..end
     }
 
@@ -299,28 +289,22 @@ fn resolve_single_parameter(
         let label_name = extract_identifier_from_name(&name_nodes[0]);
         let bind_name = Spanned::new(
             extract_identifier_from_name(&name_nodes[1])?,
-            get_name_span(&name_nodes[1], source),
+            get_name_span(&name_nodes[1]),
         );
-        (label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0], source))), bind_name)
+        (label_name.map(|n| Spanned::new(n, get_name_span(&name_nodes[0]))), bind_name)
     } else {
         // One name: no label, it's the bind_name
         // (In Kestrel, no label means no external label)
         let bind_name = Spanned::new(
             extract_identifier_from_name(&name_nodes[0])?,
-            get_name_span(&name_nodes[0], source),
+            get_name_span(&name_nodes[0]),
         );
         (None, bind_name)
     };
 
     // Find and resolve the type from Ty node
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext {
-            db: ctx.db,
-            diagnostics: ctx.diagnostics,
-            file_id,
-            source,
-            context_id,
-        };
+        let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - inferred

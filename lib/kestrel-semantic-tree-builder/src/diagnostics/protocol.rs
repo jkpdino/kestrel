@@ -14,6 +14,7 @@ pub struct NotAProtocolError {
 }
 
 /// The context where a protocol was expected.
+#[derive(Clone, Copy)]
 pub enum NotAProtocolContext {
     /// Used as a generic type bound (e.g., `T: SomeStruct`)
     Bound,

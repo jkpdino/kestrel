@@ -23,14 +23,12 @@ use super::expressions::resolve_expression;
 static OPERATOR_REGISTRY: LazyLock<OperatorRegistry> = LazyLock::new(OperatorRegistry::new);
 
 /// Resolve a prefix unary expression: -expr, +expr, !expr, not expr
-pub fn resolve_unary_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+pub fn resolve_unary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Find the operator token
-    let operator_token = node.children_with_tokens()
+    let operator_token = node
+        .children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| {
             matches!(
@@ -76,7 +74,8 @@ pub fn resolve_postfix_expression(
     let span = get_node_span(node, ctx.source);
 
     // Find the operator token (!)
-    let operator_token = node.children_with_tokens()
+    let operator_token = node
+        .children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::Bang);
 
@@ -102,10 +101,7 @@ pub fn resolve_postfix_expression(
 
 /// Resolve a binary expression: a + b
 /// Uses Pratt parsing to handle operator precedence.
-pub fn resolve_binary_expression(
-    node: &SyntaxNode,
-    ctx: &mut BodyResolutionContext,
-) -> Expression {
+pub fn resolve_binary_expression(node: &SyntaxNode, ctx: &mut BodyResolutionContext) -> Expression {
     let span = get_node_span(node, ctx.source);
 
     // Collect all operands and operators from the flat binary tree
@@ -154,7 +150,8 @@ fn collect_binary_operands(
     }
 
     // Get the operator token between them
-    let op_token = node.children_with_tokens()
+    let op_token = node
+        .children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| is_binary_operator_token(t.kind()));
 
@@ -167,7 +164,10 @@ fn collect_binary_operands(
     // Recursively collect from left operand
     let lhs_node = expr_children[0];
     let (lhs_operands, lhs_ops) = if has_binary_child(lhs_node) {
-        let binary_child = lhs_node.children().find(|c| c.kind() == SyntaxKind::ExprBinary).unwrap();
+        let binary_child = lhs_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::ExprBinary)
+            .unwrap();
         collect_binary_operands(&binary_child, ctx)
     } else {
         (vec![resolve_expression(lhs_node, ctx)], vec![])
@@ -184,7 +184,10 @@ fn collect_binary_operands(
     // Recursively collect from right operand
     let rhs_node = expr_children[1];
     let (rhs_operands, rhs_ops) = if has_binary_child(rhs_node) {
-        let binary_child = rhs_node.children().find(|c| c.kind() == SyntaxKind::ExprBinary).unwrap();
+        let binary_child = rhs_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::ExprBinary)
+            .unwrap();
         collect_binary_operands(&binary_child, ctx)
     } else {
         (vec![resolve_expression(rhs_node, ctx)], vec![])
@@ -245,7 +248,13 @@ fn pratt_parse(
     }
 
     // Use a simple precedence-climbing approach
-    pratt_parse_bp(&mut operands.into_iter().peekable(), &mut operators.into_iter().peekable(), 0, full_span, ctx)
+    pratt_parse_bp(
+        &mut operands.into_iter().peekable(),
+        &mut operators.into_iter().peekable(),
+        0,
+        full_span,
+        ctx,
+    )
 }
 
 /// Pratt parser using binding power (precedence climbing).
@@ -329,7 +338,8 @@ fn desugar_binary_op(
         rhs_span: rhs.span.clone(),
         rhs_type: super::utils::format_type(&rhs.ty),
     };
-    ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+    ctx.diagnostics
+        .add_diagnostic(error.into_diagnostic(ctx.file_id));
     Expression::error(full_span)
 }
 
@@ -393,81 +403,24 @@ fn desugar_unary_op(
         operand_span: operand.span.clone(),
         operand_type: super::utils::format_type(&operand.ty),
     };
-    ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+    ctx.diagnostics
+        .add_diagnostic(error.into_diagnostic(ctx.file_id));
     Expression::error(full_span)
 }
 
-/// Look up a primitive binary method on a type.
+/// Look up a primitive method on a type for binary operators.
+/// Uses the centralized PrimitiveMethod::lookup.
 fn lookup_primitive_binary_method(ty: &Ty, method_name: &str) -> Option<PrimitiveMethod> {
-    match ty.kind() {
-        TyKind::Int(_) => match method_name {
-            "add" => Some(PrimitiveMethod::IntAdd),
-            "sub" => Some(PrimitiveMethod::IntSub),
-            "mul" => Some(PrimitiveMethod::IntMul),
-            "div" => Some(PrimitiveMethod::IntDiv),
-            "rem" => Some(PrimitiveMethod::IntRem),
-            "eq" => Some(PrimitiveMethod::IntEq),
-            "ne" => Some(PrimitiveMethod::IntNe),
-            "lt" => Some(PrimitiveMethod::IntLt),
-            "le" => Some(PrimitiveMethod::IntLe),
-            "gt" => Some(PrimitiveMethod::IntGt),
-            "ge" => Some(PrimitiveMethod::IntGe),
-            "bitAnd" => Some(PrimitiveMethod::IntBitAnd),
-            "bitOr" => Some(PrimitiveMethod::IntBitOr),
-            "bitXor" => Some(PrimitiveMethod::IntBitXor),
-            "shl" => Some(PrimitiveMethod::IntShl),
-            "shr" => Some(PrimitiveMethod::IntShr),
-            _ => None,
-        },
-        TyKind::Float(_) => match method_name {
-            "add" => Some(PrimitiveMethod::FloatAdd),
-            "sub" => Some(PrimitiveMethod::FloatSub),
-            "mul" => Some(PrimitiveMethod::FloatMul),
-            "div" => Some(PrimitiveMethod::FloatDiv),
-            "eq" => Some(PrimitiveMethod::FloatEq),
-            "ne" => Some(PrimitiveMethod::FloatNe),
-            "lt" => Some(PrimitiveMethod::FloatLt),
-            "le" => Some(PrimitiveMethod::FloatLe),
-            "gt" => Some(PrimitiveMethod::FloatGt),
-            "ge" => Some(PrimitiveMethod::FloatGe),
-            _ => None,
-        },
-        TyKind::Bool => match method_name {
-            "logicalAnd" => Some(PrimitiveMethod::BoolAnd),
-            "logicalOr" => Some(PrimitiveMethod::BoolOr),
-            "eq" => Some(PrimitiveMethod::BoolEq),
-            "ne" => Some(PrimitiveMethod::BoolNe),
-            _ => None,
-        },
-        TyKind::String => match method_name {
-            "eq" => Some(PrimitiveMethod::StringEq),
-            "ne" => Some(PrimitiveMethod::StringNe),
-            _ => None,
-        },
-        _ => None,
-    }
+    PrimitiveMethod::lookup(ty, method_name)
 }
 
-/// Look up a primitive unary method on a type.
+/// Look up a primitive method on a type for unary operators.
+/// Uses the centralized PrimitiveMethod::lookup, with special handling
+/// for `!` (bitNot) on Bool which maps to logicalNot.
 fn lookup_primitive_unary_method(ty: &Ty, method_name: &str) -> Option<PrimitiveMethod> {
-    match ty.kind() {
-        TyKind::Int(_) => match method_name {
-            "neg" => Some(PrimitiveMethod::IntNeg),
-            "identity" => Some(PrimitiveMethod::IntIdentity),
-            "bitNot" => Some(PrimitiveMethod::IntBitNot),
-            _ => None,
-        },
-        TyKind::Float(_) => match method_name {
-            "neg" => Some(PrimitiveMethod::FloatNeg),
-            "identity" => Some(PrimitiveMethod::FloatIdentity),
-            _ => None,
-        },
-        TyKind::Bool => match method_name {
-            "logicalNot" => Some(PrimitiveMethod::BoolNot),
-            // Also allow `!` (bitNot) on Bool as logical NOT for compatibility
-            "bitNot" => Some(PrimitiveMethod::BoolNot),
-            _ => None,
-        },
-        _ => None,
+    // Special case: `!` (bitNot) on Bool maps to logicalNot for compatibility
+    if matches!(ty.kind(), TyKind::Bool) && method_name == "bitNot" {
+        return Some(PrimitiveMethod::BoolNot);
     }
+    PrimitiveMethod::lookup(ty, method_name)
 }

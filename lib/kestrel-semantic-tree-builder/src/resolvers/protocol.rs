@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use kestrel_semantic_tree::behavior::conformances::ConformancesBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
@@ -11,13 +10,12 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::diagnostics::{NotAProtocolContext, NotAProtocolError, UnresolvedTypeError};
-use crate::queries::TypePathResolution;
+use crate::diagnostics::NotAProtocolContext;
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
 use crate::utils::{
-    extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
-    get_visibility_span, parse_visibility,
+    extract_name, extract_visibility, find_child, find_visibility_scope,
+    get_node_span, get_visibility_span, parse_visibility, resolve_conformance_list,
 };
 
 /// Resolver for protocol declarations
@@ -117,117 +115,15 @@ impl Resolver for ProtocolResolver {
             .unwrap_or("");
 
         // Resolve inherited protocols from syntax and add as behavior
-        resolve_inherited_protocols(syntax, source, symbol, symbol_id, context, file_id);
+        resolve_conformance_list(
+            syntax,
+            source,
+            symbol,
+            symbol_id,
+            context,
+            file_id,
+            NotAProtocolContext::Inheritance,
+        );
     }
 }
 
-/// Resolve inherited protocols from syntax and add them as a ConformancesBehavior
-fn resolve_inherited_protocols(
-    syntax: &SyntaxNode,
-    source: &str,
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-    file_id: usize,
-) {
-    // Find the ConformanceList node
-    let conformance_list = match find_child(syntax, SyntaxKind::ConformanceList) {
-        Some(node) => node,
-        None => return,
-    };
-
-    let mut resolved_protocols = Vec::new();
-
-    // Process each ConformanceItem
-    for item in conformance_list.children() {
-        if item.kind() != SyntaxKind::ConformanceItem {
-            continue;
-        }
-
-        // ConformanceItem contains a Ty node
-        let ty_node = match find_child(&item, SyntaxKind::Ty) {
-            Some(node) => node,
-            None => continue,
-        };
-
-        let span = get_node_span(&ty_node, source);
-
-        // Find the TyPath inside Ty
-        let ty_path = match ty_node.children().find(|c| c.kind() == SyntaxKind::TyPath) {
-            Some(node) => node,
-            None => continue,
-        };
-
-        // Extract path from TyPath
-        let path_node = match find_child(&ty_path, SyntaxKind::Path) {
-            Some(node) => node,
-            None => continue,
-        };
-
-        // Extract path segments
-        let segments: Vec<String> = path_node
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::PathElement)
-            .filter_map(|elem| {
-                elem.children_with_tokens()
-                    .filter_map(|e| e.into_token())
-                    .find(|t| t.kind() == SyntaxKind::Identifier)
-                    .map(|t| t.text().to_string())
-            })
-            .collect();
-
-        if segments.is_empty() {
-            continue;
-        }
-
-        let protocol_name = segments.join(".");
-
-        // Resolve the path
-        match ctx.db.resolve_type_path(segments.clone(), context_id) {
-            TypePathResolution::Resolved(resolved_ty) => {
-                use kestrel_semantic_tree::ty::TyKind;
-                match resolved_ty.kind() {
-                    TyKind::Protocol { .. } => {
-                        // Valid protocol - add to resolved list
-                        resolved_protocols.push(resolved_ty);
-                    }
-                    TyKind::Struct { symbol, .. } => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: symbol.metadata().name().value.clone(),
-                            context: NotAProtocolContext::Inheritance,
-                        }, file_id);
-                        resolved_protocols.push(Ty::error(span));
-                    }
-                    _ => {
-                        ctx.diagnostics.throw(NotAProtocolError {
-                            span: span.clone(),
-                            name: protocol_name.clone(),
-                            context: NotAProtocolContext::Inheritance,
-                        }, file_id);
-                        resolved_protocols.push(Ty::error(span));
-                    }
-                }
-            }
-            TypePathResolution::NotFound { .. } => {
-                ctx.diagnostics.throw(UnresolvedTypeError {
-                    span: span.clone(),
-                    type_name: protocol_name.clone(),
-                }, file_id);
-                resolved_protocols.push(Ty::error(span));
-            }
-            TypePathResolution::Ambiguous { .. } | TypePathResolution::NotAType { .. } => {
-                ctx.diagnostics.throw(NotAProtocolError {
-                    span: span.clone(),
-                    name: protocol_name.clone(),
-                    context: NotAProtocolContext::Inheritance,
-                }, file_id);
-                resolved_protocols.push(Ty::error(span));
-            }
-        }
-    }
-
-    // Add ConformancesBehavior with resolved inherited protocols
-    let conformances_behavior = ConformancesBehavior::new(resolved_protocols);
-    symbol.metadata().add_behavior(conformances_behavior);
-}

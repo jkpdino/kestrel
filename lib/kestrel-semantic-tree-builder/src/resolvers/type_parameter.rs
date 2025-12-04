@@ -7,7 +7,7 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
-use crate::utils::{find_child, get_node_span};
+use crate::utils::{extract_path_segments, find_child, get_node_span};
 
 /// Extract type parameters from a syntax node that has a TypeParameterList child.
 ///
@@ -155,20 +155,6 @@ fn extract_ty_from_node(ty_node: &SyntaxNode, source: &str) -> Option<Ty> {
         }
         _ => None,
     }
-}
-
-/// Extract path segments from a Path node.
-fn extract_path_segments(path_node: &SyntaxNode) -> Vec<String> {
-    path_node
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::PathElement)
-        .filter_map(|elem| {
-            elem.children_with_tokens()
-                .filter_map(|e| e.into_token())
-                .find(|t| t.kind() == SyntaxKind::Identifier)
-                .map(|t| t.text().to_string())
-        })
-        .collect()
 }
 
 /// Extract where clause constraints from a syntax node that has a WhereClause child.

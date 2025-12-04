@@ -14,8 +14,8 @@ use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
 use crate::type_syntax::{extract_type_from_ty_node, extract_type_from_node, resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::utils::{
-    extract_name, extract_visibility, find_child, find_visibility_scope, get_node_span,
-    get_visibility_span, parse_visibility,
+    extract_identifier_from_name, extract_name, extract_visibility, find_child,
+    find_visibility_scope, get_node_span, get_visibility_span, parse_visibility,
 };
 
 /// Resolver for function declarations
@@ -295,15 +295,6 @@ fn extract_single_parameter(param_node: &SyntaxNode, source: &str) -> Option<Par
         return None;
     }
 
-    // Helper function to extract identifier text from a Name node
-    fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
-        name_node
-            .children_with_tokens()
-            .filter_map(|elem| elem.into_token())
-            .find(|tok| tok.kind() == SyntaxKind::Identifier)
-            .map(|tok| tok.text().to_string())
-    }
-
     // Extract name strings and spans
     let (label, bind_name) = if name_nodes.len() >= 2 {
         // Two names: first is label, second is bind_name
@@ -389,15 +380,6 @@ fn resolve_single_parameter(
         return None;
     }
 
-    // Helper function to extract identifier text from a Name node
-    fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
-        name_node
-            .children_with_tokens()
-            .filter_map(|elem| elem.into_token())
-            .find(|tok| tok.kind() == SyntaxKind::Identifier)
-            .map(|tok| tok.text().to_string())
-    }
-
     // Determine label and bind_name based on number of Name nodes
     let (label, bind_name) = if name_nodes.len() >= 2 {
         // Two names: first is label, second is bind_name
@@ -418,13 +400,7 @@ fn resolve_single_parameter(
 
     // Find and resolve the type from Ty node using shared utility
     let ty = if let Some(ty_node) = param_node.children().find(|c| c.kind() == SyntaxKind::Ty) {
-        let mut type_ctx = TypeSyntaxContext {
-            db: ctx.db,
-            diagnostics: ctx.diagnostics,
-            file_id,
-            source,
-            context_id,
-        };
+        let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
         resolve_type_from_ty_node(&ty_node, &mut type_ctx)
     } else {
         // No type annotation - inferred
@@ -445,13 +421,7 @@ fn resolve_return_type_from_syntax(
     // Find the return type node: FunctionDeclaration -> ReturnType -> Ty
     if let Some(return_type_node) = find_child(syntax, SyntaxKind::ReturnType) {
         if let Some(ty_node) = find_child(&return_type_node, SyntaxKind::Ty) {
-            let mut type_ctx = TypeSyntaxContext {
-                db: ctx.db,
-                diagnostics: ctx.diagnostics,
-                file_id,
-                source,
-                context_id,
-            };
+            let mut type_ctx = TypeSyntaxContext::new(ctx.db, ctx.diagnostics, file_id, source, context_id);
             return resolve_type_from_ty_node(&ty_node, &mut type_ctx);
         }
     }

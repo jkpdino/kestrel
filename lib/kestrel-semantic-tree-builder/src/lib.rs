@@ -32,6 +32,7 @@ use crate::diagnostics::{
     ModuleNotFirstError, MultipleModuleDeclarationsError, NoModuleDeclarationError,
 };
 use crate::resolver::{BindingContext, ResolverRegistry, SyntaxMap};
+use crate::utils::get_file_id_for_symbol;
 
 /// Represents the root of a semantic tree
 pub struct SemanticTree {
@@ -572,24 +573,6 @@ fn check_duplicate_signatures(
     // Recursively check children
     for child in symbol.metadata().children() {
         check_duplicate_signatures(&child, diagnostics);
-    }
-}
-
-/// Get the file_id for a symbol by walking up to its SourceFile parent
-fn get_file_id_for_symbol(
-    symbol: &Arc<dyn Symbol<KestrelLanguage>>,
-    diagnostics: &DiagnosticContext,
-) -> usize {
-    let mut current = symbol.clone();
-    loop {
-        if current.metadata().kind() == KestrelSymbolKind::SourceFile {
-            let file_name = current.metadata().name().value.clone();
-            return diagnostics.get_file_id(&file_name).unwrap_or(0);
-        }
-        match current.metadata().parent() {
-            Some(parent) => current = parent,
-            None => return 0,
-        }
     }
 }
 
