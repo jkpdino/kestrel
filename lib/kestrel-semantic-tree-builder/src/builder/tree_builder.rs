@@ -13,7 +13,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolTable};
 
 use crate::resolver::ResolverRegistry;
-use crate::tree::{build_module_hierarchy, SemanticTree, SyntaxMap};
+use crate::tree::{build_module_hierarchy, SemanticTree};
 
 use super::ModuleValidator;
 

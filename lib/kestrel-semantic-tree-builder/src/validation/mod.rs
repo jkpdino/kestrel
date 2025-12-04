@@ -115,12 +115,15 @@ impl ValidationConfig {
 type SharedDiagnostics = Rc<RefCell<DiagnosticsWrapper>>;
 
 /// Wrapper to hold the mutable reference to DiagnosticContext
-struct DiagnosticsWrapper {
+///
+/// This type provides safe access to the DiagnosticContext during validation tree walks.
+pub struct DiagnosticsWrapper {
     inner: *mut DiagnosticContext,
 }
 
 impl DiagnosticsWrapper {
-    fn get(&self) -> &mut DiagnosticContext {
+    /// Get a mutable reference to the underlying DiagnosticContext
+    pub fn get(&self) -> &mut DiagnosticContext {
         // SAFETY: The wrapper is only created and used within run(), and the
         // DiagnosticContext reference is valid for the duration of the walk.
         unsafe { &mut *self.inner }

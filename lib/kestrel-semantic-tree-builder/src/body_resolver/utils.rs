@@ -72,10 +72,6 @@ pub fn get_callable_behavior(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Optio
     None
 }
 
-/// Get the return type from a callable symbol
-pub fn get_callable_return_type(symbol: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
-    get_callable_behavior(symbol).map(|c| c.return_type().clone())
-}
 
 /// Create a struct type from a struct symbol.
 ///

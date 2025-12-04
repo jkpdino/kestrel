@@ -9,7 +9,6 @@ use semantic_tree::symbol::Symbol;
 
 use crate::resolver::{Resolver, BindingContext};
 use crate::syntax::get_node_span;
-use crate::database;
 
 /// Resolver for import declarations
 pub struct ImportResolver;

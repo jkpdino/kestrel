@@ -114,11 +114,10 @@ fn validate_import(
         }
     };
 
-    // Get the module symbol
-    let module_symbol = match ctx.db.symbol_by_id(module_id) {
-        Some(s) => s,
-        None => return,
-    };
+    // Verify the module exists
+    if ctx.db.symbol_by_id(module_id).is_none() {
+        return;
+    }
 
     // 2. Validate import items if present
     if !import_data.items().is_empty() {
@@ -289,6 +288,7 @@ fn check_import_conflicts(
 #[derive(Debug, Clone)]
 struct NameSource {
     span: kestrel_span::Span,
+    #[allow(dead_code)] // Kept for future cross-file diagnostics
     file_id: usize,
     is_import: bool,
 }

@@ -13,7 +13,6 @@ use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::valued::ValueBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
-use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::import::ImportDataBehavior;
 use kestrel_semantic_tree::ty::{Ty, TyKind};

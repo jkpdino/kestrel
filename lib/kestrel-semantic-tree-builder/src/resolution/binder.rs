@@ -20,7 +20,7 @@ use crate::database::{SemanticDatabase, SymbolRegistry};
 use crate::diagnostics::DuplicateFunctionSignatureError;
 use crate::resolver::{BindingContext, ResolverRegistry};
 use crate::syntax::get_file_id_for_symbol;
-use crate::tree::{SemanticTree, SourceMap, SyntaxMap};
+use crate::tree::SemanticTree;
 use crate::validation::{ValidationConfig, ValidationRunner};
 
 /// Binder for resolving references in a semantic tree
