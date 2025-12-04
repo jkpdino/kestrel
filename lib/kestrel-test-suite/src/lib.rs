@@ -19,22 +19,22 @@
 //!
 //! Symbols can be found by simple name or by dot-separated path:
 //!
-//! ```
+//! ```no_run
 //! use kestrel_test_suite::*;
 //!
 //! // Simple name lookup (finds first match anywhere in tree)
-//! Symbol::new("Inner")
+//! Symbol::new("Inner");
 //!
 //! // Path-based lookup (finds Outer, then Inner within it)
-//! Symbol::new("Outer.Inner")
+//! Symbol::new("Outer.Inner");
 //!
 //! // Deeply nested paths
-//! Symbol::new("Module.Struct.Method")
+//! Symbol::new("Module.Struct.Method");
 //! ```
 //!
 //! # Available Behaviors
 //!
-//! ```
+//! ```no_run
 //! use kestrel_test_suite::*;
 //!
 //! Symbol::new("Foo")
