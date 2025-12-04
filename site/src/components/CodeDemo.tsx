@@ -10,7 +10,27 @@ interface CodeExample {
 
 const codeExamples: CodeExample[] = [
   {
-    title: "Self-Documenting Calls",
+    title: "Sanctuary",
+    filename: "sanctuary.ks",
+    code: `// Code should read like a thought process.
+
+let sanctuary = Sanctuary(
+    location: "Highlands",
+    capacity: 50.birds
+)
+
+// The compiler ensures the flock is safe before moving.
+// No nulls. No accidents.
+if sanctuary.isReady {
+    flock.migrate(to: sanctuary, speed: .gliding)
+}
+
+// When the scope ends, resources are quietly released.
+// No garbage collector pauses. Just silence.`,
+    output: ["> Flock migrated safely to Highlands ✓"],
+  },
+  {
+    title: "Self-Documenting",
     filename: "game.ks",
     code: `// No more mystery parameters
 let player = Player(
@@ -78,27 +98,6 @@ match user {
 // Or use the ? operator for ergonomics
 let name = user?.name ?? "Anonymous"`,
     output: ["> Found: Alice"],
-  },
-  {
-    title: "Iterators That Compose",
-    filename: "data.ks",
-    code: `// Chain operations without intermediate allocations
-
-let transactions = accounts
-    .filter { $0.isActive }
-    .flatMap { $0.transactions }
-    .filter { $0.amount > 1000.0 }
-    .map { ($0.date, $0.amount) }
-    .take(10)
-    .collect()
-
-// Lazy evaluation - only computes what you need
-let first = users
-    .filter { $0.age >= 18 }
-    .find { $0.country == "Japan" }
-
-print("Found:", first?.name ?? "nobody")`,
-    output: ["> Found: Yuki"],
   },
 ];
 

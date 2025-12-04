@@ -63,7 +63,7 @@ export default function Hero() {
                 ? "opacity-100 translate-y-0"
                 : "opacity-0 translate-y-10"
             }`}>
-            Precise. Expressive. Swift.
+            Intent. Clarity. Flow.
           </p>
         </div>
 
