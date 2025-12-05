@@ -13,6 +13,7 @@
 //! - `assignment` - Assignment validation errors
 //! - `operators` - Operator resolution errors
 //! - `cycles` - Cycle detection errors (struct containment, generic constraints)
+//! - `type_check` - Type checking errors (type mismatches)
 
 mod assignment;
 mod call;
@@ -24,6 +25,7 @@ mod module;
 mod operators;
 mod protocol;
 mod struct_init;
+mod type_check;
 mod type_resolution;
 mod visibility;
 
@@ -37,5 +39,6 @@ pub use module::*;
 pub use operators::*;
 pub use protocol::*;
 pub use struct_init::*;
+pub use type_check::*;
 pub use type_resolution::*;
 pub use visibility::*;

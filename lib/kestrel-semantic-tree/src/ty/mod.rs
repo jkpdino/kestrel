@@ -6,11 +6,13 @@ pub use kind::{FloatBits, IntBits, TyKind};
 pub use substitutions::Substitutions;
 pub use where_clause::{Constraint, WhereClause};
 
+use crate::language::KestrelLanguage;
 use crate::symbol::protocol::ProtocolSymbol;
 use crate::symbol::r#struct::StructSymbol;
 use crate::symbol::type_alias::TypeAliasSymbol;
 use crate::symbol::type_parameter::TypeParameterSymbol;
 use kestrel_span::Span;
+use semantic_tree::symbol::Symbol;
 use std::sync::Arc;
 
 /// Represents a semantic type with its kind and source location
@@ -194,6 +196,219 @@ impl Ty {
         )
     }
 
+    // === Type joining (for Never propagation) ===
+
+    /// Join two types, handling Never type propagation.
+    ///
+    /// This is used for computing the type of if expressions and other
+    /// control flow constructs where branches may have different types.
+    ///
+    /// Rules:
+    /// - If either type is Never, return the other type (Never is the bottom type)
+    /// - If either type is Error, return Error (poison propagation)
+    /// - Otherwise, return the first type (type checking validates they match)
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // if cond { 1 } else { return }  -> Int (return has type Never)
+    /// Ty::int(...).join(&Ty::never(...)) // returns Int
+    ///
+    /// // if cond { return } else { "hello" } -> String
+    /// Ty::never(...).join(&Ty::string(...)) // returns String
+    ///
+    /// // if cond { return } else { break } -> Never (both are Never)
+    /// Ty::never(...).join(&Ty::never(...)) // returns Never
+    /// ```
+    pub fn join(&self, other: &Ty) -> Ty {
+        // Error propagates (poison)
+        if self.is_error() || other.is_error() {
+            return Ty::error(self.span.clone());
+        }
+
+        // Never is the bottom type - it joins with anything to produce the other type
+        if self.is_never() {
+            return other.clone();
+        }
+        if other.is_never() {
+            return self.clone();
+        }
+
+        // Otherwise return self (type checking will validate compatibility)
+        self.clone()
+    }
+
+    // === Type compatibility ===
+
+    /// Apply substitutions to this type, replacing type parameters with concrete types.
+    pub fn apply_substitutions(&self, substitutions: &Substitutions) -> Ty {
+        substitutions.apply(self)
+    }
+
+    /// Expand type aliases to their underlying types.
+    ///
+    /// This follows type alias chains until reaching a non-alias type.
+    /// Returns a clone of self if not a type alias.
+    pub fn expand_aliases(&self) -> Ty {
+        use crate::behavior::KestrelBehaviorKind;
+        use crate::symbol::type_alias::TypeAliasTypedBehavior;
+        use semantic_tree::symbol::Symbol;
+
+        match &self.kind {
+            TyKind::TypeAlias { symbol, substitutions } => {
+                // Get the resolved type from the TypeAliasTypedBehavior
+                let behaviors = symbol.metadata().behaviors();
+                let resolved = behaviors
+                    .iter()
+                    .find(|b| matches!(b.kind(), KestrelBehaviorKind::TypeAliasTyped))
+                    .and_then(|b| b.as_ref().downcast_ref::<TypeAliasTypedBehavior>())
+                    .map(|tab| tab.resolved_ty().clone());
+
+                match resolved {
+                    Some(ty) => {
+                        // Apply substitutions if any, then recursively expand
+                        if substitutions.is_empty() {
+                            ty.expand_aliases()
+                        } else {
+                            ty.apply_substitutions(substitutions).expand_aliases()
+                        }
+                    }
+                    // Alias not yet resolved - return as-is
+                    None => self.clone(),
+                }
+            }
+            // Not a type alias - return as-is
+            _ => self.clone(),
+        }
+    }
+
+    /// Check if this type is assignable to the target type.
+    ///
+    /// This handles:
+    /// - Never is assignable to any type (bottom type)
+    /// - Error is assignable to any type (suppress cascading errors)
+    /// - Type aliases are expanded before comparison
+    /// - Structural equality for tuples, arrays, functions
+    /// - Nominal equality for structs and protocols (by symbol identity)
+    /// - Type parameters are compared by identity
+    ///
+    /// Note: This does NOT handle subtyping or coercions.
+    pub fn is_assignable_to(&self, target: &Ty) -> bool {
+        // Expand aliases first
+        let from = self.expand_aliases();
+        let to = target.expand_aliases();
+
+        // Never is assignable to anything (it never produces a value)
+        if from.is_never() {
+            return true;
+        }
+
+        // Error is assignable to anything (suppress cascading errors)
+        if from.is_error() || to.is_error() {
+            return true;
+        }
+
+        // Inferred types are compatible with anything (not yet resolved)
+        if from.is_inferred() || to.is_inferred() {
+            return true;
+        }
+
+        // Compare by kind
+        match (from.kind(), to.kind()) {
+            // Primitives - exact match
+            (TyKind::Unit, TyKind::Unit) => true,
+            (TyKind::Bool, TyKind::Bool) => true,
+            (TyKind::String, TyKind::String) => true,
+            (TyKind::Int(a), TyKind::Int(b)) => a == b,
+            (TyKind::Float(a), TyKind::Float(b)) => a == b,
+
+            // Tuples - element-wise comparison
+            (TyKind::Tuple(a_elems), TyKind::Tuple(b_elems)) => {
+                a_elems.len() == b_elems.len()
+                    && a_elems
+                        .iter()
+                        .zip(b_elems.iter())
+                        .all(|(a, b)| a.is_assignable_to(b))
+            }
+
+            // Arrays - element type comparison
+            (TyKind::Array(a_elem), TyKind::Array(b_elem)) => a_elem.is_assignable_to(b_elem),
+
+            // Functions - contravariant params, covariant return
+            // For now, we use simple equality (no variance)
+            (
+                TyKind::Function {
+                    params: a_params,
+                    return_type: a_ret,
+                },
+                TyKind::Function {
+                    params: b_params,
+                    return_type: b_ret,
+                },
+            ) => {
+                a_params.len() == b_params.len()
+                    && a_params
+                        .iter()
+                        .zip(b_params.iter())
+                        .all(|(a, b)| a.is_assignable_to(b))
+                    && a_ret.is_assignable_to(b_ret)
+            }
+
+            // Structs - nominal equality (same symbol by ID)
+            (
+                TyKind::Struct {
+                    symbol: a_sym,
+                    substitutions: a_subs,
+                },
+                TyKind::Struct {
+                    symbol: b_sym,
+                    substitutions: b_subs,
+                },
+            ) => {
+                // Same struct symbol by ID (not pointer) to handle different Arc instances
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+                    && substitutions_equal(a_subs, b_subs)
+            }
+
+            // Protocols - nominal equality (same symbol by ID)
+            (
+                TyKind::Protocol {
+                    symbol: a_sym,
+                    substitutions: a_subs,
+                },
+                TyKind::Protocol {
+                    symbol: b_sym,
+                    substitutions: b_subs,
+                },
+            ) => {
+                Symbol::<KestrelLanguage>::metadata(a_sym.as_ref()).id()
+                    == Symbol::<KestrelLanguage>::metadata(b_sym.as_ref()).id()
+                    && substitutions_equal(a_subs, b_subs)
+            }
+
+            // Type parameters - for now, consider any type parameter compatible with another
+            // Full generic constraint checking is deferred to Phase 6
+            // TODO: Proper handling requires tracking type parameter scopes and substitutions
+            (TyKind::TypeParameter(_), TyKind::TypeParameter(_)) => true,
+
+            // Type parameter can be assigned to anything (and vice versa) for now
+            // This allows generic code to compile before constraint checking
+            (TyKind::TypeParameter(_), _) | (_, TyKind::TypeParameter(_)) => true,
+
+            // Self type - equal to Self or any Struct/Protocol
+            // In a struct/protocol context, Self represents the containing type
+            (TyKind::SelfType, TyKind::SelfType) => true,
+            (TyKind::SelfType, TyKind::Struct { .. }) => true,
+            (TyKind::Struct { .. }, TyKind::SelfType) => true,
+            (TyKind::SelfType, TyKind::Protocol { .. }) => true,
+            (TyKind::Protocol { .. }, TyKind::SelfType) => true,
+
+            // Everything else is not assignable
+            _ => false,
+        }
+    }
+
     // === Type checking methods (generated) ===
     is_type! {
         /// Check if this is a unit type
@@ -329,6 +544,36 @@ impl Ty {
     }
 }
 
+/// Check if two substitution maps are equal (all mapped types are assignable).
+///
+/// For now, if both have the same length, we check positionally rather than by ID.
+/// This is because type parameters from different scopes have different IDs
+/// even when they represent the same logical type parameter.
+fn substitutions_equal(a: &Substitutions, b: &Substitutions) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+
+    // If both are empty, they're equal
+    if a.is_empty() {
+        return true;
+    }
+
+    // Compare substitutions positionally (sorted by ID for consistency)
+    let mut a_types: Vec<_> = a.iter().collect();
+    let mut b_types: Vec<_> = b.iter().collect();
+    a_types.sort_by_key(|(id, _)| id.raw());
+    b_types.sort_by_key(|(id, _)| id.raw());
+
+    for ((_, a_ty), (_, b_ty)) in a_types.iter().zip(b_types.iter()) {
+        if !a_ty.is_assignable_to(b_ty) {
+            return false;
+        }
+    }
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,5 +662,198 @@ mod tests {
         assert_eq!(tuple_elements.len(), 2);
         assert!(tuple_elements[0].is_unit());
         assert!(tuple_elements[1].is_never());
+    }
+
+    #[test]
+    fn test_join_never_with_int() {
+        let never = Ty::never(0..1);
+        let int = Ty::int(IntBits::I64, 0..3);
+
+        // Never joined with Int should give Int
+        let result = never.join(&int);
+        assert!(result.is_int());
+
+        // Int joined with Never should give Int
+        let result = int.join(&never);
+        assert!(result.is_int());
+    }
+
+    #[test]
+    fn test_join_never_with_never() {
+        let never1 = Ty::never(0..1);
+        let never2 = Ty::never(2..3);
+
+        // Never joined with Never should give Never
+        let result = never1.join(&never2);
+        assert!(result.is_never());
+    }
+
+    #[test]
+    fn test_join_error_propagates() {
+        let error = Ty::error(0..1);
+        let int = Ty::int(IntBits::I64, 0..3);
+
+        // Error joined with anything should give Error
+        let result = error.join(&int);
+        assert!(result.is_error());
+
+        // Anything joined with Error should give Error
+        let result = int.join(&error);
+        assert!(result.is_error());
+    }
+
+    #[test]
+    fn test_join_same_types() {
+        let int1 = Ty::int(IntBits::I64, 0..3);
+        let int2 = Ty::int(IntBits::I64, 4..7);
+
+        // Same types should return the first
+        let result = int1.join(&int2);
+        assert!(result.is_int());
+    }
+
+    // === is_assignable_to tests ===
+
+    #[test]
+    fn test_assignable_same_primitives() {
+        let int1 = Ty::int(IntBits::I64, 0..3);
+        let int2 = Ty::int(IntBits::I64, 4..7);
+        assert!(int1.is_assignable_to(&int2));
+
+        let bool1 = Ty::bool(0..4);
+        let bool2 = Ty::bool(5..9);
+        assert!(bool1.is_assignable_to(&bool2));
+
+        let string1 = Ty::string(0..6);
+        let string2 = Ty::string(7..13);
+        assert!(string1.is_assignable_to(&string2));
+
+        let unit1 = Ty::unit(0..2);
+        let unit2 = Ty::unit(3..5);
+        assert!(unit1.is_assignable_to(&unit2));
+    }
+
+    #[test]
+    fn test_not_assignable_different_primitives() {
+        let int = Ty::int(IntBits::I64, 0..3);
+        let float = Ty::float(FloatBits::F64, 0..3);
+        let bool_ty = Ty::bool(0..4);
+        let string = Ty::string(0..6);
+
+        assert!(!int.is_assignable_to(&float));
+        assert!(!int.is_assignable_to(&bool_ty));
+        assert!(!int.is_assignable_to(&string));
+        assert!(!float.is_assignable_to(&int));
+        assert!(!bool_ty.is_assignable_to(&string));
+    }
+
+    #[test]
+    fn test_never_assignable_to_anything() {
+        let never = Ty::never(0..1);
+        let int = Ty::int(IntBits::I64, 0..3);
+        let string = Ty::string(0..6);
+        let unit = Ty::unit(0..2);
+
+        assert!(never.is_assignable_to(&int));
+        assert!(never.is_assignable_to(&string));
+        assert!(never.is_assignable_to(&unit));
+        assert!(never.is_assignable_to(&never));
+    }
+
+    #[test]
+    fn test_error_assignable_to_anything() {
+        let error = Ty::error(0..1);
+        let int = Ty::int(IntBits::I64, 0..3);
+
+        // Error is assignable to anything (suppress cascading)
+        assert!(error.is_assignable_to(&int));
+        assert!(int.is_assignable_to(&error));
+    }
+
+    #[test]
+    fn test_assignable_tuples() {
+        let tuple1 = Ty::tuple(
+            vec![Ty::int(IntBits::I64, 0..3), Ty::bool(4..8)],
+            0..9,
+        );
+        let tuple2 = Ty::tuple(
+            vec![Ty::int(IntBits::I64, 10..13), Ty::bool(14..18)],
+            10..19,
+        );
+        assert!(tuple1.is_assignable_to(&tuple2));
+
+        // Different element types
+        let tuple3 = Ty::tuple(
+            vec![Ty::string(0..6), Ty::bool(7..11)],
+            0..12,
+        );
+        assert!(!tuple1.is_assignable_to(&tuple3));
+
+        // Different lengths
+        let tuple4 = Ty::tuple(
+            vec![Ty::int(IntBits::I64, 0..3)],
+            0..4,
+        );
+        assert!(!tuple1.is_assignable_to(&tuple4));
+    }
+
+    #[test]
+    fn test_assignable_arrays() {
+        let arr1 = Ty::array(Ty::int(IntBits::I64, 0..3), 0..5);
+        let arr2 = Ty::array(Ty::int(IntBits::I64, 6..9), 6..11);
+        assert!(arr1.is_assignable_to(&arr2));
+
+        // Different element types
+        let arr3 = Ty::array(Ty::string(0..6), 0..8);
+        assert!(!arr1.is_assignable_to(&arr3));
+    }
+
+    #[test]
+    fn test_assignable_functions() {
+        let fn1 = Ty::function(
+            vec![Ty::int(IntBits::I64, 0..3)],
+            Ty::bool(4..8),
+            0..9,
+        );
+        let fn2 = Ty::function(
+            vec![Ty::int(IntBits::I64, 10..13)],
+            Ty::bool(14..18),
+            10..19,
+        );
+        assert!(fn1.is_assignable_to(&fn2));
+
+        // Different param types
+        let fn3 = Ty::function(
+            vec![Ty::string(0..6)],
+            Ty::bool(7..11),
+            0..12,
+        );
+        assert!(!fn1.is_assignable_to(&fn3));
+
+        // Different return type
+        let fn4 = Ty::function(
+            vec![Ty::int(IntBits::I64, 0..3)],
+            Ty::string(4..10),
+            0..11,
+        );
+        assert!(!fn1.is_assignable_to(&fn4));
+
+        // Different arity
+        let fn5 = Ty::function(
+            vec![Ty::int(IntBits::I64, 0..3), Ty::int(IntBits::I64, 4..7)],
+            Ty::bool(8..12),
+            0..13,
+        );
+        assert!(!fn1.is_assignable_to(&fn5));
+    }
+
+    #[test]
+    fn test_int_bit_widths_not_assignable() {
+        let i32_ty = Ty::int(IntBits::I32, 0..3);
+        let i64_ty = Ty::int(IntBits::I64, 0..3);
+
+        // Different bit widths are not assignable
+        assert!(!i32_ty.is_assignable_to(&i64_ty));
+        assert!(!i64_ty.is_assignable_to(&i32_ty));
     }
 }

@@ -320,4 +320,35 @@ mod tests {
         assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
         assert_eq!(children[1].kind(), SyntaxKind::InitializerDeclaration);
     }
+
+    #[test]
+    fn test_struct_with_semicolon_separated_fields() {
+        // Test inline fields separated by semicolons
+        let decl = parse("struct Point { var x: Int; var y: Int }");
+        let children = decl.children();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::FieldDeclaration);
+    }
+
+    #[test]
+    fn test_struct_with_semicolon_separated_fields_trailing() {
+        // Test inline fields with trailing semicolon
+        let decl = parse("struct Point { var x: Int; var y: Int; }");
+        let children = decl.children();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::FieldDeclaration);
+    }
+
+    #[test]
+    fn test_struct_with_mixed_field_separators() {
+        // Test mixing semicolons and newlines
+        let decl = parse("struct Point { var x: Int; var y: Int\nvar z: Int }");
+        let children = decl.children();
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[1].kind(), SyntaxKind::FieldDeclaration);
+        assert_eq!(children[2].kind(), SyntaxKind::FieldDeclaration);
+    }
 }

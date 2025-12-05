@@ -28,7 +28,8 @@ use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
 use super::members::resolve_member_call;
 use super::utils::{
-    create_struct_type, format_type, get_callable_behavior, is_expression_kind, matches_signature,
+    create_generic_struct_type, create_struct_type, format_type, get_callable_behavior,
+    is_expression_kind, matches_signature,
 };
 
 /// Resolve a call expression: callee(arg1, arg2, ...)
@@ -521,7 +522,9 @@ fn resolve_implicit_init(
 
     // All checks passed - create ImplicitStructInit expression
     // Create the actual struct type using the struct symbol
-    let struct_ty = create_struct_type(&struct_symbol, span.clone());
+    // For generic structs, infer type arguments from argument types
+    let arg_types: Vec<_> = arguments.iter().map(|a| a.value.ty.clone()).collect();
+    let struct_ty = create_generic_struct_type(&struct_symbol, &fields, &arg_types, span.clone());
 
     Expression::implicit_struct_init(struct_ty, arguments, span)
 }

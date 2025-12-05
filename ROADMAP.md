@@ -221,14 +221,23 @@
   - [x] Functions with non-unit return types checked
   - [x] Control flow analysis for all code paths
   - [x] Handles if/else, loops, early returns
-- [ ] Never Type Propagation
-  - [ ] Expressions containing Never propagate correctly
-  - [ ] Type compatibility with Never
-- [ ] Type Checking - Full type validation
-  - [ ] Return type checking (return expr matches declared type)
-  - [ ] Assignment type checking
-  - [ ] Function argument type checking
-  - [ ] Binary/unary operator type checking
+- [x] Never Type Propagation
+  - [x] Expressions containing Never propagate correctly
+  - [x] Type compatibility with Never (Ty::join)
+- [x] Type Checking - Full type validation
+  - [x] Return type checking (return expr matches declared type)
+  - [x] Assignment type checking
+  - [x] Variable binding type checking
+  - [x] Function/initializer argument type checking
+  - [x] If/while condition must be Bool
+  - [x] If branch types must match (when used as expression)
+  - [x] Array element types must be consistent
+  - [x] Struct nominal equality (different structs are incompatible)
+  - [x] Generic struct type inference in implicit init
+- [ ] Tuple Indexing - `tuple.0`, `tuple.1`
+  - [ ] Parser support for integer member access
+  - [ ] Semantic validation (index in bounds)
+  - [ ] Type resolution (element type at index)
 
 ## Phase 6: Type System Completion
 
@@ -300,25 +309,28 @@
 
 ## Current Status
 
-**Phase**: Phase 5 (Validation & Type Checking) - IN PROGRESS
-**Progress**: Phases 1-4 complete.
+**Phase**: Phase 5 (Validation & Type Checking) - NEARLY COMPLETE
+**Progress**: Phases 1-5 mostly complete. Only tuple indexing remains in Phase 5.
 
-**Recently Completed (Phase 4)**:
+**Recently Completed (Phase 5)**:
 
-- If expressions with else/else-if chains
-- While loops with optional labels
-- Loop (infinite loop with break)
-- Break/continue with optional labels
-- Return expressions with optional value
-- Initializer verification with control flow analysis
-- Dead code detection (warnings for unreachable code)
-- Exhaustive return analysis (all paths must return)
+- Never type propagation with Ty::join()
+- Full type checking via TypeCheckValidator:
+  - Return type checking
+  - Assignment type checking
+  - Variable binding type checking
+  - Function/initializer argument type checking
+  - If/while condition must be Bool
+  - If branch type matching
+  - Array element type consistency
+  - Struct nominal equality
+  - Generic struct type inference in implicit init
+- Parser fix: inline semicolon-separated field declarations
 
 **Next Tasks**:
 
-1. Never type propagation
-2. Type checking (return types, assignments, arguments)
-3. Type inference
+1. Tuple indexing (`tuple.0`, `tuple.1`)
+2. Type inference (Phase 6)
 
 ## Notes
 

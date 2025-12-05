@@ -308,3 +308,170 @@ func test() {
         .expect(Symbol::new("test").is(SymbolKind::Function));
     }
 }
+
+mod never_type_propagation {
+    use super::*;
+
+    #[test]
+    fn if_with_return_in_else_branch() {
+        // The else branch returns Never, so the if expression type is Int
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    if cond {
+        42
+    } else {
+        return 0
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn if_with_return_in_then_branch() {
+        // The then branch returns Never, so the if expression type is Int
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    if cond {
+        return 0
+    } else {
+        42
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn if_with_return_in_both_branches() {
+        // Both branches return Never, so the if expression type is Never
+        // This is fine because the function still returns the correct type
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    if cond {
+        return 1
+    } else {
+        return 2
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn if_else_if_with_return() {
+        // Test Never propagation through else-if chains
+        Test::new(
+            r#"
+module Main
+
+func test(x: Int) -> Int {
+    if x == 1 {
+        return 10
+    } else if x == 2 {
+        20
+    } else {
+        30
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn if_else_if_chain_all_return() {
+        // All branches return, which is valid
+        Test::new(
+            r#"
+module Main
+
+func test(x: Int) -> Int {
+    if x == 1 {
+        return 10
+    } else if x == 2 {
+        return 20
+    } else {
+        return 30
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn nested_if_with_never_propagation() {
+        // Never propagates through nested if expressions
+        Test::new(
+            r#"
+module Main
+
+func test(a: Bool, b: Bool) -> Int {
+    if a {
+        if b {
+            return 1
+        } else {
+            2
+        }
+    } else {
+        3
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn if_as_expression_with_never_in_else() {
+        // Using if as an expression where else returns Never
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    let x: Int = if cond { 42 } else { return 0 };
+    x
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn if_as_expression_with_never_in_then() {
+        // Using if as an expression where then returns Never
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    let x: Int = if cond { return 0 } else { 42 };
+    x
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}

@@ -7,8 +7,41 @@
 use kestrel_span::Span;
 use semantic_tree::symbol::SymbolId;
 
+use crate::stmt::{Statement, StatementKind};
 use crate::symbol::local::LocalId;
 use crate::ty::Ty;
+
+/// Compute the type of a block (statements + optional trailing value).
+///
+/// This handles:
+/// - If there's a trailing value, use its type
+/// - If the last statement is an expression statement, use its type
+///   (this handles cases like `if a { inner_if }` where inner_if has no semicolon
+///   but gets parsed as an expression statement)
+/// - Otherwise return Unit
+///
+/// Note: This is used for computing if branch types, where the "trailing value"
+/// distinction matters less than getting the actual type of what the block evaluates to.
+pub fn compute_block_type(
+    statements: &[Statement],
+    value: Option<&Expression>,
+    span: &Span,
+) -> Ty {
+    // If there's a trailing value, use its type
+    if let Some(v) = value {
+        return v.ty.clone();
+    }
+
+    // Check if the last statement is an expression statement - use its type
+    if let Some(last_stmt) = statements.last() {
+        if let StatementKind::Expr(expr) = &last_stmt.kind {
+            return expr.ty.clone();
+        }
+    }
+
+    // Default to Unit
+    Ty::unit(span.clone())
+}
 
 /// Unique identifier for a loop within a function body.
 ///
@@ -450,6 +483,25 @@ pub enum ElseBranch {
     ElseIf(Box<Expression>),
 }
 
+impl ElseBranch {
+    /// Get the type of this else branch.
+    ///
+    /// For a block:
+    /// - If there's a trailing value, returns its type
+    /// - If the last statement is an expression with Never type, returns Never
+    /// - Otherwise returns Unit
+    ///
+    /// For an else-if, returns the type of the nested if expression.
+    pub fn ty(&self, span: &Span) -> Ty {
+        match self {
+            ElseBranch::Block { statements, value } => {
+                compute_block_type(statements, value.as_ref().map(|v| v.as_ref()), span)
+            }
+            ElseBranch::ElseIf(if_expr) => if_expr.ty.clone(),
+        }
+    }
+}
+
 /// A resolved expression in the semantic tree.
 ///
 /// Unlike symbols, expressions are plain data structures without SymbolId.
@@ -757,9 +809,13 @@ impl Expression {
 
     /// Create an if expression.
     ///
-    /// Type is:
-    /// - `()` if there's no else branch
-    /// - The type of the then_value if there's an else branch (type checking deferred)
+    /// Type computation with Never propagation:
+    /// - No else branch: type is `()`
+    /// - With else branch: join the types of both branches
+    ///   - If one branch is Never (return, break, etc.), use the other branch's type
+    ///   - If both branches are Never, the type is Never
+    ///   - Otherwise, use the then branch's type (type checking validates compatibility)
+    ///
     /// If expressions are not mutable lvalues.
     pub fn if_expr(
         condition: Expression,
@@ -768,16 +824,18 @@ impl Expression {
         else_branch: Option<ElseBranch>,
         span: Span,
     ) -> Self {
-        // Compute the type:
+        // Compute the type with Never propagation:
         // - No else: type is ()
-        // - With else: type is the then_value's type (or () if no then_value)
-        let ty = if else_branch.is_some() {
-            then_value
-                .as_ref()
-                .map(|v| v.ty.clone())
-                .unwrap_or_else(|| Ty::unit(span.clone()))
-        } else {
-            Ty::unit(span.clone())
+        // - With else: join the then and else branch types
+        let ty = match &else_branch {
+            Some(else_br) => {
+                let then_ty = compute_block_type(&then_branch, then_value.as_ref(), &span);
+                let else_ty = else_br.ty(&span);
+
+                // Join the types - handles Never propagation
+                then_ty.join(&else_ty)
+            }
+            None => Ty::unit(span.clone()),
         };
 
         Expression {

@@ -1,0 +1,1317 @@
+//! Type checking validation tests
+//!
+//! These tests verify that the type checker catches type mismatches.
+
+use kestrel_test_suite::*;
+
+mod return_types {
+    use super::*;
+
+    #[test]
+    fn return_wrong_type() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    return "hello"
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn return_int_for_string() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> String {
+    return 42
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn return_bool_for_int() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    return true
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn bare_return_in_non_unit_function() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    return
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn bare_return_in_unit_function_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    return
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn return_unit_for_int() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    return ()
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn implicit_return_wrong_type() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    "not an int"
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn return_tuple_for_int() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    return (1, 2)
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn return_array_for_int() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    return [1, 2, 3]
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn correct_return_type_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    return 42
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod assignment_types {
+    use super::*;
+
+    #[test]
+    fn assign_string_to_int_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    x = "hello"
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn assign_bool_to_string_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: String = "hello";
+    x = true
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn assign_int_to_bool_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Bool = true;
+    x = 42
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn assign_tuple_to_int_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    x = (1, 2)
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn assign_correct_type_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    x = 42
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn assign_to_struct_field_wrong_type() {
+        Test::new(
+            r#"
+module Main
+
+struct Point {
+    var x: Int
+    var y: Int
+}
+
+func test() {
+    var p: Point = Point(x: 0, y: 0);
+    p.x = "not an int"
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+}
+
+mod variable_binding_types {
+    use super::*;
+
+    #[test]
+    fn bind_string_to_int_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x: Int = "hello";
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn bind_bool_to_string_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x: String = false;
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn bind_int_to_bool_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Bool = 123;
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn bind_tuple_to_int_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x: Int = (1, 2, 3);
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn bind_array_to_int_variable() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x: Int = [1, 2, 3];
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn bind_correct_type_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x: Int = 42;
+    let y: String = "hello";
+    let z: Bool = true;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod condition_types {
+    use super::*;
+
+    #[test]
+    fn if_condition_int() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    if 42 {
+        let x: Int = 1;
+    }
+}
+"#,
+        )
+        .expect(HasError("must be `Bool`"));
+    }
+
+    #[test]
+    fn if_condition_string() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    if "hello" {
+        let x: Int = 1;
+    }
+}
+"#,
+        )
+        .expect(HasError("must be `Bool`"));
+    }
+
+    #[test]
+    fn while_condition_int() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    while 42 {
+        let x: Int = 1;
+    }
+}
+"#,
+        )
+        .expect(HasError("must be `Bool`"));
+    }
+
+    #[test]
+    fn while_condition_string() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    while "hello" {
+        let x: Int = 1;
+    }
+}
+"#,
+        )
+        .expect(HasError("must be `Bool`"));
+    }
+
+    #[test]
+    fn if_condition_tuple() {
+        // Use a variable to avoid parsing ambiguity with if (...)
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t: (Bool, Bool) = (true, false);
+    if t {
+        let x: Int = 1;
+    }
+}
+"#,
+        )
+        .expect(HasError("must be `Bool`"));
+    }
+
+    #[test]
+    fn if_condition_unit() {
+        // Use a variable to avoid parsing ambiguity
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let u: () = ();
+    if u {
+        let x: Int = 1;
+    }
+}
+"#,
+        )
+        .expect(HasError("must be `Bool`"));
+    }
+
+    #[test]
+    fn if_condition_bool_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    if true {
+        let x: Int = 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn while_condition_bool_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    while false {
+        let x: Int = 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn if_condition_comparison_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x: Int = 5;
+    if x == 5 {
+        let y: Int = 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod branch_types {
+    use super::*;
+
+    #[test]
+    fn if_else_branches_mismatch_int_string() {
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    if cond {
+        42
+    } else {
+        "hello"
+    }
+}
+"#,
+        )
+        .expect(HasError("incompatible types"));
+    }
+
+    #[test]
+    fn if_else_branches_mismatch_bool_int() {
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    if cond {
+        true
+    } else {
+        42
+    }
+}
+"#,
+        )
+        .expect(HasError("incompatible types"));
+    }
+
+    #[test]
+    fn if_else_branches_mismatch_tuple_int() {
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    if cond {
+        (1, 2)
+    } else {
+        42
+    }
+}
+"#,
+        )
+        .expect(HasError("incompatible types"));
+    }
+
+    #[test]
+    fn if_else_if_else_branches_mismatch() {
+        Test::new(
+            r#"
+module Main
+
+func test(x: Int) -> Int {
+    if x == 1 {
+        10
+    } else if x == 2 {
+        "twenty"
+    } else {
+        30
+    }
+}
+"#,
+        )
+        .expect(HasError("incompatible types"));
+    }
+
+    #[test]
+    fn if_else_branches_same_type_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    if cond {
+        42
+    } else {
+        0
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn if_without_else_unit_ok() {
+        // Without else, if has type Unit - no branch mismatch
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) {
+    if cond {
+        let x: Int = 42;
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn nested_if_else_mismatch() {
+        Test::new(
+            r#"
+module Main
+
+func test(a: Bool, b: Bool) -> Int {
+    if a {
+        if b {
+            42
+        } else {
+            "wrong"
+        }
+    } else {
+        0
+    }
+}
+"#,
+        )
+        .expect(HasError("incompatible types"));
+    }
+}
+
+mod call_argument_types {
+    use super::*;
+
+    #[test]
+    fn call_with_wrong_arg_type() {
+        Test::new(
+            r#"
+module Main
+
+func greet(name: String) {}
+
+func test() {
+    greet(42)
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn call_with_wrong_second_arg() {
+        Test::new(
+            r#"
+module Main
+
+func add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+func test() {
+    add(1, "two")
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn call_with_wrong_first_arg() {
+        Test::new(
+            r#"
+module Main
+
+func add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+func test() {
+    add("one", 2)
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn call_with_tuple_for_int() {
+        Test::new(
+            r#"
+module Main
+
+func double(x: Int) -> Int {
+    x + x
+}
+
+func test() {
+    double((1, 2))
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn call_with_correct_args_ok() {
+        Test::new(
+            r#"
+module Main
+
+func add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+func test() -> Int {
+    add(1, 2)
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn method_call_with_wrong_arg() {
+        Test::new(
+            r#"
+module Main
+
+struct Calculator {
+    var value: Int
+
+    func add(x: Int) -> Int {
+        self.value + x
+    }
+}
+
+func test() {
+    let calc: Calculator = Calculator(value: 10);
+    calc.add("five")
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+}
+
+mod struct_init_types {
+    use super::*;
+
+    #[test]
+    fn struct_init_wrong_field_type() {
+        Test::new(
+            r#"
+module Main
+
+struct Point {
+    var x: Int
+    var y: Int
+}
+
+func test() {
+    let p: Point = Point(x: "zero", y: 0);
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn struct_init_wrong_second_field_type() {
+        Test::new(
+            r#"
+module Main
+
+struct Point {
+    var x: Int
+    var y: Int
+}
+
+func test() {
+    let p: Point = Point(x: 0, y: "zero");
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn struct_init_all_fields_wrong() {
+        Test::new(
+            r#"
+module Main
+
+struct Point {
+    var x: Int
+    var y: Int
+}
+
+func test() {
+    let p: Point = Point(x: "a", y: "b");
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn struct_init_correct_types_ok() {
+        Test::new(
+            r#"
+module Main
+
+struct Point {
+    var x: Int
+    var y: Int
+}
+
+func test() {
+    let p: Point = Point(x: 10, y: 20);
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn struct_init_bool_for_int() {
+        Test::new(
+            r#"
+module Main
+
+struct Config {
+    var count: Int
+    var enabled: Bool
+}
+
+func test() {
+    let c: Config = Config(count: true, enabled: 42);
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+}
+
+mod array_element_types {
+    use super::*;
+
+    #[test]
+    fn array_mixed_int_string() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let arr: [Int] = [1, "two", 3];
+}
+"#,
+        )
+        .expect(HasError("array element type mismatch"));
+    }
+
+    #[test]
+    fn array_mixed_int_bool() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let arr: [Int] = [1, 2, true];
+}
+"#,
+        )
+        .expect(HasError("array element type mismatch"));
+    }
+
+    #[test]
+    fn array_mixed_string_int() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let arr: [String] = ["hello", 42];
+}
+"#,
+        )
+        .expect(HasError("array element type mismatch"));
+    }
+
+    #[test]
+    fn array_all_same_type_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let ints: [Int] = [1, 2, 3];
+    let strings: [String] = ["a", "b", "c"];
+    let bools: [Bool] = [true, false, true];
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn array_single_element_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let arr: [Int] = [42];
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn array_mixed_multiple_wrong() {
+        // Multiple type errors in one array
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let arr: [Int] = [1, "two", true, 4.0];
+}
+"#,
+        )
+        .expect(HasError("array element type mismatch"));
+    }
+}
+
+mod never_type {
+    use super::*;
+
+    #[test]
+    fn never_in_if_else_ok() {
+        // Never type propagates correctly
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    if cond {
+        42
+    } else {
+        return 0
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn never_in_both_branches_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test(cond: Bool) -> Int {
+    if cond {
+        return 1
+    } else {
+        return 2
+    }
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn break_propagates_never() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    loop {
+        if true {
+            break
+        } else {
+            return 42
+        }
+    }
+    0
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod struct_types {
+    use super::*;
+
+    // TODO: These tests are disabled because struct type comparison by SymbolId
+    // is not working correctly when structs are from different type resolution paths.
+    // This needs investigation - the struct types should have different IDs but
+    // they're being treated as compatible.
+
+    #[test]
+    fn assign_different_struct_types() {
+        Test::new(
+            r#"
+module Main
+
+struct Point { var x: Int; var y: Int }
+struct Size { var width: Int; var height: Int }
+
+func test() {
+    var p: Point = Point(x: 0, y: 0);
+    let s: Size = Size(width: 10, height: 20);
+    p = s
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn return_wrong_struct_type() {
+        Test::new(
+            r#"
+module Main
+
+struct Point { var x: Int; var y: Int }
+struct Size { var width: Int; var height: Int }
+
+func makePoint() -> Point {
+    Size(width: 10, height: 20)
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn pass_wrong_struct_to_function() {
+        Test::new(
+            r#"
+module Main
+
+struct Point { var x: Int; var y: Int }
+struct Size { var width: Int; var height: Int }
+
+func usePoint(p: Point) {}
+
+func test() {
+    usePoint(Size(width: 10, height: 20))
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn same_struct_type_ok() {
+        Test::new(
+            r#"
+module Main
+
+struct Point { var x: Int; var y: Int }
+
+func test() {
+    var p1: Point = Point(x: 0, y: 0);
+    let p2: Point = Point(x: 1, y: 1);
+    p1 = p2
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod tuple_types {
+    use super::*;
+
+    #[test]
+    fn tuple_wrong_element_count() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t: (Int, Int) = (1, 2, 3);
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn tuple_wrong_element_types() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t: (Int, String) = (1, 2);
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn tuple_correct_ok() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t: (Int, String, Bool) = (42, "hello", true);
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod function_types {
+    use super::*;
+
+    // Note: We can't easily test function type mismatches yet since
+    // we don't have closures or function references fully implemented.
+    // These tests are placeholders for future features.
+
+    #[test]
+    fn function_returning_function_ok() {
+        // Functions with function return types should compile
+        // when returning the right type
+        Test::new(
+            r#"
+module Main
+
+func identity(x: Int) -> Int { x }
+"#,
+        )
+        .expect(Compiles);
+    }
+}
+
+mod edge_cases {
+    use super::*;
+
+    #[test]
+    fn deeply_nested_type_mismatch() {
+        Test::new(
+            r#"
+module Main
+
+func test(a: Bool, b: Bool, c: Bool) -> Int {
+    if a {
+        if b {
+            if c {
+                42
+            } else {
+                "wrong"
+            }
+        } else {
+            0
+        }
+    } else {
+        0
+    }
+}
+"#,
+        )
+        .expect(HasError("incompatible types"));
+    }
+
+    #[test]
+    fn chained_assignments_type_mismatch() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    var y: String = "hello";
+    x = 42;
+    y = x
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn return_from_nested_if() {
+        Test::new(
+            r#"
+module Main
+
+func test(a: Bool, b: Bool) -> Int {
+    if a {
+        if b {
+            return "wrong"
+        }
+        1
+    } else {
+        2
+    }
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn while_with_wrong_return() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    while true {
+        return "not an int"
+    }
+    0
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn loop_with_wrong_return() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    loop {
+        return "not an int"
+    }
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn multiple_errors_in_function() {
+        // Should catch at least one error
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    let x: Int = "wrong1";
+    let y: String = 42;
+    return true
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+}
+
+mod type_alias {
+    use super::*;
+
+    #[test]
+    fn type_alias_expanded_correctly() {
+        // Type aliases should be expanded for comparison
+        Test::new(
+            r#"
+module Main
+
+type MyInt = Int
+
+func test() {
+    let x: MyInt = 42;
+    let y: Int = x;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn type_alias_mismatch() {
+        Test::new(
+            r#"
+module Main
+
+type MyInt = Int;
+
+func test() {
+    let x: MyInt = "not an int";
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn chained_type_alias() {
+        Test::new(
+            r#"
+module Main
+
+type MyInt = Int;
+type YourInt = MyInt;
+
+func test() {
+    let x: YourInt = 42;
+    let y: Int = x;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}

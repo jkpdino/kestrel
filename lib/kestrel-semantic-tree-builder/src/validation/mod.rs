@@ -32,6 +32,7 @@ mod protocol_method;
 mod static_context;
 mod struct_cycles;
 mod type_alias_cycles;
+mod type_check;
 mod visibility_consistency;
 
 use std::cell::RefCell;
@@ -66,6 +67,7 @@ pub use protocol_method::ProtocolMethodValidator;
 pub use static_context::StaticContextValidator;
 pub use struct_cycles::StructCycleValidator;
 pub use type_alias_cycles::TypeAliasCycleValidator;
+pub use type_check::TypeCheckValidator;
 pub use visibility_consistency::VisibilityConsistencyValidator;
 
 // Keep old names as aliases for backwards compatibility
@@ -277,6 +279,7 @@ impl ValidationRunner {
             Box::new(AssignmentValidator::new()),
             Box::new(DeadCodeValidator::new()),
             Box::new(ExhaustiveReturnValidator::new()),
+            Box::new(TypeCheckValidator::new()),
         ];
 
         Self { validators }

@@ -351,9 +351,10 @@ pub fn function_declaration_parser_internal() -> impl Parser<Token, FunctionDecl
 
 /// Parser for a field declaration
 ///
-/// Syntax: `(visibility)? (static)? let/var name: Type`
+/// Syntax: `(visibility)? (static)? let/var name: Type (;)?`
 ///
 /// This is the single source of truth for field declaration parsing.
+/// An optional trailing semicolon is allowed for inline field declarations.
 pub fn field_declaration_parser_internal() -> impl Parser<Token, FieldDeclarationData, Error = Simple<Token>> + Clone {
     visibility_parser_internal()
         .then(static_parser())
@@ -361,7 +362,8 @@ pub fn field_declaration_parser_internal() -> impl Parser<Token, FieldDeclaratio
         .then(identifier())
         .then(token(Token::Colon))
         .then(ty_parser())
-        .map(|(((((visibility, is_static), (mutability_span, is_mutable)), name_span), colon_span), ty)| {
+        .then(token(Token::Semicolon).or_not())
+        .map(|((((((visibility, is_static), (mutability_span, is_mutable)), name_span), colon_span), ty), semicolon)| {
             FieldDeclarationData {
                 visibility,
                 is_static,
@@ -370,6 +372,7 @@ pub fn field_declaration_parser_internal() -> impl Parser<Token, FieldDeclaratio
                 name_span,
                 colon_span,
                 ty,
+                semicolon,
             }
         })
 }

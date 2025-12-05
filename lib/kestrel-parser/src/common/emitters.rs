@@ -258,6 +258,11 @@ pub fn emit_field_declaration(sink: &mut EventSink, data: FieldDeclarationData) 
     sink.add_token(SyntaxKind::Colon, data.colon_span);
     emit_ty_variant(sink, &data.ty);
 
+    // Emit optional trailing semicolon
+    if let Some(semicolon_span) = data.semicolon {
+        sink.add_token(SyntaxKind::Semicolon, semicolon_span);
+    }
+
     sink.finish_node();
 }
 

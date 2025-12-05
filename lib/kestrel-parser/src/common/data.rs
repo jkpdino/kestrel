@@ -72,6 +72,8 @@ pub struct FieldDeclarationData {
     pub name_span: Span,
     pub colon_span: Span,
     pub ty: TyVariant,
+    /// Optional trailing semicolon (for inline field declarations)
+    pub semicolon: Option<Span>,
 }
 
 /// Raw parsed data for initializer declaration internals

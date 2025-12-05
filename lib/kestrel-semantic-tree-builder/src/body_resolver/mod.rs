@@ -26,3 +26,4 @@ mod utils;
 
 // Re-export main public interface
 pub use context::{BodyResolutionContext, resolve_and_attach_body, resolve_function_body};
+pub use utils::format_type;

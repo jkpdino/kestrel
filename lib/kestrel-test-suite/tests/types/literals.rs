@@ -159,18 +159,27 @@ mod arrays {
 
     #[test]
     fn array_of_various_types() {
-        // Test arrays containing strings, booleans, and mixed types
+        // Test arrays containing strings and booleans
         Test::new(
             r#"module Test
             func of_strings() { ["hello", "world"] }
             func of_booleans() { [true, false, true] }
-            func mixed_types() { [1, "hello", true] }
         "#,
         )
         .expect(Compiles)
         .expect(Symbol::new("of_strings").is(SymbolKind::Function))
-        .expect(Symbol::new("of_booleans").is(SymbolKind::Function))
-        .expect(Symbol::new("mixed_types").is(SymbolKind::Function));
+        .expect(Symbol::new("of_booleans").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn array_mixed_types_error() {
+        // Arrays with mixed element types should produce an error
+        Test::new(
+            r#"module Test
+            func mixed_types() { [1, "hello", true] }
+        "#,
+        )
+        .expect(HasError("array element type mismatch"));
     }
 }
 

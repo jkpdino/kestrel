@@ -6,11 +6,12 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::callable::CallableBehavior;
+use kestrel_semantic_tree::behavior::typed::TypedBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 use semantic_tree::symbol::Symbol;
@@ -95,6 +96,76 @@ pub fn create_struct_type(struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>, span
             Ty::error(span)
         }
     }
+}
+
+/// Create a generic struct type with substitutions inferred from argument types.
+///
+/// This is used for implicit struct initialization where the type arguments
+/// need to be inferred from the argument values' types.
+///
+/// # Arguments
+/// * `struct_symbol` - The struct symbol
+/// * `fields` - The struct's fields (in order)
+/// * `arguments` - The argument types being passed to the fields
+/// * `span` - The span for the created type
+pub fn create_generic_struct_type(
+    struct_symbol: &Arc<dyn Symbol<KestrelLanguage>>,
+    fields: &[Arc<dyn Symbol<KestrelLanguage>>],
+    arguments: &[Ty],
+    span: Span,
+) -> Ty {
+    let sym_clone = Arc::clone(struct_symbol);
+
+    match sym_clone.downcast_arc::<StructSymbol>() {
+        Ok(struct_arc) => {
+            let type_params = struct_arc.type_parameters();
+
+            // If not generic, just create a simple struct type
+            if type_params.is_empty() {
+                return Ty::r#struct(struct_arc, span);
+            }
+
+            // Build substitutions by matching field types to argument types
+            let mut substitutions = Substitutions::new();
+
+            for (field, arg_ty) in fields.iter().zip(arguments.iter()) {
+                // Get the field's declared type
+                let field_ty = get_field_type(field);
+
+                // If the field type is a type parameter, map it to the argument type
+                if let Some(TyKind::TypeParameter(param)) = field_ty.map(|t| t.kind().clone()) {
+                    let param_id = param.metadata().id();
+                    // Only insert if this type parameter belongs to this struct
+                    if type_params.iter().any(|p| p.metadata().id() == param_id) {
+                        substitutions.insert(param_id, arg_ty.clone());
+                    }
+                }
+            }
+
+            // Fill in any missing type parameters with inferred type
+            for param in type_params {
+                let param_id = param.metadata().id();
+                if !substitutions.contains(param_id) {
+                    substitutions.insert(param_id, Ty::inferred(span.clone()));
+                }
+            }
+
+            Ty::generic_struct(struct_arc, substitutions, span)
+        }
+        Err(_) => Ty::error(span),
+    }
+}
+
+/// Get the type from a field symbol's TypedBehavior
+fn get_field_type(field: &Arc<dyn Symbol<KestrelLanguage>>) -> Option<Ty> {
+    for behavior in field.metadata().behaviors() {
+        if behavior.kind() == KestrelBehaviorKind::Typed {
+            if let Some(typed) = behavior.as_ref().downcast_ref::<TypedBehavior>() {
+                return Some(typed.ty().clone());
+            }
+        }
+    }
+    None
 }
 
 /// Get the container symbol from a type (for member lookup)
