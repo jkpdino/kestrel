@@ -347,6 +347,9 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
             ExprKind::FieldAccess { object, field } => {
                 format!("{}.{}", format_expr_value(object), field)
             }
+            ExprKind::TupleIndex { tuple, index } => {
+                format!("{}.{}", format_expr_value(tuple), index)
+            }
             ExprKind::MethodRef { receiver, method_name, .. } => {
                 format!("{}.{}", format_expr_value(receiver), method_name)
             }

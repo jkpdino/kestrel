@@ -116,3 +116,59 @@ impl IntoDiagnostic for CannotAccessMemberOnTypeError {
             )])
     }
 }
+
+/// Error when tuple index is out of bounds.
+pub struct TupleIndexOutOfBoundsError {
+    /// Span of the index
+    pub index_span: Span,
+    /// The index that was accessed
+    pub index: usize,
+    /// The number of elements in the tuple
+    pub tuple_length: usize,
+    /// String representation of the tuple type
+    pub tuple_type: String,
+}
+
+impl IntoDiagnostic for TupleIndexOutOfBoundsError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "tuple index {} is out of bounds for tuple of length {}",
+                self.index, self.tuple_length
+            ))
+            .with_labels(vec![Label::primary(file_id, self.index_span.clone())
+                .with_message(format!("index {} out of bounds", self.index))])
+            .with_notes(vec![format!(
+                "type '{}' has {} element{}",
+                self.tuple_type,
+                self.tuple_length,
+                if self.tuple_length == 1 { "" } else { "s" }
+            )])
+    }
+}
+
+/// Error when trying to use tuple indexing on a non-tuple type.
+pub struct TupleIndexOnNonTupleError {
+    /// Span of the entire expression
+    pub span: Span,
+    /// The index that was accessed
+    pub index: usize,
+    /// String representation of the base type
+    pub base_type: String,
+}
+
+impl IntoDiagnostic for TupleIndexOnNonTupleError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "cannot use tuple index on type '{}'",
+                self.base_type
+            ))
+            .with_labels(vec![Label::primary(file_id, self.span.clone())
+                .with_message("not a tuple type")])
+            .with_notes(vec![format!(
+                "tuple indexing (e.g., '.{}') can only be used on tuple types",
+                self.index
+            )])
+    }
+}

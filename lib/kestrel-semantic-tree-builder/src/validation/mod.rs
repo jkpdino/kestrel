@@ -430,6 +430,9 @@ fn walk_expression(expr: &Expression, validators: &[&dyn Validator], ctx: &BodyC
         ExprKind::FieldAccess { object, .. } => {
             walk_expression(object, validators, ctx);
         }
+        ExprKind::TupleIndex { tuple, .. } => {
+            walk_expression(tuple, validators, ctx);
+        }
         ExprKind::MethodRef { receiver, .. } => {
             walk_expression(receiver, validators, ctx);
         }

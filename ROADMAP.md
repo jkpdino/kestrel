@@ -234,10 +234,12 @@
   - [x] Array element types must be consistent
   - [x] Struct nominal equality (different structs are incompatible)
   - [x] Generic struct type inference in implicit init
-- [ ] Tuple Indexing - `tuple.0`, `tuple.1`
-  - [ ] Parser support for integer member access
-  - [ ] Semantic validation (index in bounds)
-  - [ ] Type resolution (element type at index)
+- [x] Tuple Indexing - `tuple.0`, `tuple.1`
+  - [x] Parser support for integer member access
+  - [x] Semantic validation (index in bounds)
+  - [x] Type resolution (element type at index)
+  - [x] Mutability support (assignment to tuple elements)
+  - Note: Chained access (`t.0.1`) requires intermediate variables due to lexer ambiguity
 
 ## Phase 6: Type System Completion
 
@@ -309,8 +311,8 @@
 
 ## Current Status
 
-**Phase**: Phase 5 (Validation & Type Checking) - NEARLY COMPLETE
-**Progress**: Phases 1-5 mostly complete. Only tuple indexing remains in Phase 5.
+**Phase**: Phase 5 (Validation & Type Checking) - COMPLETE ✓
+**Progress**: Phases 1-5 complete. Ready for Phase 6.
 
 **Recently Completed (Phase 5)**:
 
@@ -326,11 +328,14 @@
   - Struct nominal equality
   - Generic struct type inference in implicit init
 - Parser fix: inline semicolon-separated field declarations
+- Tuple indexing (`tuple.0`, `tuple.1`)
+  - Parser, resolution, type checking, assignment support
+  - Known limitation: chained access requires intermediate variables
 
 **Next Tasks**:
 
-1. Tuple indexing (`tuple.0`, `tuple.1`)
-2. Type inference (Phase 6)
+1. Type inference (Phase 6)
+2. Generic constraint enforcement (Phase 6)
 
 ## Notes
 

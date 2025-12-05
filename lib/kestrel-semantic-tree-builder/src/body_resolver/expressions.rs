@@ -10,7 +10,10 @@ use kestrel_semantic_tree::ty::Ty;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_reporting::IntoDiagnostic;
 
-use crate::diagnostics::{BreakOutsideLoopError, ContinueOutsideLoopError, UndeclaredLabelError};
+use crate::diagnostics::{
+    BreakOutsideLoopError, ContinueOutsideLoopError, TupleIndexOnNonTupleError,
+    TupleIndexOutOfBoundsError, UndeclaredLabelError,
+};
 use crate::syntax::get_node_span;
 
 use super::calls::resolve_call_expression;
@@ -18,7 +21,7 @@ use super::context::BodyResolutionContext;
 use super::operators::{resolve_binary_expression, resolve_postfix_expression, resolve_unary_expression};
 use super::paths::resolve_path_expression;
 use super::statements::resolve_statement;
-use super::utils::is_expression_kind;
+use super::utils::{format_type, is_expression_kind};
 
 /// Resolve an expression syntax node into a semantic Expression
 pub fn resolve_expression(
@@ -123,6 +126,10 @@ pub fn resolve_expression(
 
         SyntaxKind::ExprReturn => {
             resolve_return_expression(expr_node, ctx)
+        }
+
+        SyntaxKind::ExprTupleIndex => {
+            resolve_tuple_index_expression(expr_node, ctx)
         }
 
         _ => Expression::error(span),
@@ -636,6 +643,76 @@ fn extract_break_continue_label(node: &SyntaxNode) -> Option<LabelInfo> {
                 span: start..end,
             }
         })
+}
+
+/// Resolve a tuple index expression: tuple.0, tuple.1
+fn resolve_tuple_index_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // Find the base expression (first Expression child)
+    let base_node = match node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+    {
+        Some(n) => n,
+        None => return Expression::error(span),
+    };
+
+    // Resolve the base expression
+    let base = resolve_expression(&base_node, ctx);
+
+    // Extract the index from the Integer token
+    let index_token = node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Integer);
+
+    let (index, index_span) = match index_token {
+        Some(token) => {
+            let text_range = token.text_range();
+            let idx_span = text_range.start().into()..text_range.end().into();
+            let index_value = token.text().parse::<usize>().unwrap_or(0);
+            (index_value, idx_span)
+        }
+        None => return Expression::error(span),
+    };
+
+    // Check if the base type is a tuple
+    let base_ty = &base.ty;
+    match base_ty.as_tuple() {
+        Some(elements) => {
+            // Check bounds
+            if index >= elements.len() {
+                let error = TupleIndexOutOfBoundsError {
+                    index_span,
+                    index,
+                    tuple_length: elements.len(),
+                    tuple_type: format_type(base_ty),
+                };
+                ctx.diagnostics
+                    .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                return Expression::error(span);
+            }
+
+            // Get the element type at the index
+            let element_ty = elements[index].clone();
+            Expression::tuple_index(base, index, element_ty, span)
+        }
+        None => {
+            // Not a tuple type
+            let error = TupleIndexOnNonTupleError {
+                span: span.clone(),
+                index,
+                base_type: format_type(base_ty),
+            };
+            ctx.diagnostics
+                .add_diagnostic(error.into_diagnostic(ctx.file_id));
+            Expression::error(span)
+        }
+    }
 }
 
 #[cfg(test)]

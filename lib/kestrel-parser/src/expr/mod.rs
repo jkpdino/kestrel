@@ -175,6 +175,12 @@ pub enum ExprVariant {
         dot: Span,
         member: Span,
     },
+    /// Tuple index expression: tuple.0, tuple.1
+    TupleIndex {
+        base: Box<ExprVariant>,
+        dot: Span,
+        index: Span,
+    },
     /// Unary prefix expression: -expr, !expr, not expr, +expr
     Unary(Token, Span, Box<ExprVariant>), // (operator_token, operator_span, operand)
     /// Postfix expression: expr!
@@ -547,16 +553,20 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 rparen,
             });
 
-        // Member access: .identifier
+        // Member access: .identifier or tuple index: .0, .1
         let member_access = skip_trivia()
             .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
             .then(
                 skip_trivia().ignore_then(filter_map(|span, token| match token {
-                    Token::Identifier => Ok(span),
+                    Token::Identifier => Ok((token, span)),
+                    Token::Integer => Ok((token, span)),
                     _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
                 })),
             )
-            .map(|(dot, member)| PostfixOp::MemberAccess { dot, member });
+            .map(|(dot, (token, span))| match token {
+                Token::Integer => PostfixOp::TupleIndex { dot, index: span },
+                _ => PostfixOp::MemberAccess { dot, member: span },
+            });
 
         // Postfix unwrap operator: expr!
         let postfix_bang = skip_trivia()
@@ -571,16 +581,20 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         let postfix_op = arg_list.clone().or(member_access).or(postfix_bang);
 
         // Postfix expression for conditions: using condition_primary
-        // Supports member access (.foo) and function calls (args use full expr)
+        // Supports member access (.foo), tuple index (.0), and function calls (args use full expr)
         let condition_member_access = skip_trivia()
             .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
             .then(
                 skip_trivia().ignore_then(filter_map(|span, token| match token {
-                    Token::Identifier => Ok(span),
+                    Token::Identifier => Ok((token, span)),
+                    Token::Integer => Ok((token, span)),
                     _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
                 })),
             )
-            .map(|(dot, member)| ConditionPostfixOp::MemberAccess { dot, member });
+            .map(|(dot, (token, span))| match token {
+                Token::Integer => ConditionPostfixOp::TupleIndex { dot, index: span },
+                _ => ConditionPostfixOp::MemberAccess { dot, member: span },
+            });
 
         // Function call arguments use the full expr parser (filled in via recursive reference)
         let condition_call = arg_list.clone().map(|op| match op {
@@ -609,6 +623,11 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                         base: Box::new(acc),
                         dot,
                         member,
+                    },
+                    ConditionPostfixOp::TupleIndex { dot, index } => ExprVariant::TupleIndex {
+                        base: Box::new(acc),
+                        dot,
+                        index,
                     },
                     ConditionPostfixOp::Call {
                         lparen,
@@ -951,6 +970,11 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                         dot,
                         member,
                     },
+                    PostfixOp::TupleIndex { dot, index } => ExprVariant::TupleIndex {
+                        base: Box::new(acc),
+                        dot,
+                        index,
+                    },
                     PostfixOp::PostfixOperator {
                         operator,
                         operator_span,
@@ -1037,6 +1061,8 @@ enum PostfixOp {
     },
     /// Member access: .identifier
     MemberAccess { dot: Span, member: Span },
+    /// Tuple index: .0, .1
+    TupleIndex { dot: Span, index: Span },
     /// Postfix operator: expr!
     PostfixOperator {
         operator: Token,
@@ -1057,6 +1083,8 @@ enum ConditionPostfixOp {
     },
     /// Member access: .identifier
     MemberAccess { dot: Span, member: Span },
+    /// Tuple index: .0, .1
+    TupleIndex { dot: Span, index: Span },
 }
 
 /// Check if an expression variant is "statement-like" (doesn't require semicolon).
@@ -1135,6 +1163,9 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         }
         ExprVariant::MemberAccess { base, dot, member } => {
             emit_member_access_expr(sink, base, dot.clone(), member.clone());
+        }
+        ExprVariant::TupleIndex { base, dot, index } => {
+            emit_tuple_index_expr(sink, base, dot.clone(), index.clone());
         }
         ExprVariant::Unary(tok, span, operand) => {
             emit_unary_expr(sink, tok.clone(), span.clone(), operand);
@@ -1358,6 +1389,19 @@ fn emit_member_access_expr(sink: &mut EventSink, base: &ExprVariant, dot: Span, 
     sink.finish_node();
 }
 
+/// Emit events for a tuple index expression
+fn emit_tuple_index_expr(sink: &mut EventSink, base: &ExprVariant, dot: Span, index: Span) {
+    sink.start_node(SyntaxKind::Expression);
+    sink.start_node(SyntaxKind::ExprTupleIndex);
+    // Emit the base expression
+    emit_expr_variant(sink, base);
+    // Then emit the dot and index
+    sink.add_token(SyntaxKind::Dot, dot);
+    sink.add_token(SyntaxKind::Integer, index);
+    sink.finish_node();
+    sink.finish_node();
+}
+
 /// Helper to emit expression variant without the Expression wrapper
 /// Used for member access where we need to chain path segments
 fn emit_expr_variant_inner(sink: &mut EventSink, variant: &ExprVariant) {
@@ -1376,6 +1420,12 @@ fn emit_expr_variant_inner(sink: &mut EventSink, variant: &ExprVariant) {
             emit_expr_variant_inner(sink, base);
             sink.add_token(SyntaxKind::Dot, dot.clone());
             sink.add_token(SyntaxKind::Identifier, member.clone());
+        }
+        ExprVariant::TupleIndex { base, dot, index } => {
+            // Recursively emit base, then dot and index
+            emit_expr_variant_inner(sink, base);
+            sink.add_token(SyntaxKind::Dot, dot.clone());
+            sink.add_token(SyntaxKind::Integer, index.clone());
         }
         ExprVariant::Call { .. } => {
             // For calls, we need the full expression wrapper for the callee

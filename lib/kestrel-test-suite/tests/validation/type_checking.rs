@@ -1315,3 +1315,154 @@ func test() {
         .expect(Compiles);
     }
 }
+
+mod tuple_indexing {
+    use super::*;
+
+    #[test]
+    fn basic_tuple_index() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t = (1, "hello", true);
+    let x: Int = t.0;
+    let y: String = t.1;
+    let z: Bool = t.2;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn tuple_index_wrong_type() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t = (1, "hello");
+    let x: String = t.0;
+}
+"#,
+        )
+        .expect(HasError("type mismatch"));
+    }
+
+    #[test]
+    fn tuple_index_out_of_bounds() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t = (1, 2);
+    let x = t.5;
+}
+"#,
+        )
+        .expect(HasError("out of bounds"));
+    }
+
+    #[test]
+    fn tuple_index_on_non_tuple() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x = 42;
+    let y = x.0;
+}
+"#,
+        )
+        .expect(HasError("cannot use tuple index"));
+    }
+
+    #[test]
+    fn chained_tuple_index() {
+        // Note: t.0.1 is currently parsed as t.0 (tuple index) then .1 (float literal .1)
+        // due to lexer ambiguity. We work around this by using intermediate variables.
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t = ((1, 2), (3, 4));
+    let inner = t.0;
+    let x: Int = inner.1;
+    let inner2 = t.1;
+    let y: Int = inner2.0;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn tuple_index_mutability() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var t = (1, 2);
+    t.0 = 10;
+    t.1 = 20;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn tuple_index_immutable_error() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t = (1, 2);
+    t.0 = 10;
+}
+"#,
+        )
+        .expect(HasError("cannot assign"));
+    }
+
+    #[test]
+    fn tuple_index_from_function_return() {
+        Test::new(
+            r#"
+module Main
+
+func getTuple() -> (Int, String) {
+    return (42, "hello");
+}
+
+func test() {
+    let x: Int = getTuple().0;
+    let y: String = getTuple().1;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+
+    #[test]
+    fn large_tuple_index() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let t = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+    let x: Int = t.9;
+}
+"#,
+        )
+        .expect(Compiles);
+    }
+}

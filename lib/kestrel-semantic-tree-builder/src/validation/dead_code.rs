@@ -360,6 +360,8 @@ fn analyze_expression(expr: &Expression, errors: &mut Vec<UnreachableCodeWarning
 
         ExprKind::FieldAccess { object, .. } => analyze_expression(object, errors),
 
+        ExprKind::TupleIndex { tuple, .. } => analyze_expression(tuple, errors),
+
         ExprKind::MethodRef { receiver, .. } => analyze_expression(receiver, errors),
 
         ExprKind::PrimitiveMethodCall { receiver, arguments, .. } => {

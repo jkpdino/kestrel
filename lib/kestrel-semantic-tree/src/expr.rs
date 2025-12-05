@@ -340,6 +340,13 @@ pub enum ExprKind {
         field: String,
     },
 
+    /// Tuple index: `tuple.0`, `tuple.1`
+    /// Accesses an element of a tuple by its position.
+    TupleIndex {
+        tuple: Box<Expression>,
+        index: usize,
+    },
+
     // Method references
     /// Method reference: `receiver.method`
     /// Represents a method lookup on a receiver before being called.
@@ -698,6 +705,21 @@ impl Expression {
                 field,
             },
             ty,
+            span,
+            mutable,
+        }
+    }
+
+    /// Create a tuple index expression.
+    /// Mutability depends on the tuple's mutability.
+    pub fn tuple_index(tuple: Expression, index: usize, element_ty: Ty, span: Span) -> Self {
+        let mutable = tuple.mutable;
+        Expression {
+            kind: ExprKind::TupleIndex {
+                tuple: Box::new(tuple),
+                index,
+            },
+            ty: element_ty,
             span,
             mutable,
         }

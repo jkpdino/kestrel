@@ -2,7 +2,7 @@
 
 This file tracks immediate next steps for Phase 5.
 
-## Current Priority: Tuple Indexing
+## Current Priority: Phase 5 Complete
 
 ---
 
@@ -58,24 +58,31 @@ Full type validation across the language.
   - [x] `struct Point { var x: Int; var y: Int }` now parses correctly
   - [x] Optional trailing semicolon on field declarations
 
----
-
-## Next: Tuple Indexing
-
-**Status**: Not started
+### Tuple Indexing
+**Status**: DONE ✓
 
 Access tuple elements by index: `tuple.0`, `tuple.1`
 
 **Implementation**:
-- [ ] Parser support for integer member access
-- [ ] Semantic validation (index within bounds)
-- [ ] Type resolution (element type at index)
+- [x] `SyntaxKind::ExprTupleIndex` - New syntax node for tuple indexing
+- [x] Parser support for integer member access (`.0`, `.1`, etc.)
+- [x] `ExprKind::TupleIndex` - Semantic expression variant
+- [x] `resolve_tuple_index_expression()` - Resolution function
+- [x] `TupleIndexOutOfBoundsError` - Index exceeds tuple length
+- [x] `TupleIndexOnNonTupleError` - Using tuple index on non-tuple type
+- [x] Mutability support (assignment to tuple elements)
+- [x] Integration with validation passes
+
+**Known Limitation**: Chained tuple access (`t.0.1`) is currently lexed as `t.0` followed by float `.1` due to lexer ambiguity. Use intermediate variables as a workaround.
 
 **Example**:
 ```kestrel
 let pair: (Int, String) = (42, "hello")
 let x: Int = pair.0      // 42
 let y: String = pair.1   // "hello"
+
+var mutable = (1, 2)
+mutable.0 = 10           // Assignment works
 ```
 
 ---

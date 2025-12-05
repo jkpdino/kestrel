@@ -97,6 +97,18 @@ fn validate_assignment_target(
                 );
             }
         }
+        ExprKind::TupleIndex { tuple: _, index } => {
+            // Tuple element access - valid lvalue if tuple is mutable
+            if !target.is_mutable() {
+                ctx.diagnostics().get().throw(
+                    CannotAssignToImmutableFieldError {
+                        span: target.span.clone(),
+                        field_name: format!("{}", index),
+                    },
+                    ctx.file_id,
+                );
+            }
+        }
         // Invalid assignment targets - not lvalues at all
         ExprKind::Literal(_)
         | ExprKind::Array(_)

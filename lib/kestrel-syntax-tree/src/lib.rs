@@ -119,6 +119,7 @@ pub enum SyntaxKind {
     ExprBreak,           // break or break label
     ExprContinue,        // continue or continue label
     ExprReturn,          // return or return expr
+    ExprTupleIndex,      // tuple.0, tuple.1 (tuple element access)
     LoopLabel,           // label: (before while/loop)
     ArgumentList,        // (arg1, label: arg2, ...)
     Argument,            // Single argument: expr or label: expr
@@ -379,6 +380,7 @@ impl Language for KestrelLanguage {
         const EXPR_BREAK: u16 = SyntaxKind::ExprBreak as u16;
         const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
         const EXPR_RETURN: u16 = SyntaxKind::ExprReturn as u16;
+        const EXPR_TUPLE_INDEX: u16 = SyntaxKind::ExprTupleIndex as u16;
         const LOOP_LABEL: u16 = SyntaxKind::LoopLabel as u16;
         const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
         const ARGUMENT: u16 = SyntaxKind::Argument as u16;
@@ -524,6 +526,7 @@ impl Language for KestrelLanguage {
             EXPR_BREAK => SyntaxKind::ExprBreak,
             EXPR_CONTINUE => SyntaxKind::ExprContinue,
             EXPR_RETURN => SyntaxKind::ExprReturn,
+            EXPR_TUPLE_INDEX => SyntaxKind::ExprTupleIndex,
             LOOP_LABEL => SyntaxKind::LoopLabel,
             ARGUMENT_LIST => SyntaxKind::ArgumentList,
             ARGUMENT => SyntaxKind::Argument,
