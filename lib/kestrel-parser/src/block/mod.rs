@@ -111,8 +111,11 @@ pub fn code_block_parser() -> impl Parser<Token, CodeBlockData, Error = Simple<T
 
 /// Check if an expression variant is "statement-like" (doesn't require semicolon)
 fn is_statement_like_expr(expr: &ExprVariant) -> bool {
-    matches!(expr, ExprVariant::If { .. })
-    // Future: add While, For, Match, etc.
+    matches!(expr,
+        ExprVariant::If { .. }
+        | ExprVariant::While { .. }
+        | ExprVariant::Loop { .. }
+    )
 }
 
 /// Parser for the items inside a code block

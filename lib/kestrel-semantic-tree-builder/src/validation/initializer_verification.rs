@@ -6,8 +6,12 @@
 //! - Fields cannot be read before they are assigned
 //! - Methods cannot be called on `self` before all fields are initialized
 //!
-//! Note: Control flow analysis (if/else branches, early returns, loops) is not yet
-//! implemented. The current analysis is conservative and linear.
+//! Control flow analysis:
+//! - If/else: A field is definitely initialized only if initialized in BOTH branches
+//!   (unless one branch diverges via return/break/continue)
+//! - While loops: Body may execute zero times, so initializations inside are not guaranteed
+//! - Loop: With break, we track what's initialized at each break point
+//! - Return: Marks the current path as diverging; all fields must be initialized before return
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -93,52 +97,47 @@ fn validate_initializer(
         return;
     };
 
-    // Create verification context
+    // Create verification context with initial state
+    let all_fields: HashSet<String> = fields.iter().map(|f| f.name.clone()).collect();
+    let let_fields: HashSet<String> = fields
+        .iter()
+        .filter(|f| f.is_let)
+        .map(|f| f.name.clone())
+        .collect();
+
     let mut ctx = VerificationContext {
-        fields: fields.iter().map(|f| f.name.clone()).collect(),
-        let_fields: fields
-            .iter()
-            .filter(|f| f.is_let)
-            .map(|f| f.name.clone())
-            .collect(),
-        assigned_fields: HashSet::new(),
-        let_fields_assigned: HashSet::new(),
+        all_fields: all_fields.clone(),
+        let_fields,
+        state: InitState::new(),
         errors: Vec::new(),
     };
 
     // Analyze the body
-    for stmt in &body.statements {
-        analyze_statement(stmt, &mut ctx);
-    }
+    let final_state = analyze_block(&body.statements, body.yield_expr.as_deref(), &mut ctx);
 
-    // Also analyze the yield expression if present
-    // (This handles cases where the last expression doesn't have a semicolon)
-    if let Some(ref yield_expr) = body.yield_expr {
-        analyze_expression(yield_expr, &mut ctx, false);
-    }
-
-    // Check that all fields are initialized
-    let uninitialized: Vec<&String> = ctx
-        .fields
-        .iter()
-        .filter(|f| !ctx.assigned_fields.contains(*f))
-        .collect();
-
-    if !uninitialized.is_empty() {
-        let file_id = crate::syntax::get_file_id_for_symbol(symbol, diagnostics);
-        let span = symbol.metadata().span().clone();
-
-        let field_list = uninitialized
+    // Check that all fields are initialized at the end (if we didn't diverge)
+    if !final_state.diverged {
+        let uninitialized: Vec<&String> = all_fields
             .iter()
-            .map(|s| format!("'{}'", s))
-            .collect::<Vec<_>>()
-            .join(", ");
+            .filter(|f| !final_state.assigned.contains(*f))
+            .collect();
 
-        let error = UninitializedFieldsError {
-            span,
-            fields: field_list,
-        };
-        diagnostics.add_diagnostic(error.into_diagnostic(file_id));
+        if !uninitialized.is_empty() {
+            let file_id = crate::syntax::get_file_id_for_symbol(symbol, diagnostics);
+            let span = symbol.metadata().span().clone();
+
+            let field_list = uninitialized
+                .iter()
+                .map(|s| format!("'{}'", s))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let error = UninitializedFieldsError {
+                span,
+                fields: field_list,
+            };
+            diagnostics.add_diagnostic(error.into_diagnostic(file_id));
+        }
     }
 
     // Report any errors collected during analysis
@@ -154,16 +153,63 @@ struct FieldInfo {
     is_let: bool,
 }
 
+/// Initialization state at a point in the program
+#[derive(Clone, Debug)]
+struct InitState {
+    /// Fields that are definitely assigned at this point
+    assigned: HashSet<String>,
+    /// `let` fields that have been assigned (for double-assignment detection)
+    let_assigned: HashSet<String>,
+    /// Whether this path has diverged (return/break/continue)
+    diverged: bool,
+}
+
+impl InitState {
+    fn new() -> Self {
+        Self {
+            assigned: HashSet::new(),
+            let_assigned: HashSet::new(),
+            diverged: false,
+        }
+    }
+
+    /// Merge two states from different branches (e.g., if/else)
+    /// A field is definitely initialized only if initialized in BOTH branches,
+    /// unless one branch diverged.
+    fn merge(self, other: InitState) -> InitState {
+        if self.diverged && other.diverged {
+            // Both branches diverge - the merged state also diverges
+            InitState {
+                assigned: self.assigned.intersection(&other.assigned).cloned().collect(),
+                let_assigned: self.let_assigned.union(&other.let_assigned).cloned().collect(),
+                diverged: true,
+            }
+        } else if self.diverged {
+            // Only self diverged - use other's state
+            other
+        } else if other.diverged {
+            // Only other diverged - use self's state
+            self
+        } else {
+            // Neither diverged - intersection of assigned fields
+            InitState {
+                assigned: self.assigned.intersection(&other.assigned).cloned().collect(),
+                // Union of let_assigned to track all assignments for double-assign detection
+                let_assigned: self.let_assigned.union(&other.let_assigned).cloned().collect(),
+                diverged: false,
+            }
+        }
+    }
+}
+
 /// Context for tracking field initialization state
 struct VerificationContext {
     /// All field names that need to be initialized
-    fields: HashSet<String>,
+    all_fields: HashSet<String>,
     /// Fields declared with `let` (can only be assigned once)
     let_fields: HashSet<String>,
-    /// Fields that have been assigned
-    assigned_fields: HashSet<String>,
-    /// `let` fields that have been assigned (to detect double assignment)
-    let_fields_assigned: HashSet<String>,
+    /// Current initialization state
+    state: InitState,
     /// Collected errors
     errors: Vec<InitializerError>,
 }
@@ -173,6 +219,7 @@ enum InitializerError {
     LetFieldAssignedTwice { span: Span, field_name: String },
     FieldReadBeforeAssigned { span: Span, field_name: String },
     SelfUsedBeforeFullyInitialized { span: Span, uninitialized: Vec<String> },
+    ReturnBeforeFullyInitialized { span: Span, uninitialized: Vec<String> },
 }
 
 impl IntoDiagnostic for InitializerError {
@@ -203,6 +250,15 @@ impl IntoDiagnostic for InitializerError {
                     ])
                     .with_notes(vec![format!("uninitialized fields: {}", fields)])
             }
+            InitializerError::ReturnBeforeFullyInitialized { span, uninitialized } => {
+                let fields = uninitialized.join(", ");
+                Diagnostic::error()
+                    .with_message("cannot return before all fields are initialized")
+                    .with_labels(vec![
+                        Label::primary(file_id, span.clone()).with_message("return here")
+                    ])
+                    .with_notes(vec![format!("uninitialized fields: {}", fields)])
+            }
         }
     }
 }
@@ -226,49 +282,80 @@ impl IntoDiagnostic for UninitializedFieldsError {
     }
 }
 
-/// Analyze a statement for field assignments and reads
-fn analyze_statement(stmt: &Statement, ctx: &mut VerificationContext) {
+/// Analyze a block of statements and optional yield expression
+/// Returns the initialization state after the block
+fn analyze_block(
+    statements: &[Statement],
+    yield_expr: Option<&Expression>,
+    ctx: &mut VerificationContext,
+) -> InitState {
+    let mut state = ctx.state.clone();
+
+    for stmt in statements {
+        if state.diverged {
+            // Dead code after divergence - could warn but skip for now
+            break;
+        }
+        state = analyze_statement(stmt, state, ctx);
+    }
+
+    // Analyze yield expression if present and not diverged
+    if !state.diverged {
+        if let Some(expr) = yield_expr {
+            state = analyze_expression(expr, state, false, ctx);
+        }
+    }
+
+    state
+}
+
+/// Analyze a statement, returning the new initialization state
+fn analyze_statement(
+    stmt: &Statement,
+    mut state: InitState,
+    ctx: &mut VerificationContext,
+) -> InitState {
     match &stmt.kind {
         StatementKind::Binding { pattern: _, value } => {
             // Variable binding - analyze the value expression
             if let Some(expr) = value {
-                analyze_expression(expr, ctx, false);
+                state = analyze_expression(expr, state, false, ctx);
             }
         }
         StatementKind::Expr(expr) => {
-            // Expression statement - this is where assignments would be
-            analyze_expression(expr, ctx, false);
+            // Expression statement
+            state = analyze_expression(expr, state, false, ctx);
         }
     }
+    state
 }
 
-/// Analyze an expression for field assignments and reads
+/// Analyze an expression, returning the new initialization state
 ///
 /// `is_assignment_target` indicates if this expression is the LHS of an assignment.
 fn analyze_expression(
     expr: &Expression,
-    ctx: &mut VerificationContext,
+    mut state: InitState,
     is_assignment_target: bool,
-) {
+    ctx: &mut VerificationContext,
+) -> InitState {
     match &expr.kind {
         ExprKind::FieldAccess { object, field } => {
             // Check if this is `self.field`
             if is_self_expr(object) {
-                if is_assignment_target {
-                    // This is `self.field = value` - marks field as initialized
-                    // Don't check if already initialized here; that's done in Assignment case
-                } else {
+                if !is_assignment_target {
                     // This is a read of self.field - must be initialized first
-                    if !ctx.assigned_fields.contains(field) {
+                    if !state.assigned.contains(field) {
                         ctx.errors.push(InitializerError::FieldReadBeforeAssigned {
                             span: expr.span.clone(),
                             field_name: field.clone(),
                         });
                     }
                 }
+                // If it's an assignment target, the assignment is handled in ExprKind::Assignment
             } else {
                 // Analyze the object expression
-                analyze_expression(object, ctx, false);
+                state = analyze_expression(object, state, false, ctx);
             }
         }
         ExprKind::Call { callee, arguments } => {
@@ -277,9 +364,9 @@ fn analyze_expression(
                 if is_self_expr(receiver) {
                     // Method call on self - all fields must be initialized
                     let uninitialized: Vec<String> = ctx
-                        .fields
+                        .all_fields
                         .iter()
-                        .filter(|f| !ctx.assigned_fields.contains(*f))
+                        .filter(|f| !state.assigned.contains(*f))
                         .cloned()
                         .collect();
 
@@ -294,73 +381,72 @@ fn analyze_expression(
             }
 
             // Analyze callee and arguments
-            analyze_expression(callee, ctx, false);
+            state = analyze_expression(callee, state, false, ctx);
             for arg in arguments {
-                analyze_expression(&arg.value, ctx, false);
+                state = analyze_expression(&arg.value, state, false, ctx);
             }
         }
-        ExprKind::LocalRef(_) => {
-            // Local variable reference - nothing to check here for field initialization
-            // (self references in field access are handled in FieldAccess case)
-        }
+        ExprKind::LocalRef(_) => {}
         ExprKind::SymbolRef(_) => {}
         ExprKind::TypeRef(_) => {}
         ExprKind::OverloadedRef(_) => {}
         ExprKind::MethodRef { receiver, .. } => {
-            analyze_expression(receiver, ctx, false);
+            state = analyze_expression(receiver, state, false, ctx);
         }
         ExprKind::Literal(_) => {}
         ExprKind::Array(elements) => {
             for elem in elements {
-                analyze_expression(elem, ctx, false);
+                state = analyze_expression(elem, state, false, ctx);
             }
         }
         ExprKind::Tuple(elements) => {
             for elem in elements {
-                analyze_expression(elem, ctx, false);
+                state = analyze_expression(elem, state, false, ctx);
             }
         }
         ExprKind::Grouping(inner) => {
-            analyze_expression(inner, ctx, false);
+            state = analyze_expression(inner, state, false, ctx);
         }
         ExprKind::PrimitiveMethodCall {
             receiver,
             arguments,
             ..
         } => {
-            analyze_expression(receiver, ctx, false);
+            state = analyze_expression(receiver, state, false, ctx);
             for arg in arguments {
-                analyze_expression(&arg.value, ctx, false);
+                state = analyze_expression(&arg.value, state, false, ctx);
             }
         }
         ExprKind::ImplicitStructInit { arguments, .. } => {
             for arg in arguments {
-                analyze_expression(&arg.value, ctx, false);
+                state = analyze_expression(&arg.value, state, false, ctx);
             }
         }
         ExprKind::Assignment { target, value } => {
+            // First analyze the value (RHS) - this happens before assignment
+            state = analyze_expression(value, state, false, ctx);
+
             // Check if this is `self.field = value`
             if let ExprKind::FieldAccess { object, field } = &target.kind {
                 if is_self_expr(object) {
                     // Check for double-assignment to `let` fields
-                    if ctx.let_fields.contains(field) && ctx.let_fields_assigned.contains(field) {
+                    if ctx.let_fields.contains(field) && state.let_assigned.contains(field) {
                         ctx.errors.push(InitializerError::LetFieldAssignedTwice {
                             span: target.span.clone(),
                             field_name: field.clone(),
                         });
                     }
                     // Mark field as initialized
-                    ctx.assigned_fields.insert(field.clone());
-                    // Track let field assignments for double-assignment detection
+                    state.assigned.insert(field.clone());
+                    // Track let field assignments
                     if ctx.let_fields.contains(field) {
-                        ctx.let_fields_assigned.insert(field.clone());
+                        state.let_assigned.insert(field.clone());
                     }
                 }
             }
-            // Analyze the target (but as an assignment target)
-            analyze_expression(target, ctx, true);
-            // Analyze the value being assigned
-            analyze_expression(value, ctx, false);
+
+            // Analyze target as assignment target (for nested field access etc)
+            state = analyze_expression(target, state, true, ctx);
         }
         ExprKind::If {
             condition,
@@ -368,34 +454,225 @@ fn analyze_expression(
             then_value,
             else_branch,
         } => {
-            // Analyze condition
-            analyze_expression(condition, ctx, false);
-            // Analyze then branch statements
+            // Analyze condition first
+            state = analyze_expression(condition, state, false, ctx);
+
+            // Save state before branches
+            let pre_branch_state = state.clone();
+
+            // Analyze then branch
+            ctx.state = pre_branch_state.clone();
+            let mut then_state = pre_branch_state.clone();
             for stmt in then_branch {
-                analyze_statement(stmt, ctx);
+                if then_state.diverged {
+                    break;
+                }
+                then_state = analyze_statement(stmt, then_state, ctx);
             }
-            // Analyze then value if present
-            if let Some(value) = then_value {
-                analyze_expression(value, ctx, false);
+            if !then_state.diverged {
+                if let Some(value) = then_value {
+                    then_state = analyze_expression(value, then_state, false, ctx);
+                }
             }
+
             // Analyze else branch if present
-            if let Some(else_branch) = else_branch {
+            let else_state = if let Some(else_branch) = else_branch {
+                ctx.state = pre_branch_state.clone();
+                let mut else_state = pre_branch_state.clone();
                 match else_branch {
                     kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
                         for stmt in statements {
-                            analyze_statement(stmt, ctx);
+                            if else_state.diverged {
+                                break;
+                            }
+                            else_state = analyze_statement(stmt, else_state, ctx);
                         }
-                        if let Some(value) = value {
-                            analyze_expression(value, ctx, false);
+                        if !else_state.diverged {
+                            if let Some(value) = value {
+                                else_state = analyze_expression(value, else_state, false, ctx);
+                            }
                         }
                     }
                     kestrel_semantic_tree::expr::ElseBranch::ElseIf(if_expr) => {
-                        analyze_expression(if_expr, ctx, false);
+                        else_state = analyze_expression(if_expr, else_state, false, ctx);
+                    }
+                }
+                else_state
+            } else {
+                // No else branch - the "else" path has the pre-branch state
+                // (if condition is false, no initializations happen)
+                pre_branch_state
+            };
+
+            // Merge the two branch states
+            state = then_state.merge(else_state);
+        }
+        ExprKind::While {
+            condition, body, ..
+        } => {
+            // Analyze condition
+            state = analyze_expression(condition, state, false, ctx);
+
+            // While loop body may execute zero times, so we analyze it but
+            // don't rely on its initializations for the continuation.
+            // We still need to check for errors inside the body.
+            let pre_loop_state = state.clone();
+            ctx.state = state.clone();
+            let mut body_state = state.clone();
+            for stmt in body {
+                if body_state.diverged {
+                    break;
+                }
+                body_state = analyze_statement(stmt, body_state, ctx);
+            }
+
+            // The state after while is the pre-loop state (conservative)
+            // because the loop might not execute at all
+            state = pre_loop_state;
+        }
+        ExprKind::Loop { body, .. } => {
+            // Loop always executes at least once
+            // We need to track the state at each break point
+
+            // Analyze the body - collect states at break points
+            ctx.state = state.clone();
+            let mut body_state = state.clone();
+            let mut break_states: Vec<InitState> = Vec::new();
+
+            for stmt in body {
+                if body_state.diverged {
+                    // If we hit a break, save the state before divergence
+                    // The diverged flag was set by the break itself
+                    break;
+                }
+
+                // Save state before analyzing the statement
+                let pre_stmt_state = body_state.clone();
+                body_state = analyze_statement(stmt, body_state, ctx);
+
+                // If this statement caused divergence via break, record the state
+                // We use pre_stmt_state because that's what was initialized before break
+                if body_state.diverged && contains_break_at_top_level(&stmt.kind) {
+                    // For break, we want the state AFTER the statements before the break
+                    // but the break itself doesn't initialize anything
+                    // Actually we need the state from within the statement up to the break
+                    // For simplicity, just record body_state (with diverged cleared for the merge)
+                    let mut break_state = body_state.clone();
+                    break_state.diverged = false;
+                    break_states.push(break_state);
+                }
+            }
+
+            // Determine the exit state
+            if break_states.is_empty() && !body_state.diverged {
+                // No breaks and no return - infinite loop, code after unreachable
+                state.diverged = true;
+            } else if break_states.is_empty() {
+                // No breaks but body diverged (all paths return) - propagate divergence
+                state = body_state;
+            } else {
+                // Has breaks - merge all break states
+                // Since loop executes at least once, we use the break states
+                let mut merged = break_states.pop().unwrap();
+                for bs in break_states {
+                    merged = merged.merge(bs);
+                }
+                state = merged;
+            }
+        }
+        ExprKind::Break { .. } => {
+            // Break exits the current loop - mark as diverged for this path
+            state.diverged = true;
+        }
+        ExprKind::Continue { .. } => {
+            // Continue goes to next iteration - mark as diverged for this path
+            state.diverged = true;
+        }
+        ExprKind::Return { value } => {
+            // Analyze return value if present
+            if let Some(val) = value {
+                state = analyze_expression(val, state, false, ctx);
+            }
+
+            // Check that all fields are initialized before return
+            let uninitialized: Vec<String> = ctx
+                .all_fields
+                .iter()
+                .filter(|f| !state.assigned.contains(*f))
+                .cloned()
+                .collect();
+
+            if !uninitialized.is_empty() {
+                ctx.errors
+                    .push(InitializerError::ReturnBeforeFullyInitialized {
+                        span: expr.span.clone(),
+                        uninitialized,
+                    });
+            }
+
+            // Mark as diverged
+            state.diverged = true;
+        }
+        ExprKind::Error => {}
+    }
+
+    state
+}
+
+/// Check if a statement kind contains a break at the top level (not nested in another loop)
+fn contains_break_at_top_level(kind: &StatementKind) -> bool {
+    match kind {
+        StatementKind::Expr(expr) => expr_contains_break_at_top_level(&expr.kind),
+        StatementKind::Binding { value: Some(expr), .. } => {
+            expr_contains_break_at_top_level(&expr.kind)
+        }
+        StatementKind::Binding { value: None, .. } => false,
+    }
+}
+
+/// Check if an expression contains a break at the top level
+fn expr_contains_break_at_top_level(kind: &ExprKind) -> bool {
+    match kind {
+        ExprKind::Break { .. } => true,
+        ExprKind::If { then_branch, then_value, else_branch, .. } => {
+            // Check then branch
+            for stmt in then_branch {
+                if contains_break_at_top_level(&stmt.kind) {
+                    return true;
+                }
+            }
+            if let Some(val) = then_value {
+                if expr_contains_break_at_top_level(&val.kind) {
+                    return true;
+                }
+            }
+            // Check else branch
+            if let Some(else_b) = else_branch {
+                match else_b {
+                    kestrel_semantic_tree::expr::ElseBranch::Block { statements, value } => {
+                        for stmt in statements {
+                            if contains_break_at_top_level(&stmt.kind) {
+                                return true;
+                            }
+                        }
+                        if let Some(val) = value {
+                            if expr_contains_break_at_top_level(&val.kind) {
+                                return true;
+                            }
+                        }
+                    }
+                    kestrel_semantic_tree::expr::ElseBranch::ElseIf(if_expr) => {
+                        if expr_contains_break_at_top_level(&if_expr.kind) {
+                            return true;
+                        }
                     }
                 }
             }
+            false
         }
-        ExprKind::Error => {}
+        // Don't recurse into nested loops - breaks there don't affect outer loop
+        ExprKind::While { .. } | ExprKind::Loop { .. } => false,
+        _ => false,
     }
 }
 
@@ -436,50 +713,78 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_verification_context_tracks_fields() {
-        let mut ctx = VerificationContext {
-            fields: ["a", "b", "c"].iter().map(|s| s.to_string()).collect(),
-            let_fields: ["a"].iter().map(|s| s.to_string()).collect(),
-            assigned_fields: HashSet::new(),
-            let_fields_assigned: HashSet::new(),
-            errors: Vec::new(),
-        };
+    fn test_init_state_merge_both_initialized() {
+        let mut state1 = InitState::new();
+        state1.assigned.insert("x".to_string());
+        state1.assigned.insert("y".to_string());
 
-        // Assign field 'a' (a let field)
-        ctx.assigned_fields.insert("a".to_string());
-        ctx.let_fields_assigned.insert("a".to_string());
+        let mut state2 = InitState::new();
+        state2.assigned.insert("x".to_string());
+        state2.assigned.insert("z".to_string());
 
-        // Assign field 'b' (a var field)
-        ctx.assigned_fields.insert("b".to_string());
+        let merged = state1.merge(state2);
 
-        // Check uninitialized fields
-        let uninitialized: Vec<&String> = ctx
-            .fields
-            .iter()
-            .filter(|f| !ctx.assigned_fields.contains(*f))
-            .collect();
-
-        assert_eq!(uninitialized.len(), 1);
-        assert!(uninitialized.contains(&&"c".to_string()));
+        // Only x is in both branches
+        assert!(merged.assigned.contains("x"));
+        assert!(!merged.assigned.contains("y"));
+        assert!(!merged.assigned.contains("z"));
+        assert!(!merged.diverged);
     }
 
     #[test]
-    fn test_let_field_double_assignment_detection() {
-        let mut ctx = VerificationContext {
-            fields: ["id"].iter().map(|s| s.to_string()).collect(),
-            let_fields: ["id"].iter().map(|s| s.to_string()).collect(),
-            assigned_fields: HashSet::new(),
-            let_fields_assigned: HashSet::new(),
-            errors: Vec::new(),
-        };
+    fn test_init_state_merge_one_diverged() {
+        let mut state1 = InitState::new();
+        state1.assigned.insert("x".to_string());
+        state1.diverged = true; // This branch returns
 
-        // First assignment to let field
-        let field = "id".to_string();
-        assert!(!ctx.let_fields_assigned.contains(&field));
-        ctx.assigned_fields.insert(field.clone());
-        ctx.let_fields_assigned.insert(field.clone());
+        let mut state2 = InitState::new();
+        state2.assigned.insert("y".to_string());
 
-        // Second assignment should be detected
-        assert!(ctx.let_fields.contains(&field) && ctx.let_fields_assigned.contains(&field));
+        let merged = state1.merge(state2);
+
+        // state1 diverged, so we use state2
+        assert!(!merged.assigned.contains("x"));
+        assert!(merged.assigned.contains("y"));
+        assert!(!merged.diverged);
+    }
+
+    #[test]
+    fn test_init_state_merge_both_diverged() {
+        let mut state1 = InitState::new();
+        state1.assigned.insert("x".to_string());
+        state1.diverged = true;
+
+        let mut state2 = InitState::new();
+        state2.assigned.insert("x".to_string());
+        state2.assigned.insert("y".to_string());
+        state2.diverged = true;
+
+        let merged = state1.merge(state2);
+
+        // Both diverged - intersection of assigned, still diverged
+        assert!(merged.assigned.contains("x"));
+        assert!(!merged.assigned.contains("y"));
+        assert!(merged.diverged);
+    }
+
+    #[test]
+    fn test_let_field_tracking_across_branches() {
+        let mut state = InitState::new();
+
+        // Simulate: if cond { self.x = 1 } else { self.x = 2 }
+        let mut then_state = state.clone();
+        then_state.assigned.insert("x".to_string());
+        then_state.let_assigned.insert("x".to_string());
+
+        let mut else_state = state.clone();
+        else_state.assigned.insert("x".to_string());
+        else_state.let_assigned.insert("x".to_string());
+
+        let merged = then_state.merge(else_state);
+
+        // x is assigned in both branches
+        assert!(merged.assigned.contains("x"));
+        // let_assigned is union - x was assigned in both
+        assert!(merged.let_assigned.contains("x"));
     }
 }

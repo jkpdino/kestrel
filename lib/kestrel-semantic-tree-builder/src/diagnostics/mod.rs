@@ -16,6 +16,7 @@
 
 mod assignment;
 mod call;
+mod control_flow;
 mod cycles;
 mod declaration;
 mod member_access;
@@ -28,6 +29,7 @@ mod visibility;
 
 pub use assignment::*;
 pub use call::*;
+pub use control_flow::*;
 pub use cycles::*;
 pub use declaration::*;
 pub use member_access::*;

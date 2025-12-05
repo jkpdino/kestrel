@@ -6,7 +6,12 @@
 //! - Visibility consistency
 //! - Duplicate symbol detection
 //! - Protocol conformance validation
+//! - Initializer verification (field initialization, control flow)
+//! - Dead code detection
 
 mod mutability;
 mod cycles;
 mod misc;
+mod initializers;
+mod dead_code;
+mod exhaustive_return;

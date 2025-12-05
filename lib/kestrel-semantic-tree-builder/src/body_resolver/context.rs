@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use kestrel_reporting::DiagnosticContext;
 use kestrel_semantic_tree::behavior::executable::{CodeBlock, ExecutableBehavior};
+use kestrel_semantic_tree::expr::LoopId;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::ty::Ty;
+use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
@@ -20,6 +22,17 @@ use crate::syntax::get_node_span;
 
 use super::expressions::resolve_expression;
 use super::statements::{resolve_statement, resolve_variable_declaration};
+
+/// Information about an active loop during body resolution
+#[derive(Debug, Clone)]
+pub struct LoopInfo {
+    /// The unique ID for this loop
+    pub loop_id: LoopId,
+    /// Optional label name (without the colon)
+    pub label: Option<String>,
+    /// Span of the label (for diagnostics)
+    pub label_span: Option<Span>,
+}
 
 /// Context for body resolution
 pub struct BodyResolutionContext<'a> {
@@ -35,6 +48,10 @@ pub struct BodyResolutionContext<'a> {
     pub function_id: SymbolId,
     /// Local scope for variable tracking
     pub local_scope: LocalScope,
+    /// Stack of active loops (for break/continue resolution)
+    pub(crate) loop_stack: Vec<LoopInfo>,
+    /// Next loop ID to assign
+    pub(crate) next_loop_id: u32,
 }
 
 impl<'a> BodyResolutionContext<'a> {
@@ -55,7 +72,51 @@ impl<'a> BodyResolutionContext<'a> {
             source,
             function_id,
             local_scope,
+            loop_stack: Vec::new(),
+            next_loop_id: 0,
         }
+    }
+
+    /// Enter a loop, returning its LoopId.
+    pub fn enter_loop(&mut self, label: Option<String>, label_span: Option<Span>) -> LoopId {
+        let loop_id = LoopId::new(self.next_loop_id);
+        self.next_loop_id += 1;
+        self.loop_stack.push(LoopInfo {
+            loop_id,
+            label,
+            label_span,
+        });
+        loop_id
+    }
+
+    /// Exit the current loop.
+    pub fn exit_loop(&mut self) {
+        self.loop_stack.pop();
+    }
+
+    /// Find the target loop for a break/continue.
+    ///
+    /// If `label` is Some, searches for a loop with that label.
+    /// If `label` is None, returns the innermost loop.
+    /// Returns None if no matching loop is found.
+    pub fn find_loop(&self, label: Option<&str>) -> Option<LoopId> {
+        match label {
+            None => {
+                // Return innermost loop
+                self.loop_stack.last().map(|info| info.loop_id)
+            }
+            Some(label_name) => {
+                // Search for labeled loop (from innermost to outermost)
+                self.loop_stack.iter().rev()
+                    .find(|info| info.label.as_deref() == Some(label_name))
+                    .map(|info| info.loop_id)
+            }
+        }
+    }
+
+    /// Check if we're currently inside a loop.
+    pub fn in_loop(&self) -> bool {
+        !self.loop_stack.is_empty()
     }
 }
 
@@ -169,6 +230,8 @@ pub fn resolve_and_attach_body(
         source,
         function_id: function_symbol.metadata().id(),
         local_scope: create_local_scope_from_dyn(func_arc.clone()),
+        loop_stack: Vec::new(),
+        next_loop_id: 0,
     };
 
     // Add parameters to local scope first

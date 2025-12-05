@@ -391,6 +391,33 @@ fn run_program(file: &str, verbose: bool) -> ExitCode {
                 let else_str = if else_branch.is_some() { " else { ... }" } else { "" };
                 format!("if {} {{ {} }}{}", format_expr_value(condition), then_str, else_str)
             }
+            ExprKind::While { condition, .. } => {
+                format!("while {} {{ ... }}", format_expr_value(condition))
+            }
+            ExprKind::Loop { .. } => {
+                "loop { ... }".to_string()
+            }
+            ExprKind::Break { label, .. } => {
+                if let Some(l) = label {
+                    format!("break {}", l.name)
+                } else {
+                    "break".to_string()
+                }
+            }
+            ExprKind::Continue { label, .. } => {
+                if let Some(l) = label {
+                    format!("continue {}", l.name)
+                } else {
+                    "continue".to_string()
+                }
+            }
+            ExprKind::Return { value } => {
+                if let Some(v) = value {
+                    format!("return {}", format_expr_value(v))
+                } else {
+                    "return".to_string()
+                }
+            }
             ExprKind::Error => "<error>".to_string(),
         }
     }

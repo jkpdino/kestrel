@@ -154,7 +154,7 @@ impl Test {
         let mut binder = SemanticBinder::new(&semantic_tree);
         binder.bind(&mut diagnostics);
 
-        let has_errors = has_parse_errors || diagnostics.len() > 0;
+        let has_errors = has_parse_errors || diagnostics.has_errors();
 
         self.context = Some(TestContext {
             semantic_tree,
@@ -259,6 +259,74 @@ impl Expectable for Fails {
             Ok(())
         } else {
             Err("Expected compilation to fail, but it succeeded".to_string())
+        }
+    }
+}
+
+/// Expects a warning containing a specific message
+pub struct HasWarning(pub &'static str);
+
+impl Expectable for HasWarning {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        use kestrel_reporting::Severity;
+
+        // Check if any warning contains the expected message
+        let has_matching_warning = ctx
+            .diagnostics
+            .diagnostics()
+            .iter()
+            .any(|diag| {
+                diag.severity == Severity::Warning && diag.message.contains(self.0)
+            });
+
+        if has_matching_warning {
+            Ok(())
+        } else {
+            let warnings: Vec<_> = ctx
+                .diagnostics
+                .diagnostics()
+                .iter()
+                .filter(|d| d.severity == Severity::Warning)
+                .map(|d| d.message.as_str())
+                .collect();
+            if warnings.is_empty() {
+                Err(format!(
+                    "Expected a warning containing '{}', but there were no warnings",
+                    self.0
+                ))
+            } else {
+                Err(format!(
+                    "Expected a warning containing '{}', but got: {:?}",
+                    self.0, warnings
+                ))
+            }
+        }
+    }
+}
+
+/// Expects no warnings
+pub struct NoWarnings;
+
+impl Expectable for NoWarnings {
+    fn check(&self, ctx: &TestContext) -> Result<(), String> {
+        use kestrel_reporting::Severity;
+
+        let warnings: Vec<_> = ctx
+            .diagnostics
+            .diagnostics()
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+
+        if warnings.is_empty() {
+            Ok(())
+        } else {
+            let warning_messages: Vec<_> = warnings.iter().map(|d| d.message.as_str()).collect();
+            Err(format!(
+                "Expected no warnings, but got {}: {:?}",
+                warnings.len(),
+                warning_messages
+            ))
         }
     }
 }

@@ -114,6 +114,12 @@ pub enum SyntaxKind {
     ExprAssignment,      // lhs = rhs
     ExprIf,              // if condition { then } else { else }
     ElseClause,          // else { ... } or else if ...
+    ExprWhile,           // while condition { body }
+    ExprLoop,            // loop { body }
+    ExprBreak,           // break or break label
+    ExprContinue,        // continue or continue label
+    ExprReturn,          // return or return expr
+    LoopLabel,           // label: (before while/loop)
     ArgumentList,        // (arg1, label: arg2, ...)
     Argument,            // Single argument: expr or label: expr
 
@@ -128,12 +134,15 @@ pub enum SyntaxKind {
 
     // Keywords
     As,
+    Break,
     Consuming,
+    Continue,
     Else,
     Fileprivate,
     Func,
     If,
     Import,
+    Loop,
     Init,
     Internal,
     Let,
@@ -142,11 +151,13 @@ pub enum SyntaxKind {
     Private,
     Protocol,
     Public,
+    Return,
     Static,
     Struct,
     Type,
     Var,
     Where,
+    While,
 
     // Logical keywords
     And,
@@ -224,13 +235,16 @@ impl From<Token> for SyntaxKind {
             Token::Null => SyntaxKind::Null,
             // Keywords
             Token::As => SyntaxKind::As,
+            Token::Break => SyntaxKind::Break,
             Token::Consuming => SyntaxKind::Consuming,
+            Token::Continue => SyntaxKind::Continue,
             Token::Else => SyntaxKind::Else,
             Token::Fileprivate => SyntaxKind::Fileprivate,
             Token::Func => SyntaxKind::Func,
             Token::If => SyntaxKind::If,
             Token::Import => SyntaxKind::Import,
             Token::Init => SyntaxKind::Init,
+            Token::Loop => SyntaxKind::Loop,
             Token::Internal => SyntaxKind::Internal,
             Token::Let => SyntaxKind::Let,
             Token::Module => SyntaxKind::Module,
@@ -238,11 +252,13 @@ impl From<Token> for SyntaxKind {
             Token::Private => SyntaxKind::Private,
             Token::Protocol => SyntaxKind::Protocol,
             Token::Public => SyntaxKind::Public,
+            Token::Return => SyntaxKind::Return,
             Token::Static => SyntaxKind::Static,
             Token::Struct => SyntaxKind::Struct,
             Token::Type => SyntaxKind::Type,
             Token::Var => SyntaxKind::Var,
             Token::Where => SyntaxKind::Where,
+            Token::While => SyntaxKind::While,
             // Logical keywords
             Token::And => SyntaxKind::And,
             Token::Not => SyntaxKind::Not,
@@ -358,6 +374,12 @@ impl Language for KestrelLanguage {
         const EXPR_ASSIGNMENT: u16 = SyntaxKind::ExprAssignment as u16;
         const EXPR_IF: u16 = SyntaxKind::ExprIf as u16;
         const ELSE_CLAUSE: u16 = SyntaxKind::ElseClause as u16;
+        const EXPR_WHILE: u16 = SyntaxKind::ExprWhile as u16;
+        const EXPR_LOOP: u16 = SyntaxKind::ExprLoop as u16;
+        const EXPR_BREAK: u16 = SyntaxKind::ExprBreak as u16;
+        const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
+        const EXPR_RETURN: u16 = SyntaxKind::ExprReturn as u16;
+        const LOOP_LABEL: u16 = SyntaxKind::LoopLabel as u16;
         const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
         const ARGUMENT: u16 = SyntaxKind::Argument as u16;
         const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
@@ -367,13 +389,16 @@ impl Language for KestrelLanguage {
         const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
         const NULL: u16 = SyntaxKind::Null as u16;
         const AS: u16 = SyntaxKind::As as u16;
+        const BREAK: u16 = SyntaxKind::Break as u16;
         const CONSUMING: u16 = SyntaxKind::Consuming as u16;
+        const CONTINUE: u16 = SyntaxKind::Continue as u16;
         const ELSE: u16 = SyntaxKind::Else as u16;
         const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
         const FUNC: u16 = SyntaxKind::Func as u16;
         const IF: u16 = SyntaxKind::If as u16;
         const IMPORT: u16 = SyntaxKind::Import as u16;
         const INIT: u16 = SyntaxKind::Init as u16;
+        const LOOP: u16 = SyntaxKind::Loop as u16;
         const INTERNAL: u16 = SyntaxKind::Internal as u16;
         const LET: u16 = SyntaxKind::Let as u16;
         const MODULE: u16 = SyntaxKind::Module as u16;
@@ -381,11 +406,13 @@ impl Language for KestrelLanguage {
         const PRIVATE: u16 = SyntaxKind::Private as u16;
         const PROTOCOL: u16 = SyntaxKind::Protocol as u16;
         const PUBLIC: u16 = SyntaxKind::Public as u16;
+        const RETURN: u16 = SyntaxKind::Return as u16;
         const STATIC: u16 = SyntaxKind::Static as u16;
         const STRUCT: u16 = SyntaxKind::Struct as u16;
         const TYPE: u16 = SyntaxKind::Type as u16;
         const VAR: u16 = SyntaxKind::Var as u16;
         const WHERE: u16 = SyntaxKind::Where as u16;
+        const WHILE: u16 = SyntaxKind::While as u16;
         // Logical keywords
         const AND: u16 = SyntaxKind::And as u16;
         const NOT: u16 = SyntaxKind::Not as u16;
@@ -492,6 +519,12 @@ impl Language for KestrelLanguage {
             EXPR_ASSIGNMENT => SyntaxKind::ExprAssignment,
             EXPR_IF => SyntaxKind::ExprIf,
             ELSE_CLAUSE => SyntaxKind::ElseClause,
+            EXPR_WHILE => SyntaxKind::ExprWhile,
+            EXPR_LOOP => SyntaxKind::ExprLoop,
+            EXPR_BREAK => SyntaxKind::ExprBreak,
+            EXPR_CONTINUE => SyntaxKind::ExprContinue,
+            EXPR_RETURN => SyntaxKind::ExprReturn,
+            LOOP_LABEL => SyntaxKind::LoopLabel,
             ARGUMENT_LIST => SyntaxKind::ArgumentList,
             ARGUMENT => SyntaxKind::Argument,
             IDENTIFIER => SyntaxKind::Identifier,
@@ -501,13 +534,16 @@ impl Language for KestrelLanguage {
             BOOLEAN => SyntaxKind::Boolean,
             NULL => SyntaxKind::Null,
             AS => SyntaxKind::As,
+            BREAK => SyntaxKind::Break,
             CONSUMING => SyntaxKind::Consuming,
+            CONTINUE => SyntaxKind::Continue,
             ELSE => SyntaxKind::Else,
             FILEPRIVATE => SyntaxKind::Fileprivate,
             FUNC => SyntaxKind::Func,
             IF => SyntaxKind::If,
             IMPORT => SyntaxKind::Import,
             INIT => SyntaxKind::Init,
+            LOOP => SyntaxKind::Loop,
             INTERNAL => SyntaxKind::Internal,
             LET => SyntaxKind::Let,
             MODULE => SyntaxKind::Module,
@@ -515,11 +551,13 @@ impl Language for KestrelLanguage {
             PRIVATE => SyntaxKind::Private,
             PROTOCOL => SyntaxKind::Protocol,
             PUBLIC => SyntaxKind::Public,
+            RETURN => SyntaxKind::Return,
             STATIC => SyntaxKind::Static,
             STRUCT => SyntaxKind::Struct,
             TYPE => SyntaxKind::Type,
             VAR => SyntaxKind::Var,
             WHERE => SyntaxKind::Where,
+            WHILE => SyntaxKind::While,
             // Logical keywords
             AND => SyntaxKind::And,
             NOT => SyntaxKind::Not,

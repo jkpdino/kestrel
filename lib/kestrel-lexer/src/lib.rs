@@ -154,14 +154,29 @@ pub enum Token {
     #[token("as")]
     As,
 
+    #[token("break")]
+    Break,
+
     #[token("consuming")]
     Consuming,
+
+    #[token("continue")]
+    Continue,
 
     #[token("else")]
     Else,
 
     #[token("if")]
     If,
+
+    #[token("loop")]
+    Loop,
+
+    #[token("return")]
+    Return,
+
+    #[token("while")]
+    While,
 
     // ===== Braces =====
     #[token("(")]

@@ -296,7 +296,7 @@ mod visibility_consistency {
         Test::new(
             r#"module Test
             private struct Internal { }
-            func helper() -> Internal { }
+            func helper() -> Internal { Internal() }
         "#,
         )
         .expect(Compiles)

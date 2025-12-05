@@ -124,7 +124,6 @@
 - [x] Variable Declarations - `let x: Int = 42`
 - [x] Mutable Variables - `var x: Int = 42`
 - [x] Pattern-based bindings (Statement::Binding with Pattern)
-- [ ] Type Inference - `let x = 42` (infer Int) [Deferred]
 - [x] Assignment Expressions - `x = 43`, `point.x = 10`
   - [x] Parser: `=` operator (lowest precedence, right-associative)
   - [x] AST: `ExprKind::Assignment { target, value }`
@@ -149,7 +148,6 @@
   - [x] Error for wrong arity in calls
   - [x] Error for wrong labels in calls
   - [x] Error for calling instance method on type name
-- [ ] First-class Function References - Functions as values (overloaded names error for now)
 
 ### Expressions
 
@@ -168,7 +166,6 @@
 - [x] Unary Operators - `-x`, `+x`, `!x`, `not x`, `x!`
   - [x] Prefix: `neg`, `identity`, `bitNot`, `logicalNot`
   - [x] Postfix: `unwrap` (for optionals, not yet implemented)
-- [ ] Block Expressions - `{ stmt; stmt; expr }`
 
 ### Struct Operations
 
@@ -188,70 +185,140 @@
 
 ## Phase 4: Control Flow
 
-- [ ] If Expressions - `if condition { ... } else { ... }`
-- [ ] Match Expressions - Pattern matching
-- [ ] While Loops - `while condition { ... }`
-- [ ] For Loops - `for item in collection { ... }`
+- [x] If Expressions - `if condition { ... } else { ... }`
+  - [x] Parser support for if/else/else-if chains
+  - [x] Semantic tree representation (ExprKind::If)
+  - [x] If as expression (returns value from branches)
+  - [x] Condition must be Bool
+- [x] While Loops - `while condition { ... }`
+  - [x] Parser support with optional labels (`label: while ...`)
+  - [x] Semantic tree representation (ExprKind::While)
+  - [x] Labeled loops for break/continue targets
+- [x] Loop - `loop { ... }`
+  - [x] Parser support with optional labels
+  - [x] Infinite loop (exits via break or return)
+- [x] Break/Continue - `break`, `break label`, `continue`, `continue label`
+  - [x] Parser support for labeled break/continue
+  - [x] Semantic validation (must be inside loop)
+  - [x] Label resolution to target loop
+- [x] Return - `return`, `return expr`
+  - [x] Parser support for return with optional value
+  - [x] Semantic tree representation (ExprKind::Return)
+  - [x] Type is Never (control transfers out)
 
-## Phase 5: Advanced Features
+## Phase 5: Validation & Type Checking
 
-- [x] Methods - Functions on structs (basic support via function declarations in struct bodies)
-- [ ] Protocol Implementations - `impl Protocol for Struct`
-- [ ] Associated Types - Types within protocols
-- [ ] Error Handling - Result types, error propagation
-- [ ] Traits/Extensions - Add methods to existing types
-- [ ] Default Parameters - `func foo(x: Int = 0)`
-- [ ] Variadic Parameters - `func log(messages: String...)`
-- [ ] Trailing Closures
+- [x] Initializer Verification - Field initialization analysis
+  - [x] All fields must be initialized before return
+  - [x] `let` fields can only be assigned once
+  - [x] Fields cannot be read before assigned
+  - [x] Control flow analysis (if/else, loops, return)
+- [x] Dead Code Detection - Unreachable code warnings
+  - [x] Code after return
+  - [x] Code after break/continue
+  - [x] Code after infinite loops
+- [x] Exhaustive Return Analysis - All paths must return
+  - [x] Functions with non-unit return types checked
+  - [x] Control flow analysis for all code paths
+  - [x] Handles if/else, loops, early returns
+- [ ] Never Type Propagation
+  - [ ] Expressions containing Never propagate correctly
+  - [ ] Type compatibility with Never
+- [ ] Type Checking - Full type validation
+  - [ ] Return type checking (return expr matches declared type)
+  - [ ] Assignment type checking
+  - [ ] Function argument type checking
+  - [ ] Binary/unary operator type checking
 
-## Phase 6: Polish & Optimization
+## Phase 6: Type System Completion
 
-- [ ] Type Inference Improvements
-  - [ ] Generic Type Inference - Deduce type parameters from usage
-  - [ ] Generic Constraint Enforcement - Verify bounds at call sites
-- [x] Error Messages - Clear, actionable diagnostics
-  - [x] Cross-file diagnostics
-  - [x] Precise span reporting (name-level, not declaration-level)
-  - [x] Contextual secondary labels
-- [ ] IDE Support - LSP implementation
-- [ ] Optimization Passes
+- [ ] Type Inference
+  - [ ] `let x = 42` infers `Int`
+  - [ ] Generic type argument inference at call sites
+  - [ ] Closure parameter type inference (when closures exist)
+- [ ] Generic Constraint Enforcement
+  - [ ] Verify bounds at call sites
+  - [ ] Constraint satisfaction checking
+
+## Phase 7: Closures & First-Class Functions
+
+- [ ] Closure Expressions
+  - [ ] Closure syntax (e.g., `{ x, y in x + y }` or `func(x, y) { x + y }`)
+  - [ ] Capturing variables from enclosing scope
+  - [ ] Capture semantics (by value vs by reference)
+- [ ] Function References
+  - [ ] Reference named functions as values
+  - [ ] Pass functions to higher-order functions
+
+## Phase 8: Enums & Algebraic Data Types
+
+- [ ] Enum Declarations
+  - [ ] Simple enums: `enum Color { Red, Green, Blue }`
+  - [ ] Enums with associated values: `enum Option[T] { Some(T), None }`
+  - [ ] Recursive enums
+- [ ] Pattern Matching
+  - [ ] `match` expressions
+  - [ ] Exhaustiveness checking
+  - [ ] Patterns: literals, bindings, enum variants, wildcards
+  - [ ] Guard clauses in patterns
+  - [ ] `if let` / `guard let`
+
+## Phase 9: Memory Model
+
+- [ ] Value vs Reference Semantics
+  - [ ] Structs as value types (copy semantics)
+  - [ ] Reference types if needed
+- [ ] Ownership Strategy
+  - [ ] Reference counting, or
+  - [ ] Ownership/borrowing, or
+  - [ ] Garbage collection
+
+## Phase 10: Code Generation
+
+- [ ] IR Generation
+  - [ ] Choose target: LLVM, WASM, bytecode, or transpile
+- [ ] Runtime Support
+  - [ ] Memory management implementation
+  - [ ] Built-in function implementations
+- [ ] Executable Output
+  - [ ] Binary or interpreted execution
+
+## Phase 11: Standard Library & Syntactic Sugar
+
 - [ ] Standard Library
+  - [ ] Option[T], Result[T, E] (as regular enums)
+  - [ ] Collections (Array, Map, Set)
+  - [ ] String utilities
+  - [ ] I/O primitives
+- [ ] Syntactic Sugar
+  - [ ] `T?` for `Option[T]`
+  - [ ] `?` operator for error/option propagation
+  - [ ] Optional chaining `x?.foo`
+  - [ ] For loops (desugars to iterator protocol)
 
 ---
 
 ## Current Status
 
-**Phase**: Phase 3 (Values & Expressions) - IN PROGRESS
-**Progress**: Phase 1 & 2 complete. Phase 3 partially complete.
+**Phase**: Phase 5 (Validation & Type Checking) - IN PROGRESS
+**Progress**: Phases 1-4 complete.
 
-**Completed in Phase 3**:
+**Recently Completed (Phase 4)**:
 
-- Literals (all types)
-- Path resolution
-- Variable declarations (let/var with Pattern-based bindings)
-- Function calls with overload resolution
-- Method calls on structs
-- Primitive method calls
-- Member/field access
-- Self parameter handling (`self` injection, `mutating`/`consuming` modifiers)
-- Call validation (undefined functions, arity, labels, instance vs static)
-- Chained member access (`obj.method().field`)
-- Struct instantiation with implicit memberwise init
-- Struct initializer declarations (`init() {}`)
-- Diagnostics for struct instantiation errors
-- Assignment expressions (`x = 5`, `point.x = 10`)
-- Initializer body resolution with field initialization verification
-- Expression mutability tracking
-- Binary operators (`+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `<<`, `>>`)
-- Comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`)
-- Logical operators (`and`, `or`, `not`)
-- Unary operators (`-x`, `+x`, `!x`, `not x`, `x!`)
+- If expressions with else/else-if chains
+- While loops with optional labels
+- Loop (infinite loop with break)
+- Break/continue with optional labels
+- Return expressions with optional value
+- Initializer verification with control flow analysis
+- Dead code detection (warnings for unreachable code)
+- Exhaustive return analysis (all paths must return)
 
 **Next Tasks**:
 
-1. If/else expressions
-2. While loops
-3. Return/break/continue
+1. Never type propagation
+2. Type checking (return types, assignments, arguments)
+3. Type inference
 
 ## Notes
 
@@ -260,6 +327,4 @@
 - Functions are first-class, enabling functional programming patterns
 - Function overloading supported via arity, types, and labels
 - Labeled parameters enable Swift-style named arguments
-- Import resolution must work before advanced features (generics, protocols)
-- Values/expressions come after types are solid
-- Classes are implemented as a stepping stone; will be replaced by Structs
+- Standard library and syntactic sugar come last - core language first

@@ -37,6 +37,11 @@ pub fn is_expression_kind(kind: SyntaxKind) -> bool {
         | SyntaxKind::ExprCall
         | SyntaxKind::ExprAssignment
         | SyntaxKind::ExprIf
+        | SyntaxKind::ExprWhile
+        | SyntaxKind::ExprLoop
+        | SyntaxKind::ExprBreak
+        | SyntaxKind::ExprContinue
+        | SyntaxKind::ExprReturn
     )
 }
 

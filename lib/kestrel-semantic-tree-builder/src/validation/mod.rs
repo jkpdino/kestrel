@@ -21,7 +21,9 @@
 mod assignment_validation;
 mod conformance;
 mod constraint_cycles;
+mod dead_code;
 mod duplicate_symbol;
+mod exhaustive_return;
 mod function_body;
 mod generics;
 mod imports;
@@ -53,7 +55,9 @@ use crate::database::SemanticDatabase;
 pub use assignment_validation::AssignmentValidator;
 pub use conformance::ConformanceValidator;
 pub use constraint_cycles::ConstraintCycleValidator;
+pub use dead_code::DeadCodeValidator;
 pub use duplicate_symbol::DuplicateSymbolValidator;
+pub use exhaustive_return::ExhaustiveReturnValidator;
 pub use function_body::FunctionBodyValidator;
 pub use generics::GenericsValidator;
 pub use imports::ImportValidator;
@@ -271,6 +275,8 @@ impl ValidationRunner {
             Box::new(ConformanceValidator::new()),
             Box::new(InitializerVerificationValidator::new()),
             Box::new(AssignmentValidator::new()),
+            Box::new(DeadCodeValidator::new()),
+            Box::new(ExhaustiveReturnValidator::new()),
         ];
 
         Self { validators }
@@ -478,13 +484,33 @@ fn walk_expression(expr: &Expression, validators: &[&dyn Validator], ctx: &BodyC
                 }
             }
         }
+        ExprKind::While {
+            condition, body, ..
+        } => {
+            walk_expression(condition, validators, ctx);
+            for stmt in body {
+                walk_statement(stmt, validators, ctx);
+            }
+        }
+        ExprKind::Loop { body, .. } => {
+            for stmt in body {
+                walk_statement(stmt, validators, ctx);
+            }
+        }
         // Leaf expressions - no nested nodes
         ExprKind::Literal(_)
         | ExprKind::LocalRef(_)
         | ExprKind::SymbolRef(_)
         | ExprKind::OverloadedRef(_)
         | ExprKind::TypeRef(_)
+        | ExprKind::Break { .. }
+        | ExprKind::Continue { .. }
+        | ExprKind::Return { value: None }
         | ExprKind::Error => {}
+
+        ExprKind::Return { value: Some(val) } => {
+            walk_expression(val, validators, ctx);
+        }
     }
 }
 

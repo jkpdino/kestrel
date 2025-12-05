@@ -111,6 +111,11 @@ fn validate_assignment_target(
         | ExprKind::TypeRef(_)
         | ExprKind::Assignment { .. }
         | ExprKind::If { .. }
+        | ExprKind::While { .. }
+        | ExprKind::Loop { .. }
+        | ExprKind::Break { .. }
+        | ExprKind::Continue { .. }
+        | ExprKind::Return { .. }
         | ExprKind::Error => {
             ctx.diagnostics().get().throw(
                 CannotAssignToExpressionError {

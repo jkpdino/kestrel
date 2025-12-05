@@ -238,6 +238,8 @@ fn resolve_function_body(
         source,
         function_id: symbol.metadata().id(),
         local_scope,
+        loop_stack: Vec::new(),
+        next_loop_id: 0,
     };
 
     // Resolve the body

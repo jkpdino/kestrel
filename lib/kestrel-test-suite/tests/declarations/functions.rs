@@ -17,7 +17,7 @@ mod basic {
 
     #[test]
     fn function_with_return_type() {
-        Test::new("module Test\nfunc getValue() -> Int { }")
+        Test::new("module Test\nfunc getValue() -> Int { 42 }")
             .expect(Compiles)
             .expect(
                 Symbol::new("getValue")
@@ -29,7 +29,7 @@ mod basic {
 
     #[test]
     fn function_with_parameters() {
-        Test::new("module Test\nfunc add(a: Int, b: Int) -> Int { }")
+        Test::new("module Test\nfunc add(a: Int, b: Int) -> Int { a + b }")
             .expect(Compiles)
             .expect(
                 Symbol::new("add")
@@ -103,8 +103,8 @@ mod overloading {
     fn overload_by_parameter_type() {
         Test::new(
             r#"module Test
-            func convert(x: Int) -> String { }
-            func convert(x: Float) -> String { }
+            func convert(x: Int) -> String { "int" }
+            func convert(x: Float) -> String { "float" }
         "#,
         )
         .expect(Compiles)
@@ -153,9 +153,9 @@ mod in_structs {
         Test::new(
             r#"module Test
             struct Calculator {
-                func add(a: Int, b: Int) -> Int { }
-                func subtract(a: Int, b: Int) -> Int { }
-                func multiply(a: Int, b: Int) -> Int { }
+                func add(a: Int, b: Int) -> Int { a + b }
+                func subtract(a: Int, b: Int) -> Int { a - b }
+                func multiply(a: Int, b: Int) -> Int { a * b }
             }
         "#,
         )

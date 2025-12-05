@@ -76,7 +76,7 @@ mod basic_parsing {
 
     #[test]
     fn generic_function() {
-        Test::new("module Test\nfunc identity[T](value: T) -> T { }")
+        Test::new("module Test\nfunc identity[T](value: T) -> T { value }")
             .expect(Compiles)
             .expect(
                 Symbol::new("identity")
@@ -392,8 +392,10 @@ mod instantiation {
         // Test that generic types can be used as return types
         Test::new(
             r#"module Test
-            struct Box[T] { }
-            func makeBox[T]() -> Box[T] { }
+            struct Box[T] {
+                var value: T
+            }
+            func makeBox[T](v: T) -> Box[T] { Box(value: v) }
         "#,
         )
         .expect(Compiles)
@@ -403,7 +405,7 @@ mod instantiation {
                 .is(SymbolKind::Function)
                 .has(Behavior::IsGeneric(true))
                 .has(Behavior::TypeParamCount(1))
-                .has(Behavior::ParameterCount(0)),
+                .has(Behavior::ParameterCount(1)),
         );
     }
 
@@ -412,8 +414,10 @@ mod instantiation {
         // Test that generic types can be used as parameter types
         Test::new(
             r#"module Test
-            struct Box[T] { }
-            func unbox[T](box: Box[T]) -> T { }
+            struct Box[T] {
+                var value: T
+            }
+            func unbox[T](box: Box[T]) -> T { box.value }
         "#,
         )
         .expect(Compiles)
@@ -481,8 +485,10 @@ mod instantiation {
         // Test generic types inside tuples
         Test::new(
             r#"module Test
-            struct Box[T] { }
-            func pair[A, B](a: A, b: B) -> (Box[A], Box[B]) { }
+            struct Box[T] {
+                var value: T
+            }
+            func pair[A, B](a: A, b: B) -> (Box[A], Box[B]) { (Box(value: a), Box(value: b)) }
         "#,
         )
         .expect(Compiles)
@@ -501,8 +507,10 @@ mod instantiation {
         // Test generic types in function type signatures
         Test::new(
             r#"module Test
-            struct Box[T] { }
-            func transform[T](f: (T) -> Box[T], value: T) -> Box[T] { }
+            struct Box[T] {
+                var value: T
+            }
+            func transform[T](f: (T) -> Box[T], value: T) -> Box[T] { f(value) }
         "#,
         )
         .expect(Compiles)

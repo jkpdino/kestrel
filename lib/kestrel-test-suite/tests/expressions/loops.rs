@@ -1,0 +1,1366 @@
+//! Tests for loop expressions (while, loop, break, continue).
+//!
+//! These tests verify that:
+//! - While loops parse and resolve correctly
+//! - Loop (infinite) loops work
+//! - Break and continue work within loops
+//! - Labeled break/continue work for nested loops
+//! - Break/continue outside loops produce errors
+//! - Edge cases and error conditions are handled correctly
+
+use kestrel_test_suite::*;
+
+mod while_basic {
+    use super::*;
+
+    #[test]
+    fn simple_while_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 10 {
+        x = x + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn while_without_semicolon_followed_by_expression() {
+        // While loops are statement-like and don't need semicolons
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    var x: Int = 0;
+    while x < 5 {
+        x = x + 1;
+    }
+    x
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn multiple_while_without_semicolons() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    var x: Int = 0;
+    while x < 5 {
+        x = x + 1;
+    }
+    while x < 10 {
+        x = x + 1;
+    }
+    x
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn while_with_complex_condition() {
+        Test::new(
+            r#"
+module Main
+
+func test(a: Bool, b: Bool) {
+    while a and b {
+        ()
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn nested_while_loops() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var i: Int = 0;
+    var j: Int = 0;
+    while i < 10 {
+        j = 0;
+        while j < 10 {
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}
+
+mod loop_basic {
+    use super::*;
+
+    #[test]
+    fn simple_loop_with_break() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    loop {
+        break;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn loop_without_semicolon_followed_by_expression() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    var x: Int = 0;
+    loop {
+        x = x + 1;
+        if x > 5 {
+            break;
+        }
+    }
+    x
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn nested_loops() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    loop {
+        loop {
+            break;
+        }
+        break;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}
+
+mod break_continue {
+    use super::*;
+
+    #[test]
+    fn break_in_while() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    while true {
+        break;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn continue_in_while() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 10 {
+        x = x + 1;
+        continue;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn break_in_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    loop {
+        break;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn continue_in_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    loop {
+        x = x + 1;
+        if x > 10 {
+            break;
+        }
+        continue;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn break_outside_loop_fails() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    break;
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("outside of loop"));
+    }
+
+    #[test]
+    fn continue_outside_loop_fails() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    continue;
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("outside of loop"));
+    }
+
+    #[test]
+    fn break_in_if_outside_loop_fails() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    if true {
+        break;
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("outside of loop"));
+    }
+}
+
+mod labeled_loops {
+    use super::*;
+
+    #[test]
+    fn labeled_while_with_break() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    outer: while true {
+        while true {
+            break outer;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn labeled_loop_with_break() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    outer: loop {
+        loop {
+            break outer;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn labeled_while_with_continue() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    outer: while x < 100 {
+        x = x + 1;
+        while true {
+            continue outer;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn break_to_undeclared_label_fails() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    while true {
+        break nonexistent;
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undeclared label"));
+    }
+
+    #[test]
+    fn continue_to_undeclared_label_fails() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    while true {
+        continue nonexistent;
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undeclared label"));
+    }
+
+    #[test]
+    fn multiple_labeled_loops() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    outer: loop {
+        inner: loop {
+            break inner;
+        }
+        break outer;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}
+
+mod loop_scoping {
+    use super::*;
+
+    #[test]
+    fn variable_in_while_block_not_visible_outside() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    while true {
+        let x: Int = 42;
+        break;
+    }
+    x
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undefined"));
+    }
+
+    #[test]
+    fn variable_in_loop_block_not_visible_outside() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    loop {
+        let y: Int = 10;
+        break;
+    }
+    y
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undefined"));
+    }
+
+    #[test]
+    fn outer_variable_visible_inside_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let outer: Int = 10;
+    while outer > 0 {
+        break;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}
+
+mod edge_cases {
+    use super::*;
+
+    #[test]
+    fn deeply_nested_loops() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var a: Int = 0;
+    while a < 10 {
+        var b: Int = 0;
+        while b < 10 {
+            var c: Int = 0;
+            while c < 10 {
+                var d: Int = 0;
+                loop {
+                    d = d + 1;
+                    if d > 5 {
+                        break;
+                    }
+                }
+                c = c + 1;
+            }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn loop_inside_if_inside_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 10 {
+        if x < 5 {
+            loop {
+                break;
+            }
+        }
+        x = x + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn if_inside_loop_inside_if() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    if true {
+        while x < 10 {
+            if x == 5 {
+                break;
+            }
+            x = x + 1;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn empty_while_body() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 0 {
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn empty_loop_body_with_break() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    loop {
+        break;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn while_with_comparison_condition() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var counter: Int = 0;
+    while counter < 10 {
+        counter = counter + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn while_with_function_call_condition() {
+        Test::new(
+            r#"
+module Main
+
+func shouldContinue() -> Bool {
+    false
+}
+
+func test() {
+    while shouldContinue() {
+        ()
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn while_with_nested_function_call_condition() {
+        Test::new(
+            r#"
+module Main
+
+func getValue() -> Int {
+    5
+}
+
+func isValid(x: Int) -> Bool {
+    x > 0
+}
+
+func test() {
+    while isValid(getValue()) {
+        break;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn if_with_function_call_condition() {
+        Test::new(
+            r#"
+module Main
+
+func check() -> Bool {
+    true
+}
+
+func test() {
+    if check() {
+        ()
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn break_as_last_statement() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while true {
+        x = x + 1;
+        break
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn continue_as_last_statement() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 10 {
+        x = x + 1;
+        continue
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn multiple_breaks_in_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    loop {
+        x = x + 1;
+        if x == 5 {
+            break;
+        }
+        if x == 10 {
+            break;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn multiple_continues_in_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 20 {
+        x = x + 1;
+        if x == 5 {
+            continue;
+        }
+        if x == 10 {
+            continue;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn break_and_continue_in_same_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 20 {
+        x = x + 1;
+        if x == 5 {
+            continue;
+        }
+        if x == 15 {
+            break;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn labeled_break_from_deeply_nested() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    outermost: while true {
+        while true {
+            loop {
+                break outermost;
+            }
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn same_label_in_different_scopes() {
+        // Labels are scoped to their containing loop, so reusing a label name
+        // after the previous loop ends should be fine
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    myloop: while true {
+        break myloop;
+    }
+    myloop: loop {
+        break myloop;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}
+
+mod error_cases {
+    use super::*;
+
+    #[test]
+    fn break_in_function_body_no_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x: Int = 1;
+    break;
+    let y: Int = 2;
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("outside of loop"));
+    }
+
+    #[test]
+    fn continue_in_function_body_no_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    let x: Int = 1;
+    continue;
+    let y: Int = 2;
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("outside of loop"));
+    }
+
+    #[test]
+    fn break_in_nested_if_no_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    if true {
+        if true {
+            break;
+        }
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("outside of loop"));
+    }
+
+    #[test]
+    fn continue_in_nested_if_no_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    if true {
+        if false {
+            continue;
+        }
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("outside of loop"));
+    }
+
+    #[test]
+    fn break_to_label_that_exists_but_not_in_scope() {
+        // Label exists in a sibling loop, not an enclosing loop
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    sibling: while true {
+        break;
+    }
+    while true {
+        break sibling;
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undeclared label"));
+    }
+
+    #[test]
+    fn continue_to_label_that_exists_but_not_in_scope() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    sibling: while x < 10 {
+        x = x + 1;
+    }
+    while x < 20 {
+        x = x + 1;
+        continue sibling;
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undeclared label"));
+    }
+
+    #[test]
+    fn break_to_inner_label_from_outer() {
+        // Can't break to a label that's inside the current scope, only enclosing
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    while true {
+        break inner;
+        inner: loop {
+            break;
+        }
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undeclared label"));
+    }
+
+    #[test]
+    fn break_with_typo_in_label() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    myloop: while true {
+        break mylooop;
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undeclared label"));
+    }
+
+    #[test]
+    fn continue_with_typo_in_label() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    myloop: while x < 10 {
+        x = x + 1;
+        continue myloooop;
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undeclared label"));
+    }
+
+    #[test]
+    fn use_loop_variable_after_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    while true {
+        let counter: Int = 0;
+        break;
+    }
+    counter
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undefined"));
+    }
+
+    #[test]
+    fn use_nested_loop_variable_outside() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    while true {
+        loop {
+            let inner: Int = 42;
+            break;
+        }
+        inner
+    }
+}
+"#,
+        )
+        .expect(Fails)
+        .expect(HasError("undefined"));
+    }
+
+    #[test]
+    fn shadowed_variable_not_visible_after_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() -> Int {
+    let x: Int = 1;
+    while true {
+        let x: Int = 2;
+        break;
+    }
+    x
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}
+
+mod complex_control_flow {
+    use super::*;
+
+    #[test]
+    fn while_with_else_if_chain_inside() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 100 {
+        if x < 10 {
+            x = x + 1;
+        } else if x < 50 {
+            x = x + 5;
+        } else {
+            x = x + 10;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn nested_labeled_loops_with_mixed_breaks() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    outer: while x < 100 {
+        var y: Int = 0;
+        middle: loop {
+            var z: Int = 0;
+            inner: while z < 10 {
+                z = z + 1;
+                if z == 5 {
+                    break inner;
+                }
+                if z == 7 {
+                    break middle;
+                }
+            }
+            y = y + 1;
+            if y > 3 {
+                break outer;
+            }
+        }
+        x = x + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn loop_with_conditional_break_and_continue() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var i: Int = 0;
+    outer: loop {
+        i = i + 1;
+        var j: Int = 0;
+        while j < i {
+            j = j + 1;
+            if j == 3 {
+                continue;
+            }
+            if j == 5 {
+                continue outer;
+            }
+        }
+        if i > 10 {
+            break outer;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn three_levels_of_labeled_loops() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    a: while true {
+        b: while true {
+            c: while true {
+                break a;
+            }
+            break b;
+        }
+        break;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn alternating_while_and_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 5 {
+        loop {
+            var y: Int = 0;
+            while y < 3 {
+                loop {
+                    break;
+                }
+                y = y + 1;
+            }
+            break;
+        }
+        x = x + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}
+
+mod statements_after_loops {
+    use super::*;
+
+    #[test]
+    fn statement_after_while_in_while() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 10 {
+        while x < 5 {
+            x = x + 1;
+        }
+        x = x + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn statement_after_loop_in_while() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 10 {
+        loop {
+            break;
+        }
+        x = x + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn statement_after_if_in_while() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 10 {
+        if x < 5 {
+            x = x + 2;
+        }
+        x = x + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn multiple_statement_like_expressions_in_sequence() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 100 {
+        if x < 10 {
+            x = x + 1;
+        }
+        while x < 20 {
+            x = x + 1;
+        }
+        loop {
+            x = x + 1;
+            break;
+        }
+        if x > 50 {
+            break;
+        }
+        x = x + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn statement_after_while_in_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    loop {
+        while x < 5 {
+            x = x + 1;
+        }
+        x = x + 1;
+        if x > 10 {
+            break;
+        }
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+
+    #[test]
+    fn statement_after_nested_if_while_loop() {
+        Test::new(
+            r#"
+module Main
+
+func test() {
+    var x: Int = 0;
+    while x < 100 {
+        if true {
+            while x < 10 {
+                loop {
+                    break;
+                }
+                x = x + 1;
+            }
+            x = x + 1;
+        }
+        x = x + 1;
+    }
+}
+"#,
+        )
+        .expect(Compiles)
+        .expect(Symbol::new("test").is(SymbolKind::Function));
+    }
+}

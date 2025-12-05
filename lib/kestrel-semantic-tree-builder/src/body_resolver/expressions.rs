@@ -4,11 +4,13 @@
 //! representations. It dispatches to specialized modules for complex expressions
 //! like calls, operators, and paths.
 
-use kestrel_semantic_tree::expr::{ElseBranch, Expression};
+use kestrel_semantic_tree::expr::{ElseBranch, Expression, LabelInfo};
 use kestrel_semantic_tree::stmt::Statement;
 use kestrel_semantic_tree::ty::Ty;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_reporting::IntoDiagnostic;
 
+use crate::diagnostics::{BreakOutsideLoopError, ContinueOutsideLoopError, UndeclaredLabelError};
 use crate::syntax::get_node_span;
 
 use super::calls::resolve_call_expression;
@@ -101,6 +103,26 @@ pub fn resolve_expression(
 
         SyntaxKind::ExprIf => {
             resolve_if_expression(expr_node, ctx)
+        }
+
+        SyntaxKind::ExprWhile => {
+            resolve_while_expression(expr_node, ctx)
+        }
+
+        SyntaxKind::ExprLoop => {
+            resolve_loop_expression(expr_node, ctx)
+        }
+
+        SyntaxKind::ExprBreak => {
+            resolve_break_expression(expr_node, ctx)
+        }
+
+        SyntaxKind::ExprContinue => {
+            resolve_continue_expression(expr_node, ctx)
+        }
+
+        SyntaxKind::ExprReturn => {
+            resolve_return_expression(expr_node, ctx)
         }
 
         _ => Expression::error(span),
@@ -382,6 +404,238 @@ fn resolve_else_clause(
     }
 
     None
+}
+
+/// Resolve a while expression: label: while condition { body }
+fn resolve_while_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // Parse optional label
+    let label_info = extract_loop_label(node);
+
+    // Find condition expression
+    let condition = node.children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+        .map(|c| resolve_expression(&c, ctx))
+        .unwrap_or_else(|| Expression::error(span.clone()));
+
+    // Enter the loop context with the label
+    let label_name = label_info.as_ref().map(|l| l.name.clone());
+    let label_span = label_info.as_ref().map(|l| l.span.clone());
+    let loop_id = ctx.enter_loop(label_name, label_span);
+
+    // Resolve the body
+    let body = node.children()
+        .find(|c| c.kind() == SyntaxKind::CodeBlock)
+        .map(|c| resolve_loop_body(&c, ctx))
+        .unwrap_or_default();
+
+    // Exit the loop context
+    ctx.exit_loop();
+
+    Expression::while_loop(loop_id, label_info, condition, body, span)
+}
+
+/// Resolve a loop expression: label: loop { body }
+fn resolve_loop_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // Parse optional label
+    let label_info = extract_loop_label(node);
+
+    // Enter the loop context with the label
+    let label_name = label_info.as_ref().map(|l| l.name.clone());
+    let label_span = label_info.as_ref().map(|l| l.span.clone());
+    let loop_id = ctx.enter_loop(label_name, label_span);
+
+    // Resolve the body
+    let body = node.children()
+        .find(|c| c.kind() == SyntaxKind::CodeBlock)
+        .map(|c| resolve_loop_body(&c, ctx))
+        .unwrap_or_default();
+
+    // Exit the loop context
+    ctx.exit_loop();
+
+    Expression::loop_expr(loop_id, label_info, body, span)
+}
+
+/// Resolve a break expression: break or break label
+fn resolve_break_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // Check if we're in a loop
+    if !ctx.in_loop() {
+        let error = BreakOutsideLoopError { span: span.clone() };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Extract optional label
+    let label_info = extract_break_continue_label(node);
+    let label_name = label_info.as_ref().map(|l| l.name.as_str());
+
+    // Find the target loop
+    let loop_id = match ctx.find_loop(label_name) {
+        Some(id) => id,
+        None => {
+            // Label not found
+            if let Some(ref label) = label_info {
+                let error = UndeclaredLabelError {
+                    span: label.span.clone(),
+                    label_name: label.name.clone(),
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+            }
+            return Expression::error(span);
+        }
+    };
+
+    Expression::break_expr(loop_id, label_info, span)
+}
+
+/// Resolve a continue expression: continue or continue label
+fn resolve_continue_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // Check if we're in a loop
+    if !ctx.in_loop() {
+        let error = ContinueOutsideLoopError { span: span.clone() };
+        ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Extract optional label
+    let label_info = extract_break_continue_label(node);
+    let label_name = label_info.as_ref().map(|l| l.name.as_str());
+
+    // Find the target loop
+    let loop_id = match ctx.find_loop(label_name) {
+        Some(id) => id,
+        None => {
+            // Label not found
+            if let Some(ref label) = label_info {
+                let error = UndeclaredLabelError {
+                    span: label.span.clone(),
+                    label_name: label.name.clone(),
+                };
+                ctx.diagnostics.add_diagnostic(error.into_diagnostic(ctx.file_id));
+            }
+            return Expression::error(span);
+        }
+    };
+
+    Expression::continue_expr(loop_id, label_info, span)
+}
+
+/// Resolve a return expression: return or return expr
+fn resolve_return_expression(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let span = get_node_span(node, ctx.source);
+
+    // Find the optional value expression
+    // The ExprReturn contains: Return keyword, optional Expression child
+    let value = node.children()
+        .find(|c| c.kind() == SyntaxKind::Expression || is_expression_kind(c.kind()))
+        .map(|expr_node| resolve_expression(&expr_node, ctx));
+
+    Expression::return_expr(value, span)
+}
+
+/// Resolve the body of a loop, returning statements.
+/// This creates a new scope for the loop body.
+fn resolve_loop_body(
+    block_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Vec<Statement> {
+    ctx.local_scope.push_scope();
+
+    let mut statements = Vec::new();
+
+    for child in block_node.children() {
+        match child.kind() {
+            SyntaxKind::Statement | SyntaxKind::ExpressionStatement => {
+                if let Some(stmt) = resolve_statement(&child, ctx) {
+                    statements.push(stmt);
+                }
+            }
+            SyntaxKind::VariableDeclaration => {
+                if let Some(stmt) = super::statements::resolve_variable_declaration(&child, ctx) {
+                    statements.push(stmt);
+                }
+            }
+            SyntaxKind::Expression => {
+                // Expressions in loop body become expression statements
+                let expr = resolve_expression(&child, ctx);
+                let stmt_span = get_node_span(&child, ctx.source);
+                statements.push(Statement::expr(expr, stmt_span));
+            }
+            _ if is_expression_kind(child.kind()) => {
+                // Handle bare expression kinds
+                let expr = resolve_expression(&child, ctx);
+                let stmt_span = get_node_span(&child, ctx.source);
+                statements.push(Statement::expr(expr, stmt_span));
+            }
+            _ => {}
+        }
+    }
+
+    ctx.local_scope.pop_scope();
+    statements
+}
+
+/// Extract label info from a loop expression (while/loop).
+/// The label appears as a LoopLabel child before the loop keyword.
+fn extract_loop_label(node: &SyntaxNode) -> Option<LabelInfo> {
+    node.children()
+        .find(|c| c.kind() == SyntaxKind::LoopLabel)
+        .and_then(|label_node| {
+            // The LoopLabel contains an Identifier token
+            label_node.children_with_tokens()
+                .filter_map(|e| e.into_token())
+                .find(|t| t.kind() == SyntaxKind::Identifier)
+                .map(|token| {
+                    let text_range = token.text_range();
+                    let start = text_range.start().into();
+                    let end = text_range.end().into();
+                    LabelInfo {
+                        name: token.text().to_string(),
+                        span: start..end,
+                    }
+                })
+        })
+}
+
+/// Extract label info from a break/continue expression.
+/// The label appears as an Identifier token after the keyword.
+fn extract_break_continue_label(node: &SyntaxNode) -> Option<LabelInfo> {
+    // The ExprBreak/ExprContinue contains: keyword token, optional Identifier token
+    node.children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+        .map(|token| {
+            let text_range = token.text_range();
+            let start = text_range.start().into();
+            let end = text_range.end().into();
+            LabelInfo {
+                name: token.text().to_string(),
+                span: start..end,
+            }
+        })
 }
 
 #[cfg(test)]

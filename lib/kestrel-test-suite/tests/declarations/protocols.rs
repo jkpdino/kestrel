@@ -300,8 +300,8 @@ mod validation {
                 func equals(other: Int) -> Bool
             }
             struct Number: Comparable {
-                func lessThan(other: Int) -> Bool { }
-                func equals(other: Int) -> Bool { }
+                func lessThan(other: Int) -> Bool { true }
+                func equals(other: Int) -> Bool { false }
             }
         "#,
         )
@@ -352,7 +352,7 @@ mod validation {
             }
             struct Circle: Shape {
                 func draw() { }
-                func area() -> Int { }
+                func area() -> Int { 42 }
             }
         "#,
         )

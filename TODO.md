@@ -1,183 +1,68 @@
 # Kestrel TODO
 
-This file tracks immediate next steps and their dependencies.
+This file tracks immediate next steps for Phase 5.
 
-## Current Priority: Control Flow
-
-## Operators
-
-### 1. Binary Operators
-**Status**: ✅ Complete
-
-```kestrel
-a + b
-a - b
-a * b
-a / b
-a % b
-```
-
-**Implementation**:
-- [x] Parser: Binary expression with precedence (Pratt parsing)
-- [x] AST: `ExprBinary` syntax node
-- [x] Semantic: Desugar to method calls (`a + b` → `a.add(b)`)
-- [x] Semantic: Primitive method lookup for Int, Float types
-- [x] Semantic: Bitwise operators (`&`, `|`, `^`, `<<`, `>>`)
-
-**Design Decision**: Operator overloading?
-- Current: Built-in operators on primitive types via `PrimitiveMethod`
-- Later: Protocol-based overloading (`Addable`, `Comparable`, etc.)
-
-### 2. Comparison Operators
-**Status**: ✅ Complete
-**Depends on**: Binary operator infrastructure
-
-```kestrel
-a == b
-a != b
-a < b
-a > b
-a <= b
-a >= b
-```
-
-**Implementation**:
-- [x] Parser: Same infrastructure as binary operators
-- [x] Semantic: Desugar to `eq`, `ne`, `lt`, `gt`, `le`, `ge` methods
-- [x] Semantic: Primitive methods for Int, Float, Bool, String
-
-### 3. Logical Operators
-**Status**: ✅ Complete
-**Depends on**: Comparison operators (for useful conditions)
-
-```kestrel
-a and b
-a or b
-not a
-```
-
-**Implementation**:
-- [x] Parser: `and`/`or` as binary, `not` as unary prefix
-- [x] Semantic: Desugar to `logicalAnd`, `logicalOr`, `logicalNot` methods
-- [x] Semantic: Primitive methods on Bool type
-- [ ] Semantic: Short-circuit evaluation (later, for codegen)
-
-### 4. Unary Operators
-**Status**: ✅ Complete
-
-```kestrel
--x      // negation
-+x      // identity
-!x      // bitwise not (prefix) / unwrap (postfix)
-not x   // logical not
-```
-
-**Implementation**:
-- [x] Parser: Prefix and postfix unary operators
-- [x] Semantic: Desugar to `neg`, `identity`, `bitNot`, `logicalNot` methods
-- [x] Semantic: Primitive methods for Int, Float, Bool
+## Current Priority: Type Checking
 
 ---
 
-## Control Flow
+## Phase 5: Validation & Type Checking
 
-### 4. If Expressions
+### Never Type Propagation
 **Status**: Not started
-**Depends on**: Comparison operators, logical operators
 
-```kestrel
-if condition {
-    thenBranch
-} else {
-    elseBranch
-}
-```
+Expressions with type `Never` should propagate correctly through the type system.
 
 **Implementation**:
-- [ ] Parser: `if` keyword, condition, braces, optional `else`
-- [ ] AST: `ExprKind::If { condition, then_branch, else_branch }`
-- [ ] Semantic: Condition must be `Bool`
-- [ ] Semantic: Branch types must match (if used as expression)
+- [ ] `Never` is compatible with any type (it never produces a value)
+- [ ] Expressions containing `Never` sub-expressions have type `Never`
+- [ ] Control flow after `Never` expressions is unreachable
 
-**Design Decision**: If as expression or statement?
-- Expression: `let x = if cond { 1 } else { 2 }`
-- Requires both branches, types must match
-- Recommendation: Expression (more powerful)
-
-### 5. While Loops
-**Status**: Not started
-**Depends on**: Comparison operators
-
+**Examples**:
 ```kestrel
-while condition {
-    body
-}
+let x: Int = return 5    // return has type Never, but this is valid
+let y: Int = if cond { 1 } else { return 2 }  // else branch is Never
 ```
 
-**Implementation**:
-- [ ] Parser: `while` keyword, condition, body block
-- [ ] AST: `Statement::While { condition, body }`
-- [ ] Semantic: Condition must be `Bool`
-
-### 6. Return / Break / Continue
+### Type Checking
 **Status**: Not started
-**Depends on**: Control flow (while, for)
 
-```kestrel
-return value
-break
-continue
-```
+Full type validation across the language.
 
 **Implementation**:
-- [ ] Parser: Keywords with optional expression (return)
-- [ ] AST: `Statement::Return`, `Statement::Break`, `Statement::Continue`
-- [ ] Semantic: Return type must match function signature
-- [ ] Semantic: Break/continue only valid inside loops
+- [ ] Return type checking
+  - [ ] `return expr` type matches function's declared return type
+  - [ ] Bare `return` only in functions returning `()`
+- [ ] Assignment type checking
+  - [ ] Value type matches target type
+  - [ ] Field assignment type checking
+- [ ] Function argument type checking
+  - [ ] Argument types match parameter types
+  - [ ] Generic type argument validation
+- [ ] Binary/unary operator type checking
+  - [ ] Operand types are valid for the operator
+  - [ ] Result type is correct
+- [ ] If expression type checking
+  - [ ] Condition is Bool
+  - [ ] Branch types match (when used as expression)
+- [ ] Type error diagnostics
+  - [ ] Clear "expected X, found Y" messages
+  - [ ] Show both locations (expected and actual)
 
 ---
 
-## Type System
+## Suggested Order
 
-### 7. Type Checking
-**Status**: Partial (some validation exists)
-**Depends on**: All expression types being resolvable
-
-**Current state**:
-- Types are resolved for declarations
-- Some expression types are inferred
-- No systematic type checking pass
-
-**Needs**:
-- [ ] Unify expected vs actual types
-- [ ] Type errors with good diagnostics
-- [ ] Coercion rules (if any)
-- [ ] Generic type argument inference
+1. **Never type propagation** - Foundation for control flow typing
+2. **Return type checking** - Most impactful for catching bugs
+3. **Assignment type checking** - Catch type mismatches at assignment
+4. **Argument type checking** - Validate function calls
+5. **Operator type checking** - Complete expression typing
 
 ---
 
-## Suggested Implementation Order
+## Notes
 
-```
-1. Binary Operators ──┬─> 2. Comparison ──┬─> 3. Logical     ✅ DONE
-                      │                   │        │
-                      │                   └────────┴─> 4. If Expressions
-                      │                                      │
-                      └─> 5. While Loops <───────────────────┘
-                               │
-                               └─> 6. Return/Break/Continue
-
-7. Type Checking (incremental, alongside each feature)
-```
-
-**Completed**:
-1. ✅ Binary operators (+, -, *, /, %, &, |, ^, <<, >>)
-2. ✅ Comparison operators (==, !=, <, >, <=, >=)
-3. ✅ Logical operators (and, or, not)
-4. ✅ Unary operators (+, -, !, not, postfix !)
-
-**Next**:
-1. If expressions
-2. While loops
-3. Return/break/continue
-
+- Type checking should produce clear, actionable error messages
+- Consider whether to allow implicit coercions (probably not initially)
+- Generic type checking will need constraint enforcement (Phase 6)

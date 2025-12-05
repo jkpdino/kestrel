@@ -10,6 +10,20 @@ use semantic_tree::symbol::SymbolId;
 use crate::symbol::local::LocalId;
 use crate::ty::Ty;
 
+/// Unique identifier for a loop within a function body.
+///
+/// Used to track which loop a break/continue refers to.
+/// Each while/loop expression gets a unique LoopId when resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LoopId(pub u32);
+
+impl LoopId {
+    /// Create a new LoopId.
+    pub fn new(id: u32) -> Self {
+        Self(id)
+    }
+}
+
 /// A call argument with optional label.
 ///
 /// Supports Swift-style labeled arguments:
@@ -355,10 +369,73 @@ pub enum ExprKind {
         else_branch: Option<ElseBranch>,
     },
 
-    // Future: While, Block, BinaryOp, UnaryOp, etc.
+    /// While loop expression: `label: while condition { body }`
+    ///
+    /// Type is `()` (unit) - while loops never produce a value.
+    While {
+        /// Unique identifier for this loop (for break/continue resolution)
+        loop_id: LoopId,
+        /// Optional label for named break/continue
+        label: Option<LabelInfo>,
+        /// The condition expression (must be Bool)
+        condition: Box<Expression>,
+        /// Statements in the loop body
+        body: Vec<crate::stmt::Statement>,
+    },
+
+    /// Infinite loop expression: `label: loop { body }`
+    ///
+    /// Type is `()` (unit) when it has a break, or Never if it loops forever.
+    /// Currently always typed as `()` for simplicity.
+    Loop {
+        /// Unique identifier for this loop (for break/continue resolution)
+        loop_id: LoopId,
+        /// Optional label for named break/continue
+        label: Option<LabelInfo>,
+        /// Statements in the loop body
+        body: Vec<crate::stmt::Statement>,
+    },
+
+    /// Break expression: `break` or `break label`
+    ///
+    /// Type is `Never` - control transfers out of the loop.
+    Break {
+        /// The target loop to break from (resolved from label or innermost)
+        loop_id: LoopId,
+        /// Original label (for diagnostics), None if unlabeled
+        label: Option<LabelInfo>,
+    },
+
+    /// Continue expression: `continue` or `continue label`
+    ///
+    /// Type is `Never` - control transfers to the loop condition.
+    Continue {
+        /// The target loop to continue (resolved from label or innermost)
+        loop_id: LoopId,
+        /// Original label (for diagnostics), None if unlabeled
+        label: Option<LabelInfo>,
+    },
+
+    /// Return expression: `return` or `return expr`
+    ///
+    /// Type is `Never` - control transfers out of the function.
+    Return {
+        /// The optional value to return (None means return unit)
+        value: Option<Box<Expression>>,
+    },
+
     /// Error expression (poison value).
     /// Used when expression resolution fails - prevents cascading errors.
     Error,
+}
+
+/// Information about a loop label.
+#[derive(Debug, Clone)]
+pub struct LabelInfo {
+    /// The label name
+    pub name: String,
+    /// The span of the label in source
+    pub span: Span,
 }
 
 /// Represents an else branch of an if expression.
@@ -711,6 +788,105 @@ impl Expression {
                 else_branch,
             },
             ty,
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a while loop expression.
+    ///
+    /// Type is always `()` (unit).
+    pub fn while_loop(
+        loop_id: LoopId,
+        label: Option<LabelInfo>,
+        condition: Expression,
+        body: Vec<crate::stmt::Statement>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            kind: ExprKind::While {
+                loop_id,
+                label,
+                condition: Box::new(condition),
+                body,
+            },
+            ty: Ty::unit(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create an infinite loop expression.
+    ///
+    /// Type is always `()` (unit).
+    pub fn loop_expr(
+        loop_id: LoopId,
+        label: Option<LabelInfo>,
+        body: Vec<crate::stmt::Statement>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            kind: ExprKind::Loop {
+                loop_id,
+                label,
+                body,
+            },
+            ty: Ty::unit(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a break expression.
+    ///
+    /// Type is `Never` - control transfers out of the loop.
+    pub fn break_expr(
+        loop_id: LoopId,
+        label: Option<LabelInfo>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            kind: ExprKind::Break {
+                loop_id,
+                label,
+            },
+            ty: Ty::never(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a continue expression.
+    ///
+    /// Type is `Never` - control transfers to the loop condition.
+    pub fn continue_expr(
+        loop_id: LoopId,
+        label: Option<LabelInfo>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            kind: ExprKind::Continue {
+                loop_id,
+                label,
+            },
+            ty: Ty::never(span.clone()),
+            span,
+            mutable: false,
+        }
+    }
+
+    /// Create a return expression.
+    ///
+    /// Type is `Never` - control transfers out of the function.
+    pub fn return_expr(
+        value: Option<Expression>,
+        span: Span,
+    ) -> Self {
+        Expression {
+            kind: ExprKind::Return {
+                value: value.map(Box::new),
+            },
+            ty: Ty::never(span.clone()),
             span,
             mutable: false,
         }
