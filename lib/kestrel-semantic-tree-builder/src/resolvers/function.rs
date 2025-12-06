@@ -1,18 +1,20 @@
 use std::sync::Arc;
 
 use kestrel_semantic_tree::behavior::callable::{CallableBehavior, ReceiverKind};
+use kestrel_semantic_tree::behavior::generics::GenericsBehavior;
 use kestrel_semantic_tree::behavior::visibility::VisibilityBehavior;
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::function::{FunctionSymbol, Parameter};
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol;
+use kestrel_semantic_tree::ty::{Constraint, Ty, TyKind, WhereClause};
 use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
 use crate::database::TypePathResolution;
 use crate::resolver::{BindingContext, Resolver};
-use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
+use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters};
 use crate::resolution::type_resolver::{extract_type_from_ty_node, extract_type_from_node, resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::syntax::{
     extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility, find_child,
@@ -73,10 +75,7 @@ impl Resolver for FunctionResolver {
         // Extract type parameters (they'll have function as parent later)
         let type_parameters = extract_type_parameters(syntax, source, parent.cloned());
 
-        // Extract where clause (uses type_parameters to look up SymbolIds)
-        let where_clause = extract_where_clause(syntax, source, &type_parameters);
-
-        // Create the function symbol with type parameters and where clause
+        // Create the function symbol (GenericsBehavior is added during BIND)
         let function_symbol = FunctionSymbol::with_generics(
             name,
             full_span,
@@ -85,8 +84,6 @@ impl Resolver for FunctionResolver {
             has_body,
             parameters,
             return_type,
-            type_parameters.clone(),
-            where_clause,
             parent.cloned(),
         );
         let function_arc = Arc::new(function_symbol);
@@ -127,15 +124,16 @@ impl Resolver for FunctionResolver {
         // Extract and resolve return type from syntax
         let resolved_return = resolve_return_type_from_syntax(syntax, &source, symbol_id, context, file_id);
 
-        // Resolve where clause bounds
-        resolve_where_clause_bounds(syntax, &source, symbol_id, context, file_id);
+        // Extract type parameters and resolve where clause bounds
+        let generics_behavior = resolve_generics(syntax, &source, symbol_id, context);
+
+        // Add GenericsBehavior
+        symbol.metadata().add_behavior(generics_behavior);
 
         // Determine receiver kind for instance methods
         let receiver_kind = determine_receiver_kind(syntax, symbol);
 
         // Add a new CallableBehavior with resolved types
-        // The FunctionSymbol.get_callable() method returns the last CallableBehavior,
-        // which will be this resolved one.
         let resolved_callable = match receiver_kind {
             Some(kind) => CallableBehavior::with_receiver(resolved_params.clone(), resolved_return, kind, span),
             None => CallableBehavior::new(resolved_params.clone(), resolved_return, span),
@@ -145,6 +143,131 @@ impl Resolver for FunctionResolver {
         // Resolve function body if present
         if let Some(body_node) = find_child(syntax, SyntaxKind::FunctionBody) {
             resolve_function_body(symbol, &body_node, &resolved_params, context, file_id, &source);
+        }
+    }
+}
+
+/// Extract type parameters and resolve where clause bounds, creating a GenericsBehavior.
+fn resolve_generics(
+    syntax: &SyntaxNode,
+    source: &str,
+    context_id: semantic_tree::symbol::SymbolId,
+    ctx: &mut BindingContext,
+) -> GenericsBehavior {
+    // Re-extract type parameters (they were already extracted during BUILD and added as children)
+    // We need to get them from the symbol's children
+    let symbol = match ctx.db.symbol_by_id(context_id) {
+        Some(s) => s,
+        None => return GenericsBehavior::empty(),
+    };
+
+    let type_parameters: Vec<Arc<TypeParameterSymbol>> = symbol
+        .metadata()
+        .children()
+        .into_iter()
+        .filter_map(|child| {
+            if child.metadata().kind() == KestrelSymbolKind::TypeParameter {
+                child.downcast_arc::<TypeParameterSymbol>().ok()
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Now resolve the where clause with fully resolved protocol types
+    let where_clause = resolve_where_clause(syntax, source, context_id, ctx, &type_parameters);
+
+    GenericsBehavior::new(type_parameters, where_clause)
+}
+
+/// Resolve where clause from syntax, returning a WhereClause with resolved protocol types.
+fn resolve_where_clause(
+    syntax: &SyntaxNode,
+    source: &str,
+    context_id: semantic_tree::symbol::SymbolId,
+    ctx: &mut BindingContext,
+    type_params: &[Arc<TypeParameterSymbol>],
+) -> WhereClause {
+    let where_clause_node = match find_child(syntax, SyntaxKind::WhereClause) {
+        Some(node) => node,
+        None => return WhereClause::new(),
+    };
+
+    let mut constraints = Vec::new();
+
+    for child in where_clause_node.children() {
+        if child.kind() == SyntaxKind::TypeBound {
+            if let Some(constraint) = resolve_type_bound(&child, source, context_id, ctx, type_params) {
+                constraints.push(constraint);
+            }
+        }
+    }
+
+    WhereClause::with_constraints(constraints)
+}
+
+/// Resolve a single TypeBound, resolving protocol paths to actual types.
+fn resolve_type_bound(
+    syntax: &SyntaxNode,
+    source: &str,
+    context_id: semantic_tree::symbol::SymbolId,
+    ctx: &mut BindingContext,
+    type_params: &[Arc<TypeParameterSymbol>],
+) -> Option<Constraint> {
+    // Find the Name node and extract the type parameter name and span
+    let name_node = find_child(syntax, SyntaxKind::Name)?;
+    let name_token = name_node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)?;
+
+    let param_name = name_token.text().to_string();
+    let text_range = name_token.text_range();
+    let param_span: kestrel_span::Span = (text_range.start().into())..(text_range.end().into());
+
+    // Look up the type parameter (may be None if undeclared)
+    let param_id = type_params
+        .iter()
+        .find(|p| p.metadata().name().value == param_name)
+        .map(|p| p.metadata().id());
+
+    // Resolve each Path to a protocol type
+    let bounds: Vec<Ty> = syntax
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::Path)
+        .map(|path_node| {
+            let span = get_node_span(&path_node, source);
+            let segments = extract_path_segments(&path_node);
+
+            if segments.is_empty() {
+                return Ty::error(span);
+            }
+
+            // Resolve the path to a type
+            match ctx.db.resolve_type_path(segments, context_id) {
+                TypePathResolution::Resolved(resolved_ty) => {
+                    if let TyKind::Protocol { .. } = resolved_ty.kind() {
+                        resolved_ty
+                    } else {
+                        // Not a protocol - error already reported by validation
+                        Ty::error(span)
+                    }
+                }
+                TypePathResolution::NotFound { .. } => {
+                    // Error already reported during general type resolution
+                    Ty::error(span)
+                }
+                _ => Ty::error(span),
+            }
+        })
+        .collect();
+
+    if bounds.is_empty() {
+        None
+    } else {
+        match param_id {
+            Some(id) => Some(Constraint::type_bound(id, param_name, param_span, bounds)),
+            None => Some(Constraint::unresolved_type_bound(param_name, param_span, bounds)),
         }
     }
 }
@@ -492,94 +615,5 @@ fn determine_receiver_kind(
         (true, _) => Some(ReceiverKind::Mutating),
         (_, true) => Some(ReceiverKind::Consuming),
         _ => Some(ReceiverKind::Borrowing), // Default for instance methods
-    }
-}
-
-/// Resolve where clause bounds from a FunctionDeclaration syntax node during bind phase.
-///
-/// This resolves the protocol types in where clause constraints (e.g., T: Add resolves
-/// Add to the actual protocol symbol). The resolved bounds are stored in the FunctionSymbol's
-/// where clause so they can be used during body resolution.
-fn resolve_where_clause_bounds(
-    syntax: &SyntaxNode,
-    source: &str,
-    context_id: semantic_tree::symbol::SymbolId,
-    ctx: &mut BindingContext,
-    file_id: usize,
-) {
-    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
-
-    // Get the function symbol to update its where clause
-    let Some(func_arc) = ctx.db.symbol_by_id(context_id) else {
-        return;
-    };
-
-    let Some(func_sym) = func_arc.as_ref().downcast_ref::<FunctionSymbol>() else {
-        return;
-    };
-
-    // Find the WhereClause syntax node
-    let Some(where_clause_node) = find_child(syntax, SyntaxKind::WhereClause) else {
-        return;
-    };
-
-    // Resolve each bound and update the function's where clause
-    // Track constraint index since there may be multiple TypeBounds for the same type parameter
-    let mut constraint_index = 0;
-    for child in where_clause_node.children() {
-        if child.kind() == SyntaxKind::TypeBound {
-            resolve_type_bound_in_function(&child, source, func_sym, ctx, constraint_index);
-            constraint_index += 1;
-        }
-    }
-}
-
-/// Resolve a single type bound in a function's where clause.
-///
-/// For each Path node in the TypeBound, resolve it to a protocol type and update
-/// the corresponding constraint in the function's where clause.
-///
-/// # Arguments
-/// * `constraint_index` - The index of this TypeBound's constraint in where_clause.constraints
-fn resolve_type_bound_in_function(
-    syntax: &SyntaxNode,
-    source: &str,
-    func_sym: &FunctionSymbol,
-    ctx: &mut BindingContext,
-    constraint_index: usize,
-) {
-    use kestrel_semantic_tree::ty::TyKind;
-
-    // Get the function's context ID for path resolution
-    let context_id = func_sym.metadata().id();
-
-    // Resolve each Path in the bound
-    let mut bound_index = 0;
-    for child in syntax.children() {
-        if child.kind() == SyntaxKind::Path {
-            let _span = get_node_span(&child, source);
-            let segments = extract_path_segments(&child);
-
-            if segments.is_empty() {
-                bound_index += 1;
-                continue;
-            }
-
-            // Resolve the path to a type
-            match ctx.db.resolve_type_path(segments.clone(), context_id) {
-                TypePathResolution::Resolved(resolved_ty) => {
-                    // Update the bound in the where clause
-                    if let TyKind::Protocol { .. } = resolved_ty.kind() {
-                        func_sym.update_where_clause_bound(constraint_index, bound_index, resolved_ty);
-                    }
-                }
-                TypePathResolution::NotFound { .. } => {
-                    // Error already reported during general type resolution
-                }
-                _ => {}
-            }
-
-            bound_index += 1;
-        }
     }
 }

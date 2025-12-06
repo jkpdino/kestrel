@@ -57,29 +57,29 @@ impl Validator for GenericsValidator {
             KestrelSymbolKind::Struct => {
                 if let Some(struct_sym) = symbol_ref.as_any().downcast_ref::<StructSymbol>() {
                     let type_params = struct_sym.type_parameters();
-                    validate_type_parameters(type_params, ctx);
-                    validate_where_clause(struct_sym.where_clause(), type_params, ctx);
+                    validate_type_parameters(&type_params, ctx);
+                    validate_where_clause(&struct_sym.where_clause(), &type_params, ctx);
                 }
             }
             KestrelSymbolKind::Function => {
                 if let Some(func_sym) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
                     let type_params = func_sym.type_parameters();
-                    validate_type_parameters(type_params, ctx);
-                    validate_where_clause(&func_sym.where_clause(), type_params, ctx);
+                    validate_type_parameters(&type_params, ctx);
+                    validate_where_clause(&func_sym.where_clause(), &type_params, ctx);
                 }
             }
             KestrelSymbolKind::Protocol => {
                 if let Some(proto_sym) = symbol_ref.as_any().downcast_ref::<ProtocolSymbol>() {
                     let type_params = proto_sym.type_parameters();
-                    validate_type_parameters(type_params, ctx);
-                    validate_where_clause(proto_sym.where_clause(), type_params, ctx);
+                    validate_type_parameters(&type_params, ctx);
+                    validate_where_clause(&proto_sym.where_clause(), &type_params, ctx);
                 }
             }
             KestrelSymbolKind::TypeAlias => {
                 if let Some(alias_sym) = symbol_ref.as_any().downcast_ref::<TypeAliasSymbol>() {
                     let type_params = alias_sym.type_parameters();
-                    validate_type_parameters(type_params, ctx);
-                    validate_where_clause(alias_sym.where_clause(), type_params, ctx);
+                    validate_type_parameters(&type_params, ctx);
+                    validate_where_clause(&alias_sym.where_clause(), &type_params, ctx);
                 }
             }
             _ => {}

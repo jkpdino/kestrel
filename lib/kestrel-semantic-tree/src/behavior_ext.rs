@@ -16,6 +16,7 @@ use semantic_tree::symbol::{Symbol, SymbolMetadata};
 
 use crate::behavior::callable::CallableBehavior;
 use crate::behavior::conformances::ConformancesBehavior;
+use crate::behavior::generics::GenericsBehavior;
 use crate::behavior::typed::TypedBehavior;
 use crate::behavior::valued::ValueBehavior;
 use crate::behavior::visibility::VisibilityBehavior;
@@ -38,6 +39,9 @@ pub trait BehaviorExt {
 
     /// Get the ConformancesBehavior if present (cloned)
     fn conformances_behavior(&self) -> Option<ConformancesBehavior>;
+
+    /// Get the GenericsBehavior if present (cloned)
+    fn generics_behavior(&self) -> Option<GenericsBehavior>;
 }
 
 impl BehaviorExt for SymbolMetadata<KestrelLanguage> {
@@ -75,6 +79,13 @@ impl BehaviorExt for SymbolMetadata<KestrelLanguage> {
             .find(|b| matches!(b.kind(), KestrelBehaviorKind::Conformances))
             .and_then(|b| b.as_ref().downcast_ref::<ConformancesBehavior>().cloned())
     }
+
+    fn generics_behavior(&self) -> Option<GenericsBehavior> {
+        self.behaviors()
+            .into_iter()
+            .find(|b| matches!(b.kind(), KestrelBehaviorKind::Generics))
+            .and_then(|b| b.as_ref().downcast_ref::<GenericsBehavior>().cloned())
+    }
 }
 
 /// Extension trait for accessing typed behaviors directly on symbols
@@ -93,6 +104,9 @@ pub trait SymbolBehaviorExt {
 
     /// Get the ConformancesBehavior if present (cloned)
     fn conformances_behavior(&self) -> Option<ConformancesBehavior>;
+
+    /// Get the GenericsBehavior if present (cloned)
+    fn generics_behavior(&self) -> Option<GenericsBehavior>;
 }
 
 impl<T: Symbol<KestrelLanguage>> SymbolBehaviorExt for T {
@@ -115,6 +129,10 @@ impl<T: Symbol<KestrelLanguage>> SymbolBehaviorExt for T {
     fn conformances_behavior(&self) -> Option<ConformancesBehavior> {
         self.metadata().conformances_behavior()
     }
+
+    fn generics_behavior(&self) -> Option<GenericsBehavior> {
+        self.metadata().generics_behavior()
+    }
 }
 
 impl SymbolBehaviorExt for Arc<dyn Symbol<KestrelLanguage>> {
@@ -136,5 +154,9 @@ impl SymbolBehaviorExt for Arc<dyn Symbol<KestrelLanguage>> {
 
     fn conformances_behavior(&self) -> Option<ConformancesBehavior> {
         self.metadata().conformances_behavior()
+    }
+
+    fn generics_behavior(&self) -> Option<GenericsBehavior> {
+        self.metadata().generics_behavior()
     }
 }

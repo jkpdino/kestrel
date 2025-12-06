@@ -39,19 +39,13 @@ pub use crate::behavior::callable::CallableParameter as Parameter;
 /// # Type Resolution
 ///
 /// During build phase, basic symbol information is captured but `CallableBehavior` is not yet added.
-/// During bind phase, `CallableBehavior` is added with resolved types.
+/// During bind phase, `CallableBehavior` and `GenericsBehavior` are added with resolved types.
 /// Query methods like `return_type()` and `signature()` return `None`/defaults until bind occurs.
 #[derive(Debug)]
 pub struct FunctionSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
     is_static: bool,
     has_body: bool,
-    /// Type parameters for generic functions, e.g., `func identity[T](value: T) -> T`
-    type_parameters: Vec<Arc<TypeParameterSymbol>>,
-    /// Where clause constraints for type parameters.
-    /// During BUILD phase, bounds are Ty::error() placeholders.
-    /// During BIND phase, bounds are updated to resolved protocol types.
-    where_clause: RwLock<WhereClause>,
     /// Local variables within this function (populated during body resolution)
     /// This includes function parameters and any let/var declarations.
     /// Variables with the same name due to shadowing have different LocalIds.
@@ -84,17 +78,14 @@ impl FunctionSymbol {
             has_body,
             parameters,
             return_type,
-            Vec::new(),
-            WhereClause::new(),
             parent,
         )
     }
 
     /// Create a new generic FunctionSymbol with type parameters and where clause
     ///
-    /// NOTE: CallableBehavior is NOT added here. It will be added during the bind phase
-    /// when types are resolved. This avoids having two CallableBehaviors (one with
-    /// unresolved placeholder types, one with resolved types).
+    /// NOTE: CallableBehavior and GenericsBehavior are NOT added here. They will be
+    /// added during the bind phase when types are resolved.
     pub fn with_generics(
         name: Name,
         span: Span,
@@ -103,14 +94,12 @@ impl FunctionSymbol {
         has_body: bool,
         _parameters: Vec<Parameter>,
         _return_type: Ty,
-        type_parameters: Vec<Arc<TypeParameterSymbol>>,
-        where_clause: WhereClause,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
         // Create the function data behavior
         let function_data = FunctionDataBehavior::new(has_body, is_static);
 
-        // Note: CallableBehavior is added during bind phase with resolved types
+        // Note: CallableBehavior and GenericsBehavior are added during bind phase
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Function)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
@@ -126,8 +115,6 @@ impl FunctionSymbol {
             metadata: builder.build(),
             is_static,
             has_body,
-            type_parameters,
-            where_clause: RwLock::new(where_clause),
             locals: RwLock::new(Vec::new()),
         }
     }
@@ -202,49 +189,64 @@ impl FunctionSymbol {
             .unwrap_or_default()
     }
 
-    /// Get the type parameters for this function
-    pub fn type_parameters(&self) -> &[Arc<TypeParameterSymbol>] {
-        &self.type_parameters
+    /// Get the type parameters for this function.
+    ///
+    /// During BUILD phase (before GenericsBehavior is attached), this gets
+    /// TypeParameter children directly. After BIND, it uses the GenericsBehavior.
+    pub fn type_parameters(&self) -> Vec<Arc<TypeParameterSymbol>> {
+        // First try GenericsBehavior (available after BIND)
+        if let Some(g) = self.metadata.generics_behavior() {
+            return g.type_parameters().to_vec();
+        }
+
+        // Fallback: get TypeParameter children (available during BUILD)
+        self.metadata
+            .children()
+            .into_iter()
+            .filter_map(|c| {
+                if c.metadata().kind() == KestrelSymbolKind::TypeParameter {
+                    c.downcast_arc::<TypeParameterSymbol>().ok()
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Check if this function is generic (has type parameters)
     pub fn is_generic(&self) -> bool {
-        !self.type_parameters.is_empty()
+        self.metadata
+            .generics_behavior()
+            .map(|g| g.is_generic())
+            .unwrap_or(false)
     }
 
     /// Get the number of type parameters
+    ///
+    /// During BUILD phase (before GenericsBehavior is attached), this counts
+    /// TypeParameter children. After BIND, it uses the GenericsBehavior.
     pub fn type_parameter_count(&self) -> usize {
-        self.type_parameters.len()
-    }
-
-    /// Get the where clause for this function (cloned)
-    pub fn where_clause(&self) -> WhereClause {
-        self.where_clause.read().unwrap().clone()
-    }
-
-    /// Update a specific bound in the where clause by constraint index.
-    ///
-    /// This is called during the BIND phase to replace placeholder Ty::error()
-    /// bounds with resolved protocol types.
-    ///
-    /// # Arguments
-    /// * `constraint_index` - The index of the constraint in where_clause.constraints
-    /// * `bound_index` - The index of the bound within that constraint
-    /// * `resolved_bound` - The resolved protocol type
-    pub fn update_where_clause_bound(
-        &self,
-        constraint_index: usize,
-        bound_index: usize,
-        resolved_bound: Ty,
-    ) {
-        let mut wc = self.where_clause.write().unwrap();
-        if constraint_index < wc.constraints.len() {
-            if let crate::ty::Constraint::TypeBound { bounds, .. } = &mut wc.constraints[constraint_index] {
-                if bound_index < bounds.len() {
-                    bounds[bound_index] = resolved_bound;
-                }
-            }
+        // First try GenericsBehavior (available after BIND)
+        if let Some(g) = self.metadata.generics_behavior() {
+            return g.type_parameter_count();
         }
+
+        // Fallback: count TypeParameter children (available during BUILD)
+        self.metadata
+            .children()
+            .iter()
+            .filter(|c| c.metadata().kind() == KestrelSymbolKind::TypeParameter)
+            .count()
+    }
+
+    /// Get the where clause for this function.
+    ///
+    /// Delegates to GenericsBehavior. Returns empty where clause if not yet bound.
+    pub fn where_clause(&self) -> WhereClause {
+        self.metadata
+            .generics_behavior()
+            .map(|g| g.where_clause().clone())
+            .unwrap_or_else(WhereClause::new)
     }
 
     /// Add a new local variable to this function.

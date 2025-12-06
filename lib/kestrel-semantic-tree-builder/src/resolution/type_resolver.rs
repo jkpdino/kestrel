@@ -162,7 +162,7 @@ impl<'a> TypeResolver<'a> {
                 let type_params = symbol.type_parameters();
                 let type_name = symbol.metadata().name().value.clone();
                 self.apply_type_args_to_generic(
-                    type_params,
+                    &type_params,
                     &type_name,
                     type_args,
                     span.clone(),
@@ -174,7 +174,7 @@ impl<'a> TypeResolver<'a> {
                 let type_params = symbol.type_parameters();
                 let type_name = symbol.metadata().name().value.clone();
                 self.apply_type_args_to_generic(
-                    type_params,
+                    &type_params,
                     &type_name,
                     type_args,
                     span.clone(),
@@ -186,7 +186,7 @@ impl<'a> TypeResolver<'a> {
                 let type_params = symbol.type_parameters();
                 let type_name = symbol.metadata().name().value.clone();
                 self.apply_type_args_to_generic(
-                    type_params,
+                    &type_params,
                     &type_name,
                     type_args,
                     span.clone(),

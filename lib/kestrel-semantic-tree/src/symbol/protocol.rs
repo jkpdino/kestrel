@@ -5,19 +5,25 @@ use semantic_tree::symbol::{Symbol, SymbolMetadata, SymbolMetadataBuilder};
 
 use crate::{
     behavior::visibility::VisibilityBehavior,
+    behavior_ext::BehaviorExt,
     language::KestrelLanguage,
     symbol::kind::KestrelSymbolKind,
     symbol::type_parameter::TypeParameterSymbol,
     ty::WhereClause,
 };
 
+/// Represents a protocol declaration in the semantic tree.
+///
+/// Protocols define interfaces that types can conform to.
+///
+/// # Type Resolution
+///
+/// During build phase, basic symbol information is captured.
+/// During bind phase, `GenericsBehavior` is added with resolved type parameters and where clause.
+/// Inherited protocols are added as `ConformancesBehavior`.
 #[derive(Debug)]
 pub struct ProtocolSymbol {
     metadata: SymbolMetadata<KestrelLanguage>,
-    /// Type parameters for generic protocols, e.g., `protocol Iterator[T]`
-    type_parameters: Vec<Arc<TypeParameterSymbol>>,
-    /// Where clause constraints for type parameters
-    where_clause: WhereClause,
 }
 
 impl Symbol<KestrelLanguage> for ProtocolSymbol {
@@ -34,21 +40,6 @@ impl ProtocolSymbol {
         visibility: VisibilityBehavior,
         parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
     ) -> Self {
-        Self::with_generics(name, span, visibility, Vec::new(), WhereClause::new(), parent)
-    }
-
-    /// Create a new generic ProtocolSymbol with type parameters and where clause
-    ///
-    /// Note: Inherited protocols (conformances) are added as a `ConformancesBehavior`
-    /// during bind phase, not stored directly on the symbol.
-    pub fn with_generics(
-        name: Name,
-        span: Span,
-        visibility: VisibilityBehavior,
-        type_parameters: Vec<Arc<TypeParameterSymbol>>,
-        where_clause: WhereClause,
-        parent: Option<Arc<dyn Symbol<KestrelLanguage>>>,
-    ) -> Self {
         let mut builder = SymbolMetadataBuilder::new(KestrelSymbolKind::Protocol)
             .with_name(name.clone())
             .with_declaration_span(name.span.clone())
@@ -61,28 +52,66 @@ impl ProtocolSymbol {
 
         ProtocolSymbol {
             metadata: builder.build(),
-            type_parameters,
-            where_clause,
         }
     }
 
-    /// Get the type parameters for this protocol
-    pub fn type_parameters(&self) -> &[Arc<TypeParameterSymbol>] {
-        &self.type_parameters
+    /// Get the type parameters for this protocol.
+    ///
+    /// During BUILD phase (before GenericsBehavior is attached), this gets
+    /// TypeParameter children directly. After BIND, it uses the GenericsBehavior.
+    pub fn type_parameters(&self) -> Vec<Arc<TypeParameterSymbol>> {
+        // First try GenericsBehavior (available after BIND)
+        if let Some(g) = self.metadata.generics_behavior() {
+            return g.type_parameters().to_vec();
+        }
+
+        // Fallback: get TypeParameter children (available during BUILD)
+        self.metadata
+            .children()
+            .into_iter()
+            .filter_map(|c| {
+                if c.metadata().kind() == KestrelSymbolKind::TypeParameter {
+                    c.downcast_arc::<TypeParameterSymbol>().ok()
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Check if this protocol is generic (has type parameters)
     pub fn is_generic(&self) -> bool {
-        !self.type_parameters.is_empty()
+        self.metadata
+            .generics_behavior()
+            .map(|g| g.is_generic())
+            .unwrap_or(false)
     }
 
     /// Get the number of type parameters
+    ///
+    /// During BUILD phase (before GenericsBehavior is attached), this counts
+    /// TypeParameter children. After BIND, it uses the GenericsBehavior.
     pub fn type_parameter_count(&self) -> usize {
-        self.type_parameters.len()
+        // First try GenericsBehavior (available after BIND)
+        if let Some(g) = self.metadata.generics_behavior() {
+            return g.type_parameter_count();
+        }
+
+        // Fallback: count TypeParameter children (available during BUILD)
+        self.metadata
+            .children()
+            .iter()
+            .filter(|c| c.metadata().kind() == KestrelSymbolKind::TypeParameter)
+            .count()
     }
 
-    /// Get the where clause for this protocol
-    pub fn where_clause(&self) -> &WhereClause {
-        &self.where_clause
+    /// Get the where clause for this protocol.
+    ///
+    /// Delegates to GenericsBehavior. Returns empty where clause if not yet bound.
+    pub fn where_clause(&self) -> WhereClause {
+        self.metadata
+            .generics_behavior()
+            .map(|g| g.where_clause().clone())
+            .unwrap_or_else(WhereClause::new)
     }
 }
