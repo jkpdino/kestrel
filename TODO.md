@@ -8,35 +8,49 @@ This file tracks immediate next steps for Phase 6.
 
 ## Phase 6: Generics & Protocols
 
+### GenericsBehavior Refactor
+**Status**: ✅ DONE
+
+Refactored generics storage to use the behavior pattern consistently, eliminating `RwLock<WhereClause>` mutation.
+
+**What was done**:
+- [x] Created `GenericsBehavior` holding type parameters and where clause
+- [x] Added `Generics` to `KestrelBehaviorKind`
+- [x] Added `generics_behavior()` accessor to `BehaviorExt`
+- [x] Removed `type_parameters` and `where_clause` fields from `FunctionSymbol`, `StructSymbol`, `ProtocolSymbol`, `TypeAliasSymbol`
+- [x] Updated resolvers to add `GenericsBehavior` during BIND with fully resolved where clause
+- [x] Added fallback to children for `type_parameters()` during BUILD phase (before BIND)
+
 ### Generic Constraint Enforcement
-**Status**: TODO
+**Status**: ✅ DONE
 
 Use `where` clause constraints to enable method calls on type parameters.
 
-**Tasks**:
-- [ ] Add `get_where_clause(symbol)` helper function
-- [ ] Modify `get_type_container()` to handle `TypeParameter` by looking up protocol bounds
-- [ ] Collect methods from ALL protocol bounds (not just first)
-- [ ] Substitute `Self` with receiver type when looking up protocol methods
-- [ ] Handle ambiguous methods (same signature in multiple protocols) with diagnostic
-- [ ] Search inherited protocol methods (protocol inheritance chain)
-- [ ] Add call-site constraint verification (self-contained, movable function)
-- [ ] Emit diagnostic (not hard error) for unsupported generic protocol bounds (defer to associated types)
+**What was done**:
+- [x] Add `get_where_clause(symbol)` helper function
+- [x] Modify `get_type_container()` to handle `TypeParameter` by looking up protocol bounds
+- [x] Collect methods from ALL protocol bounds (not just first)
+- [x] Substitute `Self` with receiver type when looking up protocol methods
+- [x] Handle ambiguous methods (same signature in multiple protocols) with diagnostic
+- [x] Search inherited protocol methods (protocol inheritance chain)
+- [x] Add call-site constraint verification (self-contained, movable function)
+- [x] Emit diagnostic (not hard error) for unsupported generic protocol bounds (defer to associated types)
 
-**New Diagnostics**:
-- [ ] `UnconstrainedTypeParameterMemberError` - accessing member on type param with no bounds
-- [ ] `MethodNotInBoundsError` - method not found in any protocol bound
-- [ ] `AmbiguousConstrainedMethodError` - method found in multiple bounds with same signature
-- [ ] `ConstraintNotSatisfiedError` - call site fails to satisfy bound
+**New Diagnostics** (implemented):
+- [x] `UnconstrainedTypeParameterMemberError` - accessing member on type param with no bounds
+- [x] `MethodNotInBoundsError` - method not found in any protocol bound
+- [x] `AmbiguousConstrainedMethodError` - method found in multiple bounds with same signature
+- [x] `ConstraintNotSatisfiedError` - call site fails to satisfy bound
+- [x] `UnsupportedGenericProtocolBoundError` - generic protocol bounds deferred
 
-**Example** (should work after implementation):
+**Example** (now works):
 ```kestrel
 protocol Add {
     func add(other: Self) -> Self
 }
 
 func addThem[T](a: T, b: T) -> T where T: Add {
-    return a.add(b)  // Currently errors: "type 'T' does not have accessible members"
+    return a.add(b)  // ✅ Works - looks up `add` from protocol bound
 }
 ```
 

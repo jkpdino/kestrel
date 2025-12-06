@@ -243,14 +243,19 @@
 
 ## Phase 6: Generics & Protocols
 
-- [ ] Generic Constraint Enforcement
-  - [ ] Modify `get_type_container()` to handle TypeParameter via protocol bounds
-  - [ ] Collect methods from all protocol bounds
-  - [ ] Self substitution (Self → receiver type)
-  - [ ] Handle ambiguous methods across multiple bounds
-  - [ ] Protocol inheritance chain traversal
-  - [ ] Call-site constraint verification
-  - [ ] New diagnostics for constraint errors
+- [x] Generic Constraint Enforcement ✓
+  - [x] Modify `get_type_container()` to handle TypeParameter via protocol bounds
+  - [x] Collect methods from all protocol bounds
+  - [x] Self substitution (Self → receiver type)
+  - [x] Handle ambiguous methods across multiple bounds
+  - [x] Protocol inheritance chain traversal
+  - [x] Call-site constraint verification
+  - [x] New diagnostics for constraint errors
+- [x] GenericsBehavior Refactor ✓
+  - [x] Created GenericsBehavior for type_parameters + where_clause
+  - [x] Eliminated RwLock<WhereClause> mutation pattern
+  - [x] Resolvers add GenericsBehavior during BIND with resolved bounds
+  - [x] Fallback to children for BUILD phase type parameter access
 - [ ] Associated Types
   - [ ] Protocol associated type declarations (`protocol Iterator { type Item }`)
   - [ ] AssociatedTypeSymbol representation
@@ -347,33 +352,29 @@
 
 ## Current Status
 
-**Phase**: Phase 5 (Validation & Type Checking) - COMPLETE ✓
-**Progress**: Phases 1-5 complete. Ready for Phase 6.
+**Phase**: Phase 6 (Generics & Protocols) - IN PROGRESS
+**Progress**: Phases 1-5 complete. Phase 6 partially complete.
 
-**Recently Completed (Phase 5)**:
+**Recently Completed (Phase 6)**:
 
-- Never type propagation with Ty::join()
-- Full type checking via TypeCheckValidator:
-  - Return type checking
-  - Assignment type checking
-  - Variable binding type checking
-  - Function/initializer argument type checking
-  - If/while condition must be Bool
-  - If branch type matching
-  - Array element type consistency
-  - Struct nominal equality
-  - Generic struct type inference in implicit init
-- Parser fix: inline semicolon-separated field declarations
-- Tuple indexing (`tuple.0`, `tuple.1`)
-  - Parser, resolution, type checking, assignment support
-  - Known limitation: chained access requires intermediate variables
+- Generic Constraint Enforcement ✓
+  - Method calls on type parameters via protocol bounds (`T.method()` where `T: Protocol`)
+  - Self substitution in protocol method return types and parameters
+  - Ambiguous method detection across multiple bounds
+  - Protocol inheritance chain traversal for method lookup
+  - Call-site constraint verification
+  - New diagnostics: UnconstrainedTypeParameterMemberError, MethodNotInBoundsError, AmbiguousConstrainedMethodError, ConstraintNotSatisfiedError, UnsupportedGenericProtocolBoundError
+- GenericsBehavior Refactor ✓
+  - Replaced RwLock<WhereClause> with clean GenericsBehavior pattern
+  - Type parameters and where clause now stored as behavior (like CallableBehavior)
+  - Resolvers add GenericsBehavior during BIND with fully resolved protocol bounds
+  - Fallback to children for type_parameters() during BUILD phase
 
 **Next Tasks**:
 
-1. Generic constraint enforcement (Phase 6)
-2. Associated types (Phase 6)
-3. Protocol method linking (Phase 6)
-4. Extensions with conformances (Phase 6)
+1. Associated types (Phase 6)
+2. Protocol method linking (Phase 6)
+3. Extensions with conformances (Phase 6)
 
 ## Notes
 
