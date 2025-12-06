@@ -241,17 +241,37 @@
   - [x] Mutability support (assignment to tuple elements)
   - Note: Chained access (`t.0.1`) requires intermediate variables due to lexer ambiguity
 
-## Phase 6: Type System Completion
+## Phase 6: Generics & Protocols
 
-- [ ] Type Inference
-  - [ ] `let x = 42` infers `Int`
-  - [ ] Generic type argument inference at call sites
-  - [ ] Closure parameter type inference (when closures exist)
 - [ ] Generic Constraint Enforcement
+  - [ ] Use constraints to determine available methods on type parameters
   - [ ] Verify bounds at call sites
   - [ ] Constraint satisfaction checking
+- [ ] Associated Types
+  - [ ] Protocol associated type declarations (`protocol Iterator { type Item }`)
+  - [ ] Associated type resolution in conforming types
+  - [ ] Associated type constraints (`where T.Item: Equatable`)
+- [ ] Protocol Method Linking
+  - [ ] Track which protocol a method satisfies when struct conforms
+  - [ ] Resolve protocol method calls to concrete implementations
+- [ ] Extensions with Conformances
+  - [ ] `extend Type: Protocol { ... }` syntax
+  - [ ] Methods in extension satisfy protocol requirements
+  - [ ] Retroactive conformance (add conformance to types you don't own)
 
-## Phase 7: Closures & First-Class Functions
+## Phase 7: Type Inference
+
+- [ ] Local Type Inference
+  - [ ] `let x = 42` infers `Int`
+  - [ ] `let p = Point(x: 1, y: 2)` infers `Point`
+- [ ] Generic Type Argument Inference
+  - [ ] Infer type arguments from call arguments
+  - [ ] `identity(42)` infers `identity[Int](42)`
+- [ ] Bidirectional Type Checking
+  - [ ] Expected type propagation into expressions
+  - [ ] Foundation for closure parameter inference
+
+## Phase 8: Closures & First-Class Functions
 
 - [ ] Closure Expressions
   - [ ] Closure syntax (e.g., `{ x, y in x + y }` or `func(x, y) { x + y }`)
@@ -260,8 +280,11 @@
 - [ ] Function References
   - [ ] Reference named functions as values
   - [ ] Pass functions to higher-order functions
+- [ ] Closure Type Inference
+  - [ ] Infer parameter types from context
+  - [ ] `numbers.map({ n in n * 2 })` infers `n: Int`
 
-## Phase 8: Enums & Algebraic Data Types
+## Phase 9: Enums & Algebraic Data Types
 
 - [ ] Enum Declarations
   - [ ] Simple enums: `enum Color { Red, Green, Blue }`
@@ -274,7 +297,7 @@
   - [ ] Guard clauses in patterns
   - [ ] `if let` / `guard let`
 
-## Phase 9: Memory Model
+## Phase 10: Memory Model
 
 - [ ] Value vs Reference Semantics
   - [ ] Structs as value types (copy semantics)
@@ -284,7 +307,7 @@
   - [ ] Ownership/borrowing, or
   - [ ] Garbage collection
 
-## Phase 10: Code Generation
+## Phase 11: Code Generation
 
 - [ ] IR Generation
   - [ ] Choose target: LLVM, WASM, bytecode, or transpile
@@ -294,7 +317,7 @@
 - [ ] Executable Output
   - [ ] Binary or interpreted execution
 
-## Phase 11: Standard Library & Syntactic Sugar
+## Phase 12: Standard Library & Syntactic Sugar
 
 - [ ] Standard Library
   - [ ] Option[T], Result[T, E] (as regular enums)
@@ -334,8 +357,10 @@
 
 **Next Tasks**:
 
-1. Type inference (Phase 6)
-2. Generic constraint enforcement (Phase 6)
+1. Generic constraint enforcement (Phase 6)
+2. Associated types (Phase 6)
+3. Protocol method linking (Phase 6)
+4. Extensions with conformances (Phase 6)
 
 ## Notes
 
