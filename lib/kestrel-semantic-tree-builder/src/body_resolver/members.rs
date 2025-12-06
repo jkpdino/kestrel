@@ -1,29 +1,37 @@
 //! Member access resolution.
 //!
 //! This module handles resolving member access expressions (field access, method calls)
-//! including visibility checking and member chain resolution.
+//! including visibility checking, member chain resolution, and constraint enforcement
+//! for type parameters.
 
 use std::sync::Arc;
 
 use kestrel_reporting::IntoDiagnostic;
+use kestrel_semantic_tree::behavior::callable::CallableBehavior;
 use kestrel_semantic_tree::behavior::member_access::MemberAccessBehavior;
 use kestrel_semantic_tree::behavior::KestrelBehaviorKind;
+use kestrel_semantic_tree::behavior_ext::SymbolBehaviorExt;
 use kestrel_semantic_tree::expr::{CallArgument, Expression, PrimitiveMethod};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
+use kestrel_semantic_tree::symbol::protocol::ProtocolSymbol;
+use kestrel_semantic_tree::ty::{Ty, TyKind};
 use kestrel_span::Span;
 use semantic_tree::symbol::{Symbol, SymbolId};
 
 use crate::diagnostics::{
-    CannotAccessMemberOnTypeError, MemberNotAccessibleError, MemberNotVisibleError,
-    NoMatchingMethodError, NoSuchMemberError, NoSuchMethodError, PrimitiveMethodNotCallableError,
+    AmbiguousConstrainedMethodError, CannotAccessMemberOnTypeError, MemberNotAccessibleError,
+    MemberNotVisibleError, MethodNotInBoundsError, NoMatchingMethodError, NoSuchMemberError,
+    NoSuchMethodError, PrimitiveMethodNotCallableError, UnconstrainedTypeParameterMemberError,
+    UnsupportedGenericProtocolBoundError,
 };
 use crate::resolution::visibility::is_visible_from;
 
 use super::calls::collect_overload_descriptions;
 use super::context::BodyResolutionContext;
 use super::utils::{
-    format_symbol_kind, format_type, get_callable_behavior, get_type_container, matches_signature,
+    format_symbol_kind, format_type, get_callable_behavior, get_type_container,
+    get_type_parameter_bounds_from_context, matches_signature, substitute_self,
 };
 
 /// Resolve a chain of member accesses: obj.field1.field2.field3
@@ -74,7 +82,21 @@ pub fn resolve_member_access(
         return Expression::error(full_span);
     }
 
-    // 2. Get container from base type
+    // 2. Handle type parameter specially - we can't access fields, only methods
+    // For type parameters, create a MethodRef that will be resolved when called
+    if let TyKind::TypeParameter(type_param) = base_ty.kind() {
+        let type_param = type_param.clone();
+        return resolve_constrained_member_access(
+            base,
+            &type_param,
+            member_name,
+            member_span,
+            full_span,
+            ctx,
+        );
+    }
+
+    // 3. Get container from base type
     let container = match get_type_container(base_ty, ctx) {
         Some(c) => c,
         None => {
@@ -175,7 +197,148 @@ pub fn resolve_member_access(
     Expression::error(full_span)
 }
 
+/// Tracks a method found in a protocol bound, with its source protocol.
+struct ProtocolMethodCandidate {
+    method_id: SymbolId,
+    protocol_name: String,
+    definition_span: Span,
+}
+
+/// Resolve a member access on a constrained type parameter: a.member where a: T
+///
+/// Type parameters can only have method members (accessed from protocol bounds).
+/// This creates a MethodRef that will be resolved when the call happens.
+fn resolve_constrained_member_access(
+    base: Expression,
+    type_param: &Arc<kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol>,
+    member_name: &str,
+    _member_span: Span,
+    full_span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let type_param_name = type_param.metadata().name().value.clone();
+
+    // Get all protocol bounds for this type parameter
+    let bounds = get_type_parameter_bounds_from_context(type_param, ctx);
+
+    // If no bounds, report error
+    if bounds.is_empty() {
+        let error = UnconstrainedTypeParameterMemberError {
+            span: full_span.clone(),
+            member_name: member_name.to_string(),
+            type_param_name,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(full_span);
+    }
+
+    // Collect all method candidates from protocol bounds, tracking their source
+    let mut candidates: Vec<ProtocolMethodCandidate> = Vec::new();
+    let mut bound_names: Vec<String> = Vec::new();
+
+    for bound in &bounds {
+        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+            let proto_name = proto.metadata().name().value.clone();
+            bound_names.push(proto_name.clone());
+
+            // Check for generic protocol (not yet supported)
+            if !proto.type_parameters().is_empty() {
+                let error = UnsupportedGenericProtocolBoundError {
+                    span: bound.span().clone(),
+                    protocol_name: proto_name,
+                };
+                ctx.diagnostics
+                    .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                return Expression::error(full_span);
+            }
+
+            // Collect method IDs from this protocol (including inherited)
+            collect_protocol_method_candidates(proto, member_name, &mut candidates, ctx);
+        }
+    }
+
+    if candidates.is_empty() {
+        let error = MethodNotInBoundsError {
+            call_span: full_span.clone(),
+            method_name: member_name.to_string(),
+            type_param_name,
+            bound_names,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(full_span);
+    }
+
+    // Check for ambiguity - multiple distinct protocols have a method with this name
+    let mut unique_protocols: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for c in &candidates {
+        unique_protocols.insert(&c.protocol_name);
+    }
+
+    if unique_protocols.len() > 1 {
+        // Ambiguous - method found in multiple different protocols
+        let protocol_names: Vec<String> = candidates.iter().map(|c| c.protocol_name.clone()).collect();
+        let definition_spans: Vec<(String, Span)> = candidates
+            .iter()
+            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
+            .collect();
+
+        let error = AmbiguousConstrainedMethodError {
+            call_span: full_span.clone(),
+            method_name: member_name.to_string(),
+            protocol_names,
+            definition_spans,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(full_span);
+    }
+
+    // Single protocol source - create MethodRef
+    let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method_id).collect();
+    Expression::method_ref(base, method_ids, member_name.to_string(), full_span)
+}
+
+/// Collect method candidates from a protocol, including inherited protocols.
+/// Each candidate tracks which protocol it came from for ambiguity detection.
+fn collect_protocol_method_candidates(
+    protocol: &Arc<ProtocolSymbol>,
+    method_name: &str,
+    candidates: &mut Vec<ProtocolMethodCandidate>,
+    _ctx: &BodyResolutionContext,
+) {
+    let proto_name = protocol.metadata().name().value.clone();
+
+    // Search direct methods
+    for child in protocol.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::Function
+            && child.metadata().name().value == method_name
+        {
+            candidates.push(ProtocolMethodCandidate {
+                method_id: child.metadata().id(),
+                protocol_name: proto_name.clone(),
+                definition_span: child.metadata().name().span.clone(),
+            });
+        }
+    }
+
+    // Search inherited protocols
+    if let Some(conformances) = protocol.conformances_behavior() {
+        for parent_proto_ty in conformances.conformances() {
+            if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
+                collect_protocol_method_candidates(parent, method_name, candidates, _ctx);
+            }
+        }
+    }
+}
+
 /// Resolve a member call from a FieldAccess expression: obj.method(args)
+///
+/// This handles:
+/// - Primitive methods (e.g., Int.add, String.length)
+/// - Struct/Protocol methods directly
+/// - Constrained type parameter methods (via protocol bounds)
 pub fn resolve_member_call(
     object: &Expression,
     member_name: &str,
@@ -196,7 +359,20 @@ pub fn resolve_member_call(
         );
     }
 
-    // Get container from type
+    // Check if base type is a type parameter - needs special handling
+    if let TyKind::TypeParameter(type_param) = base_ty.kind() {
+        return resolve_constrained_member_call(
+            object,
+            type_param,
+            member_name,
+            arguments,
+            arg_labels,
+            span,
+            ctx,
+        );
+    }
+
+    // Get container from type (for Struct, Protocol, Self types)
     let container = match get_type_container(base_ty, ctx) {
         Some(c) => c,
         None => {
@@ -280,4 +456,237 @@ pub fn resolve_member_call(
         .add_diagnostic(error.into_diagnostic(ctx.file_id));
 
     Expression::error(span)
+}
+
+// =============================================================================
+// Constrained Type Parameter Method Resolution
+// =============================================================================
+
+/// A method candidate found in a protocol bound.
+struct ConstrainedMethodCandidate {
+    /// The method symbol
+    method: Arc<dyn Symbol<KestrelLanguage>>,
+    /// The callable behavior with Self substituted
+    callable: CallableBehavior,
+    /// The protocol this method comes from
+    protocol_name: String,
+    /// Span of the method definition
+    definition_span: Span,
+}
+
+/// Resolve a method call on a constrained type parameter.
+///
+/// When calling `a.method(b)` where `a: T` and `T: Protocol`:
+/// 1. Look up the protocol bounds for T
+/// 2. Search for the method in each protocol (including inherited protocols)
+/// 3. Substitute Self with T in the method signature
+/// 4. Check for ambiguous methods (same signature in multiple protocols)
+/// 5. Return the resolved call expression
+fn resolve_constrained_member_call(
+    object: &Expression,
+    type_param: &Arc<kestrel_semantic_tree::symbol::type_parameter::TypeParameterSymbol>,
+    member_name: &str,
+    arguments: Vec<CallArgument>,
+    arg_labels: &[Option<String>],
+    span: Span,
+    ctx: &mut BodyResolutionContext,
+) -> Expression {
+    let type_param_name = type_param.metadata().name().value.clone();
+    let receiver_ty = &object.ty;
+
+    // Get all protocol bounds for this type parameter
+    let bounds = get_type_parameter_bounds_from_context(type_param, ctx);
+
+    // If no bounds, report error
+    if bounds.is_empty() {
+        let error = UnconstrainedTypeParameterMemberError {
+            span: span.clone(),
+            member_name: member_name.to_string(),
+            type_param_name,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Collect all matching methods from all protocol bounds
+    let mut candidates: Vec<ConstrainedMethodCandidate> = Vec::new();
+    let mut bound_names: Vec<String> = Vec::new();
+
+    for bound in &bounds {
+        if let TyKind::Protocol { symbol: proto, .. } = bound.kind() {
+            let proto_name = proto.metadata().name().value.clone();
+            bound_names.push(proto_name.clone());
+
+            // Check for generic protocol (not yet supported)
+            if !proto.type_parameters().is_empty() {
+                let error = UnsupportedGenericProtocolBoundError {
+                    span: bound.span().clone(),
+                    protocol_name: proto_name,
+                };
+                ctx.diagnostics
+                    .add_diagnostic(error.into_diagnostic(ctx.file_id));
+                return Expression::error(span);
+            }
+
+            // Collect methods from this protocol (including inherited)
+            collect_protocol_methods(
+                proto,
+                member_name,
+                receiver_ty,
+                &mut candidates,
+                ctx,
+            );
+        }
+    }
+
+    if candidates.is_empty() {
+        let error = MethodNotInBoundsError {
+            call_span: span.clone(),
+            method_name: member_name.to_string(),
+            type_param_name,
+            bound_names,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Find matching candidates by signature
+    let matching: Vec<&ConstrainedMethodCandidate> = candidates
+        .iter()
+        .filter(|c| matches_signature(&c.callable, arguments.len(), arg_labels))
+        .collect();
+
+    if matching.is_empty() {
+        // No matching signature - report error with available overloads
+        let method_ids: Vec<SymbolId> = candidates.iter().map(|c| c.method.metadata().id()).collect();
+        let available_overloads = collect_overload_descriptions(&method_ids, ctx.db);
+
+        let error = NoMatchingMethodError {
+            call_span: span.clone(),
+            method_name: member_name.to_string(),
+            receiver_type: type_param_name,
+            provided_labels: arg_labels.to_vec(),
+            provided_arity: arguments.len(),
+            available_overloads,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    // Check for ambiguity - multiple protocols have matching method with same signature
+    // Deduplicate by protocol name (same protocol can appear multiple times)
+    let mut seen_protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let unique_matching: Vec<&ConstrainedMethodCandidate> = matching
+        .into_iter()
+        .filter(|c| seen_protocols.insert(c.protocol_name.clone()))
+        .collect();
+
+    if unique_matching.len() > 1 {
+        // Multiple different protocols have matching method with same signature
+        let protocol_names: Vec<String> = unique_matching.iter().map(|c| c.protocol_name.clone()).collect();
+        let definition_spans: Vec<(String, Span)> = unique_matching
+            .iter()
+            .map(|c| (c.protocol_name.clone(), c.definition_span.clone()))
+            .collect();
+
+        let error = AmbiguousConstrainedMethodError {
+            call_span: span.clone(),
+            method_name: member_name.to_string(),
+            protocol_names,
+            definition_spans,
+        };
+        ctx.diagnostics
+            .add_diagnostic(error.into_diagnostic(ctx.file_id));
+        return Expression::error(span);
+    }
+
+    let matching = unique_matching;
+
+    // Single matching method found
+    let winner = matching[0];
+    let return_ty = winner.callable.return_type().clone();
+    let method_id = winner.method.metadata().id();
+
+    // Create method ref and call
+    let method_ref = Expression::method_ref(
+        object.clone(),
+        vec![method_id],
+        member_name.to_string(),
+        span.clone(),
+    );
+
+    Expression::call(method_ref, arguments, return_ty, span)
+}
+
+/// Collect methods from a protocol, including inherited protocols.
+fn collect_protocol_methods(
+    protocol: &Arc<ProtocolSymbol>,
+    method_name: &str,
+    receiver_ty: &Ty,
+    candidates: &mut Vec<ConstrainedMethodCandidate>,
+    ctx: &BodyResolutionContext,
+) {
+    let proto_name = protocol.metadata().name().value.clone();
+
+    // Search direct methods
+    for child in protocol.metadata().children() {
+        if child.metadata().kind() == KestrelSymbolKind::Function
+            && child.metadata().name().value == method_name
+        {
+            if let Some(callable) = get_callable_behavior(&child) {
+                // Substitute Self with the receiver type
+                let substituted_callable = substitute_callable_self(&callable, receiver_ty);
+
+                candidates.push(ConstrainedMethodCandidate {
+                    method: child.clone(),
+                    callable: substituted_callable,
+                    protocol_name: proto_name.clone(),
+                    definition_span: child.metadata().name().span.clone(),
+                });
+            }
+        }
+    }
+
+    // Search inherited protocols
+    if let Some(conformances) = protocol.conformances_behavior() {
+        for parent_proto_ty in conformances.conformances() {
+            if let TyKind::Protocol { symbol: parent, .. } = parent_proto_ty.kind() {
+                collect_protocol_methods(parent, method_name, receiver_ty, candidates, ctx);
+            }
+        }
+    }
+}
+
+/// Substitute Self with the receiver type in a CallableBehavior.
+fn substitute_callable_self(callable: &CallableBehavior, receiver_ty: &Ty) -> CallableBehavior {
+    use kestrel_semantic_tree::behavior::callable::CallableParameter;
+
+    let new_params: Vec<CallableParameter> = callable
+        .parameters()
+        .iter()
+        .map(|p| {
+            let new_ty = substitute_self(&p.ty, receiver_ty);
+            CallableParameter {
+                ty: new_ty,
+                label: p.label.clone(),
+                bind_name: p.bind_name.clone(),
+            }
+        })
+        .collect();
+
+    let new_return = substitute_self(callable.return_type(), receiver_ty);
+
+    // Preserve receiver kind if present
+    match callable.receiver() {
+        Some(receiver_kind) => CallableBehavior::with_receiver(
+            new_params,
+            new_return,
+            receiver_kind,
+            callable.span().clone(),
+        ),
+        None => CallableBehavior::new(new_params, new_return, callable.span().clone()),
+    }
 }

@@ -305,3 +305,26 @@ impl IntoDiagnostic for InstanceMethodOnTypeError {
             )])
     }
 }
+
+/// Error when type arguments are provided to a non-generic expression (like a variable).
+pub struct TypeArgsOnNonGenericError {
+    /// Span of the type argument list
+    pub span: Span,
+    /// Description of what was being called (e.g., "variable", "expression")
+    pub callee_description: String,
+}
+
+impl IntoDiagnostic for TypeArgsOnNonGenericError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "type arguments cannot be applied to {}",
+                self.callee_description
+            ))
+            .with_labels(vec![Label::primary(file_id, self.span.clone())
+                .with_message("type arguments not allowed here")])
+            .with_notes(vec![
+                "type arguments can only be applied to generic functions or types".to_string(),
+            ])
+    }
+}

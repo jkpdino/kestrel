@@ -172,3 +172,170 @@ impl IntoDiagnostic for TupleIndexOnNonTupleError {
             )])
     }
 }
+
+// =============================================================================
+// Constraint Enforcement Errors
+// =============================================================================
+
+/// Error when accessing a member on a type parameter with no protocol bounds.
+pub struct UnconstrainedTypeParameterMemberError {
+    /// Span of the member access expression
+    pub span: Span,
+    /// Name of the member being accessed
+    pub member_name: String,
+    /// Name of the type parameter
+    pub type_param_name: String,
+}
+
+impl IntoDiagnostic for UnconstrainedTypeParameterMemberError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "cannot call '{}' on type '{}'",
+                self.member_name, self.type_param_name
+            ))
+            .with_labels(vec![Label::primary(file_id, self.span.clone())
+                .with_message(format!("cannot call '{}' on type '{}'", self.member_name, self.type_param_name))])
+            .with_notes(vec![
+                format!("'{}' is a type parameter with no constraints", self.type_param_name),
+                format!("help: add a constraint: `where {}: SomeProtocol`", self.type_param_name),
+            ])
+    }
+}
+
+/// Error when a method is not found in any of the type parameter's protocol bounds.
+pub struct MethodNotInBoundsError {
+    /// Span of the method call
+    pub call_span: Span,
+    /// Name of the method being called
+    pub method_name: String,
+    /// Name of the type parameter
+    pub type_param_name: String,
+    /// Names of the protocol bounds
+    pub bound_names: Vec<String>,
+}
+
+impl IntoDiagnostic for MethodNotInBoundsError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let bounds_str = if self.bound_names.is_empty() {
+            "no protocol bounds".to_string()
+        } else {
+            self.bound_names.join(", ")
+        };
+
+        Diagnostic::error()
+            .with_message(format!(
+                "no method '{}' found for type '{}'",
+                self.method_name, self.type_param_name
+            ))
+            .with_labels(vec![Label::primary(file_id, self.call_span.clone())
+                .with_message("method not found")])
+            .with_notes(vec![
+                format!("'{}' is constrained to: {}", self.type_param_name, bounds_str),
+                format!("none of these protocols have a method named '{}'", self.method_name),
+            ])
+    }
+}
+
+/// Error when a method is found in multiple protocol bounds with the same signature.
+pub struct AmbiguousConstrainedMethodError {
+    /// Span of the method call
+    pub call_span: Span,
+    /// Name of the method being called
+    pub method_name: String,
+    /// Names of the protocols that have this method
+    pub protocol_names: Vec<String>,
+    /// Spans of the method definitions in each protocol
+    pub definition_spans: Vec<(String, Span)>,
+}
+
+impl IntoDiagnostic for AmbiguousConstrainedMethodError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let mut labels = vec![Label::primary(file_id, self.call_span.clone())
+            .with_message("ambiguous method call")];
+
+        // Add secondary labels for each definition
+        for (proto_name, span) in &self.definition_spans {
+            labels.push(
+                Label::secondary(file_id, span.clone())
+                    .with_message(format!("candidate from '{}'", proto_name)),
+            );
+        }
+
+        Diagnostic::error()
+            .with_message(format!(
+                "ambiguous method call '{}': found in multiple protocols",
+                self.method_name
+            ))
+            .with_labels(labels)
+            .with_notes(vec![format!(
+                "'{}' is defined in: {}",
+                self.method_name,
+                self.protocol_names.join(", ")
+            )])
+    }
+}
+
+/// Error when a type argument does not satisfy a constraint.
+pub struct ConstraintNotSatisfiedError {
+    /// Span of the call site
+    pub call_span: Span,
+    /// The type that doesn't satisfy the constraint
+    pub type_name: String,
+    /// The protocol constraint that's not satisfied
+    pub constraint_name: String,
+    /// Name of the type parameter
+    pub type_param_name: String,
+    /// Span of the constraint declaration (in the function signature)
+    pub constraint_span: Option<Span>,
+}
+
+impl IntoDiagnostic for ConstraintNotSatisfiedError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        let mut labels = vec![Label::primary(file_id, self.call_span.clone())
+            .with_message("constraint not satisfied")];
+
+        if let Some(ref span) = self.constraint_span {
+            labels.push(
+                Label::secondary(file_id, span.clone())
+                    .with_message(format!("required by this constraint on '{}'", self.type_param_name)),
+            );
+        }
+
+        Diagnostic::error()
+            .with_message(format!(
+                "type '{}' does not satisfy constraint '{}'",
+                self.type_name, self.constraint_name
+            ))
+            .with_labels(labels)
+            .with_notes(vec![format!(
+                "'{}' does not conform to '{}'",
+                self.type_name, self.constraint_name
+            )])
+    }
+}
+
+/// Diagnostic (warning/note) when a generic protocol bound is used.
+/// These require associated types which aren't implemented yet.
+pub struct UnsupportedGenericProtocolBoundError {
+    /// Span of the protocol bound
+    pub span: Span,
+    /// Name of the protocol
+    pub protocol_name: String,
+}
+
+impl IntoDiagnostic for UnsupportedGenericProtocolBoundError {
+    fn into_diagnostic(&self, file_id: usize) -> Diagnostic<usize> {
+        Diagnostic::error()
+            .with_message(format!(
+                "generic protocol bounds are not yet supported: '{}'",
+                self.protocol_name
+            ))
+            .with_labels(vec![Label::primary(file_id, self.span.clone())
+                .with_message("generic protocol bound")])
+            .with_notes(vec![
+                "generic protocol bounds require associated types".to_string(),
+                "this feature is coming in a future version".to_string(),
+            ])
+    }
+}

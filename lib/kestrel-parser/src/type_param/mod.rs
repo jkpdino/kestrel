@@ -36,13 +36,13 @@ pub struct TypeArgumentData {
 }
 
 /// Raw parsed data for a type bound
-/// Syntax: T: Proto and Proto2
+/// Syntax: T: Proto and Proto2 or T: Container[Int]
 #[derive(Debug, Clone)]
 pub struct TypeBoundData {
     /// The type parameter being constrained
     pub param: Span,
-    /// The protocols/bounds (connected by `and`)
-    pub bounds: Vec<Vec<Span>>, // Each bound is a path (e.g., Proto or A.B.Proto)
+    /// The protocols/bounds (connected by `and`), with optional type arguments
+    pub bounds: Vec<TypeArgumentData>,
 }
 
 /// Raw parsed data for a where clause
@@ -103,6 +103,21 @@ pub fn type_argument_list_parser() -> impl Parser<Token, Vec<TypeArgumentData>, 
         .then_ignore(just(Token::RBracket))
 }
 
+/// Parser for type arguments with bracket spans: [Type, Type, ...]
+/// Returns (lbracket, args, rbracket)
+pub fn type_argument_list_with_spans_parser() -> impl Parser<Token, (Span, Vec<TypeArgumentData>, Span), Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::LBracket).map_with_span(|_, span| span))
+        .then(
+            type_argument_parser()
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+        )
+        .then_ignore(skip_trivia())
+        .then(just(Token::RBracket).map_with_span(|_, span| span))
+        .map(|((lbracket, args), rbracket)| (lbracket, args, rbracket))
+}
+
 /// Parser for optional type arguments after a path
 /// Returns (path, optional args)
 pub fn path_with_optional_args_parser() -> impl Parser<Token, TypeArgumentData, Error = Simple<Token>> + Clone {
@@ -148,7 +163,7 @@ pub fn type_parameter_list_parser() -> impl Parser<Token, (Span, Vec<TypeParamet
         .map(|((lbracket, params), rbracket)| (lbracket, params, rbracket))
 }
 
-/// Parser for a single type bound: T: Proto and Proto2
+/// Parser for a single type bound: T: Proto and Proto2 or T: Container[Int]
 fn type_bound_parser() -> impl Parser<Token, TypeBoundData, Error = Simple<Token>> + Clone {
     skip_trivia()
         .ignore_then(
@@ -160,8 +175,8 @@ fn type_bound_parser() -> impl Parser<Token, TypeBoundData, Error = Simple<Token
         .then_ignore(skip_trivia())
         .then_ignore(just(Token::Colon))
         .then(
-            // Bounds separated by `and`
-            path_parser()
+            // Bounds separated by `and`, with optional type arguments
+            path_with_optional_args_parser()
                 .separated_by(
                     skip_trivia()
                         .ignore_then(just(Token::And))
@@ -269,9 +284,14 @@ fn emit_type_bound(sink: &mut EventSink, bound: TypeBoundData) {
     sink.add_token(SyntaxKind::Identifier, bound.param);
     sink.finish_node();
 
-    // Emit each bound path
-    for bound_path in bound.bounds {
-        emit_path(sink, &bound_path);
+    // Emit each bound with optional type arguments
+    for bound_type in bound.bounds {
+        emit_path(sink, &bound_type.path);
+
+        // Emit type arguments if present (e.g., Container[T])
+        if let Some(ref type_args) = bound_type.args {
+            emit_type_argument_list(sink, type_args);
+        }
     }
 
     sink.finish_node();

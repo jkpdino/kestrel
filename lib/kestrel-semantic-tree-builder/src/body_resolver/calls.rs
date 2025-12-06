@@ -10,15 +10,19 @@ use kestrel_semantic_tree::expr::{CallArgument, Expression, ExprKind};
 use kestrel_semantic_tree::language::KestrelLanguage;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
 use kestrel_semantic_tree::symbol::r#struct::StructSymbol;
-use kestrel_semantic_tree::ty::{Ty, TyKind};
+use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+use kestrel_semantic_tree::ty::{Substitutions, Ty, TyKind};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::{Symbol, SymbolId};
 
+use crate::resolution::type_resolver::TypeResolver;
+
 use crate::diagnostics::{
     FieldNotVisibleForInitError, ImplicitInitArityError, ImplicitInitLabelError,
     InstanceMethodOnTypeError, NoMatchingInitializerError, NoMatchingMethodError,
-    NoMatchingOverloadError, OverloadDescription,
+    NoMatchingOverloadError, NotGenericError, OverloadDescription, TooFewTypeArgumentsError,
+    TooManyTypeArgumentsError, TypeArgsOnNonGenericError,
 };
 use crate::resolution::visibility::is_visible_from;
 use crate::database::Db;
@@ -29,10 +33,10 @@ use super::expressions::resolve_expression;
 use super::members::resolve_member_call;
 use super::utils::{
     create_generic_struct_type, create_struct_type, format_type, get_callable_behavior,
-    is_expression_kind, matches_signature,
+    is_expression_kind, matches_signature, substitute_type,
 };
 
-/// Resolve a call expression: callee(arg1, arg2, ...)
+/// Resolve a call expression: callee(arg1, arg2, ...) or callee[T](arg1, ...)
 pub fn resolve_call_expression(
     node: &SyntaxNode,
     ctx: &mut BodyResolutionContext,
@@ -44,6 +48,9 @@ pub fn resolve_call_expression(
         Some(n) => n,
         None => return Expression::error(span.clone()),
     };
+
+    // Extract explicit type arguments from the callee (e.g., foo[Int] or obj.method[T])
+    let explicit_type_args = extract_type_arguments_from_callee(&callee_node, ctx);
 
     // Find the argument list
     let arg_list_node = node.children().find(|c| c.kind() == SyntaxKind::ArgumentList);
@@ -64,7 +71,55 @@ pub fn resolve_call_expression(
         .collect();
 
     // Now resolve based on callee type
-    resolve_call(callee, arguments, &arg_labels, span, ctx)
+    resolve_call(callee, arguments, &arg_labels, explicit_type_args, span, ctx)
+}
+
+/// Extract type arguments from a callee expression node.
+/// Handles: foo[T], path.to.func[T, U], obj.method[T]
+fn extract_type_arguments_from_callee(
+    callee_node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Vec<Ty>> {
+    // Look for TypeArgumentList in the callee
+    // The callee is typically an ExprPath that may contain TypeArgumentList
+    fn find_last_type_arg_list(node: &SyntaxNode) -> Option<SyntaxNode> {
+        // First check direct children
+        let mut last_found = None;
+        for child in node.children() {
+            let kind = child.kind();
+            if kind == SyntaxKind::TypeArgumentList {
+                last_found = Some(child);
+            } else if kind == SyntaxKind::Expression || kind == SyntaxKind::ExprPath {
+                // Recurse into Expression wrappers and ExprPath
+                if let Some(inner) = find_last_type_arg_list(&child) {
+                    last_found = Some(inner);
+                }
+            }
+        }
+        last_found
+    }
+
+    let type_arg_list = find_last_type_arg_list(callee_node)?;
+
+    // Resolve each type in the TypeArgumentList
+    let mut type_args = Vec::new();
+
+    for child in type_arg_list.children() {
+        if child.kind() == SyntaxKind::Ty {
+            let mut resolver = TypeResolver::new(
+                ctx.db,
+                ctx.diagnostics,
+                ctx.file_id,
+                ctx.source,
+                ctx.function_id,
+            );
+            let ty = resolver.resolve(&child);
+            type_args.push(ty);
+        }
+    }
+
+    // Return Some even if empty - the presence of [] means explicit type args were provided
+    Some(type_args)
 }
 
 /// Resolve an argument list node into CallArguments
@@ -127,11 +182,12 @@ fn resolve_argument(
         })
 }
 
-/// Resolve a call with the given callee and arguments
+/// Resolve a call with the given callee, arguments, and optional explicit type arguments
 pub fn resolve_call(
     callee: Expression,
     arguments: Vec<CallArgument>,
     arg_labels: &[Option<String>],
+    explicit_type_args: Option<Vec<Ty>>,
     span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
@@ -142,7 +198,7 @@ pub fn resolve_call(
     match callee_kind {
         // Direct function reference
         ExprKind::SymbolRef(symbol_id) => {
-            resolve_single_function_call(symbol_id, callee, arguments, span, ctx)
+            resolve_single_function_call(symbol_id, callee, arguments, explicit_type_args, span, ctx)
         }
 
         // Overloaded function reference - need to pick one
@@ -170,6 +226,20 @@ pub fn resolve_call(
 
         // Local variable reference - could be calling a function stored in a variable
         ExprKind::LocalRef(_local_id) => {
+            // Variables cannot have explicit type arguments
+            if let Some(ref type_args) = explicit_type_args {
+                if !type_args.is_empty() {
+                    ctx.diagnostics.add_diagnostic(
+                        TypeArgsOnNonGenericError {
+                            span: span.clone(),
+                            callee_description: "a variable".to_string(),
+                        }
+                        .into_diagnostic(ctx.file_id),
+                    );
+                    return Expression::error(span);
+                }
+            }
+
             // Check if the type is callable
             if let TyKind::Function { return_type, .. } = callee_ty.kind() {
                 Expression::call(callee, arguments, (**return_type).clone(), span)
@@ -181,6 +251,20 @@ pub fn resolve_call(
 
         // Any other expression - check if callable type
         _ => {
+            // Non-function expressions cannot have explicit type arguments
+            if let Some(ref type_args) = explicit_type_args {
+                if !type_args.is_empty() {
+                    ctx.diagnostics.add_diagnostic(
+                        TypeArgsOnNonGenericError {
+                            span: span.clone(),
+                            callee_description: "this expression".to_string(),
+                        }
+                        .into_diagnostic(ctx.file_id),
+                    );
+                    return Expression::error(span);
+                }
+            }
+
             if let TyKind::Function { return_type, .. } = callee_ty.kind() {
                 Expression::call(callee, arguments, (**return_type).clone(), span)
             } else {
@@ -196,6 +280,7 @@ fn resolve_single_function_call(
     symbol_id: SymbolId,
     callee: Expression,
     arguments: Vec<CallArgument>,
+    explicit_type_args: Option<Vec<Ty>>,
     span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
@@ -252,7 +337,67 @@ fn resolve_single_function_call(
         return Expression::error(span);
     }
 
-    let return_ty = callable.return_type().clone();
+    // Get return type, applying explicit type arguments if provided
+    let return_ty = if let Some(ref type_args) = explicit_type_args {
+        // Try to downcast to FunctionSymbol to access type parameters
+        if let Some(func_sym) = symbol.as_any().downcast_ref::<FunctionSymbol>() {
+            let type_params = func_sym.type_parameters();
+            let function_name = symbol.metadata().name().value.clone();
+
+            // Validate: function must be generic if type args are provided
+            if type_params.is_empty() {
+                ctx.diagnostics.add_diagnostic(
+                    NotGenericError {
+                        span: span.clone(),
+                        type_name: function_name,
+                    }
+                    .into_diagnostic(ctx.file_id),
+                );
+                return Expression::error(span);
+            }
+
+            // Validate: type arg count must match type param count
+            if type_args.len() < type_params.len() {
+                ctx.diagnostics.add_diagnostic(
+                    TooFewTypeArgumentsError {
+                        span: span.clone(),
+                        type_name: function_name,
+                        min_expected: type_params.len(),
+                        got: type_args.len(),
+                    }
+                    .into_diagnostic(ctx.file_id),
+                );
+                return Expression::error(span);
+            }
+
+            if type_args.len() > type_params.len() {
+                ctx.diagnostics.add_diagnostic(
+                    TooManyTypeArgumentsError {
+                        span: span.clone(),
+                        type_name: function_name,
+                        max_expected: type_params.len(),
+                        got: type_args.len(),
+                    }
+                    .into_diagnostic(ctx.file_id),
+                );
+                return Expression::error(span);
+            }
+
+            // Build substitutions from type parameters to provided type arguments
+            let mut substitutions = Substitutions::new();
+            for (param, arg_ty) in type_params.iter().zip(type_args.iter()) {
+                substitutions.insert(param.metadata().id(), arg_ty.clone());
+            }
+
+            // Apply substitution to return type
+            substitute_type(callable.return_type(), &substitutions)
+        } else {
+            callable.return_type().clone()
+        }
+    } else {
+        callable.return_type().clone()
+    };
+
     Expression::call(callee, arguments, return_ty, span)
 }
 
@@ -539,6 +684,8 @@ pub fn resolve_method_call(
     span: Span,
     ctx: &mut BodyResolutionContext,
 ) -> Expression {
+    use super::utils::substitute_self;
+
     // Find matching overload
     for &candidate_id in candidates {
         if let Some(symbol) = ctx.db.symbol_by_id(candidate_id) {
@@ -552,7 +699,8 @@ pub fn resolve_method_call(
                         }
                     }
 
-                    let return_ty = callable.return_type().clone();
+                    // Get return type, substituting Self with receiver type if needed
+                    let return_ty = substitute_self(callable.return_type(), &receiver.ty);
 
                     // Create method ref and then call
                     let method_ref = Expression::method_ref(

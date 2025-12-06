@@ -13,7 +13,7 @@ use crate::block::{BlockItem, CodeBlockData, emit_code_block};
 use crate::common::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
 use crate::stmt::{StmtVariant, VariableDeclarationData};
-use crate::ty::ty_parser;
+use crate::ty::{TyVariant, emit_ty_variant, ty_parser};
 
 /// Represents an expression
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +135,47 @@ impl Expression {
     }
 }
 
+/// Parser for type arguments with full type support: [T, (A, B), [Int], (X) -> Y]
+/// Returns (lbracket, types, rbracket)
+fn full_type_args_parser() -> impl Parser<Token, TypeArgsData, Error = Simple<Token>> + Clone {
+    skip_trivia()
+        .ignore_then(just(Token::LBracket).map_with_span(|_, span| span))
+        .then(
+            ty_parser()
+                .separated_by(skip_trivia().ignore_then(just(Token::Comma)))
+                .allow_trailing(),
+        )
+        .then_ignore(skip_trivia())
+        .then(just(Token::RBracket).map_with_span(|_, span| span))
+        .map(|((lbracket, args), rbracket)| TypeArgsData {
+            lbracket,
+            args,
+            rbracket,
+        })
+}
+
+/// A path segment with optional type arguments
+/// Syntax: Ident or Ident[T, U]
+#[derive(Debug, Clone)]
+pub struct PathSegmentData {
+    /// The identifier name
+    pub name: Span,
+    /// Optional type arguments: [T, U]
+    pub type_args: Option<TypeArgsData>,
+}
+
+/// Type arguments data for expressions
+/// Syntax: [T, U, V] where each can be any type (path, tuple, function, array)
+#[derive(Debug, Clone)]
+pub struct TypeArgsData {
+    /// Left bracket span
+    pub lbracket: Span,
+    /// The type arguments (full types, not just paths)
+    pub args: Vec<TyVariant>,
+    /// Right bracket span
+    pub rbracket: Span,
+}
+
 /// A call argument with optional label
 #[derive(Debug, Clone)]
 pub struct CallArg {
@@ -167,13 +208,17 @@ pub enum ExprVariant {
     Tuple(Span, Vec<ExprVariant>, Vec<Span>, Span), // (lparen, elements, commas, rparen)
     /// Grouping expression: (expr)
     Grouping(Span, Box<ExprVariant>, Span), // (lparen, inner, rparen)
-    /// Path expression: a.b.c (used for initial path parsing, will be converted to MemberAccess chain)
-    Path(Vec<Span>, Vec<Span>), // (segments, dots)
-    /// Member access expression: base.member
+    /// Path expression: a.b.c or a[T].b[U].c (used for initial path parsing)
+    Path {
+        segments: Vec<PathSegmentData>,
+        dots: Vec<Span>,
+    },
+    /// Member access expression: base.member or base.member[T]
     MemberAccess {
         base: Box<ExprVariant>,
         dot: Span,
         member: Span,
+        type_args: Option<TypeArgsData>,
     },
     /// Tuple index expression: tuple.0, tuple.1
     TupleIndex {
@@ -322,21 +367,22 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             }))
             .map(ExprVariant::Null);
 
-        // Path expression: a.b.c
-        let path = skip_trivia()
+        // Path segment: identifier optionally followed by type args [T, U]
+        let path_segment = skip_trivia()
             .ignore_then(filter_map(|span, token| match token {
                 Token::Identifier => Ok(span),
                 _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
             }))
+            .then(full_type_args_parser().or_not())
+            .map(|(name, type_args)| PathSegmentData { name, type_args });
+
+        // Path expression: a.b.c or a[T].b[U].c
+        let path = path_segment
+            .clone()
             .then(
                 skip_trivia()
                     .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
-                    .then(
-                        skip_trivia().ignore_then(filter_map(|span, token| match token {
-                            Token::Identifier => Ok(span),
-                            _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
-                        })),
-                    )
+                    .then(path_segment.clone())
                     .repeated(),
             )
             .map(|(first, rest)| {
@@ -346,7 +392,7 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                     dots.push(dot);
                     segments.push(segment);
                 }
-                ExprVariant::Path(segments, dots)
+                ExprVariant::Path { segments, dots }
             });
 
         // Array literal: [elem, elem, ...]
@@ -553,7 +599,7 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                 rparen,
             });
 
-        // Member access: .identifier or tuple index: .0, .1
+        // Member access: .identifier or .identifier[T] or tuple index: .0, .1
         let member_access = skip_trivia()
             .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
             .then(
@@ -563,9 +609,14 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                     _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
                 })),
             )
-            .map(|(dot, (token, span))| match token {
+            .then(full_type_args_parser().or_not())
+            .map(|((dot, (token, span)), type_args)| match token {
                 Token::Integer => PostfixOp::TupleIndex { dot, index: span },
-                _ => PostfixOp::MemberAccess { dot, member: span },
+                _ => PostfixOp::MemberAccess {
+                    dot,
+                    member: span,
+                    type_args,
+                },
             });
 
         // Postfix unwrap operator: expr!
@@ -581,7 +632,7 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
         let postfix_op = arg_list.clone().or(member_access).or(postfix_bang);
 
         // Postfix expression for conditions: using condition_primary
-        // Supports member access (.foo), tuple index (.0), and function calls (args use full expr)
+        // Supports member access (.foo), .foo[T], tuple index (.0), and function calls (args use full expr)
         let condition_member_access = skip_trivia()
             .ignore_then(just(Token::Dot).map_with_span(|_, span| span))
             .then(
@@ -591,9 +642,14 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                     _ => Err(Simple::expected_input_found(span, vec![], Some(token))),
                 })),
             )
-            .map(|(dot, (token, span))| match token {
+            .then(full_type_args_parser().or_not())
+            .map(|((dot, (token, span)), type_args)| match token {
                 Token::Integer => ConditionPostfixOp::TupleIndex { dot, index: span },
-                _ => ConditionPostfixOp::MemberAccess { dot, member: span },
+                _ => ConditionPostfixOp::MemberAccess {
+                    dot,
+                    member: span,
+                    type_args,
+                },
             });
 
         // Function call arguments use the full expr parser (filled in via recursive reference)
@@ -619,10 +675,15 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
             .then(condition_postfix_op.repeated())
             .map(|(base, ops)| {
                 ops.into_iter().fold(base, |acc, op| match op {
-                    ConditionPostfixOp::MemberAccess { dot, member } => ExprVariant::MemberAccess {
+                    ConditionPostfixOp::MemberAccess {
+                        dot,
+                        member,
+                        type_args,
+                    } => ExprVariant::MemberAccess {
                         base: Box::new(acc),
                         dot,
                         member,
+                        type_args,
                     },
                     ConditionPostfixOp::TupleIndex { dot, index } => ExprVariant::TupleIndex {
                         base: Box::new(acc),
@@ -965,10 +1026,15 @@ pub fn expr_parser() -> impl Parser<Token, ExprVariant, Error = Simple<Token>> +
                         commas,
                         rparen,
                     },
-                    PostfixOp::MemberAccess { dot, member } => ExprVariant::MemberAccess {
+                    PostfixOp::MemberAccess {
+                        dot,
+                        member,
+                        type_args,
+                    } => ExprVariant::MemberAccess {
                         base: Box::new(acc),
                         dot,
                         member,
+                        type_args,
                     },
                     PostfixOp::TupleIndex { dot, index } => ExprVariant::TupleIndex {
                         base: Box::new(acc),
@@ -1059,8 +1125,12 @@ enum PostfixOp {
         commas: Vec<Span>,
         rparen: Span,
     },
-    /// Member access: .identifier
-    MemberAccess { dot: Span, member: Span },
+    /// Member access: .identifier or .identifier[T]
+    MemberAccess {
+        dot: Span,
+        member: Span,
+        type_args: Option<TypeArgsData>,
+    },
     /// Tuple index: .0, .1
     TupleIndex { dot: Span, index: Span },
     /// Postfix operator: expr!
@@ -1081,8 +1151,12 @@ enum ConditionPostfixOp {
         commas: Vec<Span>,
         rparen: Span,
     },
-    /// Member access: .identifier
-    MemberAccess { dot: Span, member: Span },
+    /// Member access: .identifier or .identifier[T]
+    MemberAccess {
+        dot: Span,
+        member: Span,
+        type_args: Option<TypeArgsData>,
+    },
     /// Tuple index: .0, .1
     TupleIndex { dot: Span, index: Span },
 }
@@ -1158,11 +1232,16 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         ExprVariant::Grouping(lparen, inner, rparen) => {
             emit_grouping_expr(sink, lparen.clone(), inner, rparen.clone());
         }
-        ExprVariant::Path(segments, dots) => {
+        ExprVariant::Path { segments, dots } => {
             emit_path_expr(sink, segments, dots);
         }
-        ExprVariant::MemberAccess { base, dot, member } => {
-            emit_member_access_expr(sink, base, dot.clone(), member.clone());
+        ExprVariant::MemberAccess {
+            base,
+            dot,
+            member,
+            type_args,
+        } => {
+            emit_member_access_expr(sink, base, dot.clone(), member.clone(), type_args.as_ref());
         }
         ExprVariant::TupleIndex { base, dot, index } => {
             emit_tuple_index_expr(sink, base, dot.clone(), index.clone());
@@ -1360,12 +1439,28 @@ fn emit_grouping_expr(sink: &mut EventSink, lparen: Span, inner: &ExprVariant, r
     sink.finish_node();
 }
 
+/// Emit events for type arguments: [T, U]
+/// Supports full types including tuples, functions, and arrays
+fn emit_type_args(sink: &mut EventSink, type_args: &TypeArgsData) {
+    sink.start_node(SyntaxKind::TypeArgumentList);
+    sink.add_token(SyntaxKind::LBracket, type_args.lbracket.clone());
+    for arg in type_args.args.iter() {
+        emit_ty_variant(sink, arg);
+    }
+    sink.add_token(SyntaxKind::RBracket, type_args.rbracket.clone());
+    sink.finish_node();
+}
+
 /// Emit events for a path expression
-fn emit_path_expr(sink: &mut EventSink, segments: &[Span], dots: &[Span]) {
+fn emit_path_expr(sink: &mut EventSink, segments: &[PathSegmentData], dots: &[Span]) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprPath);
     for (i, segment) in segments.iter().enumerate() {
-        sink.add_token(SyntaxKind::Identifier, segment.clone());
+        sink.add_token(SyntaxKind::Identifier, segment.name.clone());
+        // Emit type args if present
+        if let Some(ref type_args) = segment.type_args {
+            emit_type_args(sink, type_args);
+        }
         // Add dot after segment if there is one
         if i < dots.len() {
             sink.add_token(SyntaxKind::Dot, dots[i].clone());
@@ -1377,7 +1472,13 @@ fn emit_path_expr(sink: &mut EventSink, segments: &[Span], dots: &[Span]) {
 
 /// Emit events for a member access expression
 /// Member access is represented using ExprPath for consistency with existing AST structure
-fn emit_member_access_expr(sink: &mut EventSink, base: &ExprVariant, dot: Span, member: Span) {
+fn emit_member_access_expr(
+    sink: &mut EventSink,
+    base: &ExprVariant,
+    dot: Span,
+    member: Span,
+    type_args: Option<&TypeArgsData>,
+) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprPath);
     // Emit the base expression first (unwrapped from Expression wrapper)
@@ -1385,6 +1486,10 @@ fn emit_member_access_expr(sink: &mut EventSink, base: &ExprVariant, dot: Span, 
     // Then emit the dot and member
     sink.add_token(SyntaxKind::Dot, dot);
     sink.add_token(SyntaxKind::Identifier, member);
+    // Emit type args if present
+    if let Some(type_args) = type_args {
+        emit_type_args(sink, type_args);
+    }
     sink.finish_node();
     sink.finish_node();
 }
@@ -1406,20 +1511,33 @@ fn emit_tuple_index_expr(sink: &mut EventSink, base: &ExprVariant, dot: Span, in
 /// Used for member access where we need to chain path segments
 fn emit_expr_variant_inner(sink: &mut EventSink, variant: &ExprVariant) {
     match variant {
-        ExprVariant::Path(segments, dots) => {
+        ExprVariant::Path { segments, dots } => {
             // Emit path segments directly without Expression wrapper
             for (i, segment) in segments.iter().enumerate() {
-                sink.add_token(SyntaxKind::Identifier, segment.clone());
+                sink.add_token(SyntaxKind::Identifier, segment.name.clone());
+                // Emit type args if present
+                if let Some(ref type_args) = segment.type_args {
+                    emit_type_args(sink, type_args);
+                }
                 if i < dots.len() {
                     sink.add_token(SyntaxKind::Dot, dots[i].clone());
                 }
             }
         }
-        ExprVariant::MemberAccess { base, dot, member } => {
+        ExprVariant::MemberAccess {
+            base,
+            dot,
+            member,
+            type_args,
+        } => {
             // Recursively emit base, then dot and member
             emit_expr_variant_inner(sink, base);
             sink.add_token(SyntaxKind::Dot, dot.clone());
             sink.add_token(SyntaxKind::Identifier, member.clone());
+            // Emit type args if present
+            if let Some(type_args) = type_args {
+                emit_type_args(sink, type_args);
+            }
         }
         ExprVariant::TupleIndex { base, dot, index } => {
             // Recursively emit base, then dot and index
@@ -2326,5 +2444,77 @@ mod tests {
         let source = "continue outer";
         let expr = parse_expr_from_source(source);
         assert!(expr.is_continue());
+    }
+
+    // ===== Type Arguments in Expression Tests =====
+
+    #[test]
+    fn test_path_with_type_args() {
+        let source = "List[Int]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_path());
+    }
+
+    #[test]
+    fn test_path_with_multiple_type_args() {
+        let source = "Map[String, Int]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_path());
+    }
+
+    #[test]
+    fn test_path_with_nested_type_args() {
+        let source = "List[Option[Int]]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_path());
+    }
+
+    #[test]
+    fn test_call_with_type_args() {
+        let source = "foo[Int]()";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_call_with_type_args_and_args() {
+        let source = "helper[String](x)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_call_with_multiple_type_args() {
+        let source = "convert[Int, String](42)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_method_call_with_type_args() {
+        let source = "obj.method[Int]()";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_chained_path_with_type_args() {
+        let source = "Container[Int].Nested[String]";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_path());
+    }
+
+    #[test]
+    fn test_static_method_with_type_args() {
+        let source = "Container[Int].create()";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
+    }
+
+    #[test]
+    fn test_path_type_args_then_method() {
+        let source = "List[Int].new().push(1)";
+        let expr = parse_expr_from_source(source);
+        assert!(expr.is_call());
     }
 }

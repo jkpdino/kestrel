@@ -14,10 +14,20 @@ This file tracks immediate next steps for Phase 6.
 Use `where` clause constraints to enable method calls on type parameters.
 
 **Tasks**:
-- [ ] Look up constraints on type parameters when resolving member access
-- [ ] `T: Add` allows calling `a.add(b)` on values of type `T`
-- [ ] Verify bounds at call sites (concrete type must satisfy constraints)
-- [ ] Constraint satisfaction checking
+- [ ] Add `get_where_clause(symbol)` helper function
+- [ ] Modify `get_type_container()` to handle `TypeParameter` by looking up protocol bounds
+- [ ] Collect methods from ALL protocol bounds (not just first)
+- [ ] Substitute `Self` with receiver type when looking up protocol methods
+- [ ] Handle ambiguous methods (same signature in multiple protocols) with diagnostic
+- [ ] Search inherited protocol methods (protocol inheritance chain)
+- [ ] Add call-site constraint verification (self-contained, movable function)
+- [ ] Emit diagnostic (not hard error) for unsupported generic protocol bounds (defer to associated types)
+
+**New Diagnostics**:
+- [ ] `UnconstrainedTypeParameterMemberError` - accessing member on type param with no bounds
+- [ ] `MethodNotInBoundsError` - method not found in any protocol bound
+- [ ] `AmbiguousConstrainedMethodError` - method found in multiple bounds with same signature
+- [ ] `ConstraintNotSatisfiedError` - call site fails to satisfy bound
 
 **Example** (should work after implementation):
 ```kestrel
@@ -107,6 +117,41 @@ extend Point: Printable {
     }
 }
 ```
+
+---
+
+## Future Work (Deferred)
+
+### Static Methods on Type Parameters
+**Status**: DEFERRED (implement after constraint enforcement)
+
+Support calling static methods on type parameters: `T.create()`.
+
+**Tasks**:
+- [ ] Recognize when a path refers to a type parameter used as a value
+- [ ] Handle `TypeParameter.method()` syntax in member resolution
+- [ ] Look up static methods from protocol bounds
+
+**Example**:
+```kestrel
+protocol Factory {
+    static func create() -> Self
+}
+
+func makeOne[T]() -> T where T: Factory {
+    return T.create()  // Static call on type parameter
+}
+```
+
+### Tighten Type Parameter Assignability
+**Status**: DEFERRED (requires proper generic instantiation tracking)
+
+Currently `is_assignable_to` allows any type parameter to be assigned to any other. This is intentionally permissive for Phase 5 but should be tightened.
+
+**Tasks**:
+- [ ] Only same type parameter should be assignable to itself
+- [ ] Track type parameter identity through function calls
+- [ ] Handle generic instantiation properly
 
 ---
 

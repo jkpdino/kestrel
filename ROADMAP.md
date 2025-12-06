@@ -244,20 +244,33 @@
 ## Phase 6: Generics & Protocols
 
 - [ ] Generic Constraint Enforcement
-  - [ ] Use constraints to determine available methods on type parameters
-  - [ ] Verify bounds at call sites
-  - [ ] Constraint satisfaction checking
+  - [ ] Modify `get_type_container()` to handle TypeParameter via protocol bounds
+  - [ ] Collect methods from all protocol bounds
+  - [ ] Self substitution (Self → receiver type)
+  - [ ] Handle ambiguous methods across multiple bounds
+  - [ ] Protocol inheritance chain traversal
+  - [ ] Call-site constraint verification
+  - [ ] New diagnostics for constraint errors
 - [ ] Associated Types
   - [ ] Protocol associated type declarations (`protocol Iterator { type Item }`)
+  - [ ] AssociatedTypeSymbol representation
+  - [ ] Qualified type path resolution (`T.Item`)
   - [ ] Associated type resolution in conforming types
   - [ ] Associated type constraints (`where T.Item: Equatable`)
 - [ ] Protocol Method Linking
   - [ ] Track which protocol a method satisfies when struct conforms
   - [ ] Resolve protocol method calls to concrete implementations
+  - [ ] ProtocolImplementationBehavior for method bindings
 - [ ] Extensions with Conformances
   - [ ] `extend Type: Protocol { ... }` syntax
+  - [ ] ExtensionSymbol and extension registry
   - [ ] Methods in extension satisfy protocol requirements
   - [ ] Retroactive conformance (add conformance to types you don't own)
+
+### Deferred to Later
+
+- [ ] Static Methods on Type Parameters (`T.staticMethod()`)
+- [ ] Tighter Type Parameter Assignability
 
 ## Phase 7: Type Inference
 

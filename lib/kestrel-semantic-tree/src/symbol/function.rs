@@ -48,8 +48,10 @@ pub struct FunctionSymbol {
     has_body: bool,
     /// Type parameters for generic functions, e.g., `func identity[T](value: T) -> T`
     type_parameters: Vec<Arc<TypeParameterSymbol>>,
-    /// Where clause constraints for type parameters
-    where_clause: WhereClause,
+    /// Where clause constraints for type parameters.
+    /// During BUILD phase, bounds are Ty::error() placeholders.
+    /// During BIND phase, bounds are updated to resolved protocol types.
+    where_clause: RwLock<WhereClause>,
     /// Local variables within this function (populated during body resolution)
     /// This includes function parameters and any let/var declarations.
     /// Variables with the same name due to shadowing have different LocalIds.
@@ -125,7 +127,7 @@ impl FunctionSymbol {
             is_static,
             has_body,
             type_parameters,
-            where_clause,
+            where_clause: RwLock::new(where_clause),
             locals: RwLock::new(Vec::new()),
         }
     }
@@ -215,9 +217,34 @@ impl FunctionSymbol {
         self.type_parameters.len()
     }
 
-    /// Get the where clause for this function
-    pub fn where_clause(&self) -> &WhereClause {
-        &self.where_clause
+    /// Get the where clause for this function (cloned)
+    pub fn where_clause(&self) -> WhereClause {
+        self.where_clause.read().unwrap().clone()
+    }
+
+    /// Update a specific bound in the where clause by constraint index.
+    ///
+    /// This is called during the BIND phase to replace placeholder Ty::error()
+    /// bounds with resolved protocol types.
+    ///
+    /// # Arguments
+    /// * `constraint_index` - The index of the constraint in where_clause.constraints
+    /// * `bound_index` - The index of the bound within that constraint
+    /// * `resolved_bound` - The resolved protocol type
+    pub fn update_where_clause_bound(
+        &self,
+        constraint_index: usize,
+        bound_index: usize,
+        resolved_bound: Ty,
+    ) {
+        let mut wc = self.where_clause.write().unwrap();
+        if constraint_index < wc.constraints.len() {
+            if let crate::ty::Constraint::TypeBound { bounds, .. } = &mut wc.constraints[constraint_index] {
+                if bound_index < bounds.len() {
+                    bounds[bound_index] = resolved_bound;
+                }
+            }
+        }
     }
 
     /// Add a new local variable to this function.

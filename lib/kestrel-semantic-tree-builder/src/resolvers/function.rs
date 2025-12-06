@@ -10,11 +10,12 @@ use kestrel_span::Spanned;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use semantic_tree::symbol::Symbol;
 
+use crate::database::TypePathResolution;
 use crate::resolver::{BindingContext, Resolver};
 use crate::resolvers::type_parameter::{add_type_params_as_children, extract_type_parameters, extract_where_clause};
 use crate::resolution::type_resolver::{extract_type_from_ty_node, extract_type_from_node, resolve_type_from_ty_node, TypeSyntaxContext};
 use crate::syntax::{
-    extract_identifier_from_name, extract_name, extract_visibility, find_child,
+    extract_identifier_from_name, extract_name, extract_path_segments, extract_visibility, find_child,
     find_visibility_scope, get_node_span, get_visibility_span, parse_visibility,
 };
 
@@ -125,6 +126,9 @@ impl Resolver for FunctionResolver {
 
         // Extract and resolve return type from syntax
         let resolved_return = resolve_return_type_from_syntax(syntax, &source, symbol_id, context, file_id);
+
+        // Resolve where clause bounds
+        resolve_where_clause_bounds(syntax, &source, symbol_id, context, file_id);
 
         // Determine receiver kind for instance methods
         let receiver_kind = determine_receiver_kind(syntax, symbol);
@@ -488,5 +492,94 @@ fn determine_receiver_kind(
         (true, _) => Some(ReceiverKind::Mutating),
         (_, true) => Some(ReceiverKind::Consuming),
         _ => Some(ReceiverKind::Borrowing), // Default for instance methods
+    }
+}
+
+/// Resolve where clause bounds from a FunctionDeclaration syntax node during bind phase.
+///
+/// This resolves the protocol types in where clause constraints (e.g., T: Add resolves
+/// Add to the actual protocol symbol). The resolved bounds are stored in the FunctionSymbol's
+/// where clause so they can be used during body resolution.
+fn resolve_where_clause_bounds(
+    syntax: &SyntaxNode,
+    source: &str,
+    context_id: semantic_tree::symbol::SymbolId,
+    ctx: &mut BindingContext,
+    file_id: usize,
+) {
+    use kestrel_semantic_tree::symbol::function::FunctionSymbol;
+
+    // Get the function symbol to update its where clause
+    let Some(func_arc) = ctx.db.symbol_by_id(context_id) else {
+        return;
+    };
+
+    let Some(func_sym) = func_arc.as_ref().downcast_ref::<FunctionSymbol>() else {
+        return;
+    };
+
+    // Find the WhereClause syntax node
+    let Some(where_clause_node) = find_child(syntax, SyntaxKind::WhereClause) else {
+        return;
+    };
+
+    // Resolve each bound and update the function's where clause
+    // Track constraint index since there may be multiple TypeBounds for the same type parameter
+    let mut constraint_index = 0;
+    for child in where_clause_node.children() {
+        if child.kind() == SyntaxKind::TypeBound {
+            resolve_type_bound_in_function(&child, source, func_sym, ctx, constraint_index);
+            constraint_index += 1;
+        }
+    }
+}
+
+/// Resolve a single type bound in a function's where clause.
+///
+/// For each Path node in the TypeBound, resolve it to a protocol type and update
+/// the corresponding constraint in the function's where clause.
+///
+/// # Arguments
+/// * `constraint_index` - The index of this TypeBound's constraint in where_clause.constraints
+fn resolve_type_bound_in_function(
+    syntax: &SyntaxNode,
+    source: &str,
+    func_sym: &FunctionSymbol,
+    ctx: &mut BindingContext,
+    constraint_index: usize,
+) {
+    use kestrel_semantic_tree::ty::TyKind;
+
+    // Get the function's context ID for path resolution
+    let context_id = func_sym.metadata().id();
+
+    // Resolve each Path in the bound
+    let mut bound_index = 0;
+    for child in syntax.children() {
+        if child.kind() == SyntaxKind::Path {
+            let _span = get_node_span(&child, source);
+            let segments = extract_path_segments(&child);
+
+            if segments.is_empty() {
+                bound_index += 1;
+                continue;
+            }
+
+            // Resolve the path to a type
+            match ctx.db.resolve_type_path(segments.clone(), context_id) {
+                TypePathResolution::Resolved(resolved_ty) => {
+                    // Update the bound in the where clause
+                    if let TyKind::Protocol { .. } = resolved_ty.kind() {
+                        func_sym.update_where_clause_bound(constraint_index, bound_index, resolved_ty);
+                    }
+                }
+                TypePathResolution::NotFound { .. } => {
+                    // Error already reported during general type resolution
+                }
+                _ => {}
+            }
+
+            bound_index += 1;
+        }
     }
 }

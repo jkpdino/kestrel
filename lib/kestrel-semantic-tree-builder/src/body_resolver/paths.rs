@@ -5,19 +5,25 @@
 
 use kestrel_reporting::IntoDiagnostic;
 use kestrel_semantic_tree::expr::Expression;
+use kestrel_semantic_tree::symbol::function::FunctionSymbol;
 use kestrel_semantic_tree::symbol::kind::KestrelSymbolKind;
-use kestrel_semantic_tree::ty::Ty;
+use kestrel_semantic_tree::ty::{Substitutions, Ty};
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use semantic_tree::symbol::Symbol;
 
-use crate::diagnostics::{SelfOutsideInstanceMethodError, UndefinedNameError};
+use crate::diagnostics::{
+    NotGenericError, SelfOutsideInstanceMethodError, TooFewTypeArgumentsError,
+    TooManyTypeArgumentsError, TypeArgsOnNonGenericError, UndefinedNameError,
+};
 use crate::database::ValuePathResolution;
+use crate::resolution::type_resolver::TypeResolver;
 use crate::syntax::get_node_span;
 
 use super::context::BodyResolutionContext;
 use super::expressions::resolve_expression;
 use super::members::resolve_member_chain;
-use super::utils::is_expression_kind;
+use super::utils::{get_callable_behavior, is_expression_kind, substitute_type};
 
 /// Resolve a path expression (variable reference, function reference, or member access)
 pub fn resolve_path_expression(
@@ -51,6 +57,19 @@ pub fn resolve_path_expression(
 
     // First, check if it's a local variable
     if let Some(local_id) = ctx.local_scope.lookup(first_name) {
+        // Check for type arguments on the variable itself (first segment only) - not allowed
+        // Only check if this is a single-segment path (just `x[T]`), not `x.member[T]`
+        if path_with_spans.len() == 1 && has_type_arguments_on_first_segment(node) {
+            ctx.diagnostics.add_diagnostic(
+                TypeArgsOnNonGenericError {
+                    span: span.clone(),
+                    callee_description: "a variable".to_string(),
+                }
+                .into_diagnostic(ctx.file_id),
+            );
+            return Expression::error(span);
+        }
+
         // Get the type and mutability from the local
         let local = ctx.local_scope.function().get_local(local_id);
         let local_ty = local
@@ -82,12 +101,33 @@ pub fn resolve_path_expression(
         return Expression::error(span);
     }
 
+    // Extract type arguments from the path if present
+    let explicit_type_args = extract_type_arguments_from_path(node, ctx);
+
     // Not a local - resolve as a value path (module path)
     match ctx.db.resolve_value_path(path.clone(), ctx.function_id) {
         ValuePathResolution::Symbol { symbol_id, ty } => {
+            // Check if type arguments were provided
+            let final_ty = if let Some(ref type_args) = explicit_type_args {
+                if !type_args.is_empty() {
+                    // Apply type arguments to the function type
+                    apply_type_args_to_function(
+                        symbol_id,
+                        &ty,
+                        type_args,
+                        &span,
+                        ctx,
+                    )
+                    .unwrap_or(ty)
+                } else {
+                    ty
+                }
+            } else {
+                ty
+            };
+
             // For now, module-level symbols (functions) are not mutable lvalues
-            // TODO: Support module-level `var` declarations if/when added
-            Expression::symbol_ref(symbol_id, ty, false, span)
+            Expression::symbol_ref(symbol_id, final_ty, false, span)
         }
         ValuePathResolution::Overloaded { candidates } => {
             Expression::overloaded_ref(candidates, span)
@@ -268,4 +308,182 @@ fn extract_trailing_identifiers(node: &SyntaxNode, _source: &str) -> Vec<(String
     }
 
     identifiers
+}
+
+/// Check if a path expression contains type arguments on the first segment
+/// This is for detecting `x[T]` where x is a variable
+fn has_type_arguments_on_first_segment(node: &SyntaxNode) -> bool {
+    // For a path like `x[T]`, we look for TypeArgumentList directly in the first PathElement
+    // or directly in the ExprPath if there's no Path wrapper
+
+    // First check if there's a Path child
+    if let Some(path_node) = node.children().find(|c| c.kind() == SyntaxKind::Path) {
+        // Get the first PathElement
+        if let Some(first_elem) = path_node.children().find(|c| c.kind() == SyntaxKind::PathElement) {
+            return first_elem.children().any(|c| c.kind() == SyntaxKind::TypeArgumentList);
+        }
+    }
+
+    // Also check directly in ExprPath for simpler paths
+    for child in node.children() {
+        if child.kind() == SyntaxKind::PathElement {
+            if child.children().any(|c| c.kind() == SyntaxKind::TypeArgumentList) {
+                return true;
+            }
+            // Only check the first PathElement
+            return false;
+        }
+        if child.kind() == SyntaxKind::TypeArgumentList {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Extract type arguments from a path expression node.
+///
+/// Handles paths like `identity[String]` or `module.func[Int, Bool]`.
+/// Returns None if no type arguments are present, or Some(vec) with the resolved types.
+fn extract_type_arguments_from_path(
+    node: &SyntaxNode,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Vec<Ty>> {
+    // Look for TypeArgumentList in the path
+    fn find_last_type_arg_list(node: &SyntaxNode) -> Option<SyntaxNode> {
+        let mut last_found = None;
+
+        // Check Path child first
+        if let Some(path_node) = node.children().find(|c| c.kind() == SyntaxKind::Path) {
+            // Look for TypeArgumentList in PathElements
+            for element in path_node.children() {
+                if element.kind() == SyntaxKind::PathElement {
+                    for child in element.children() {
+                        if child.kind() == SyntaxKind::TypeArgumentList {
+                            last_found = Some(child);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also check direct children for simpler paths
+        for child in node.children() {
+            if child.kind() == SyntaxKind::PathElement {
+                for inner in child.children() {
+                    if inner.kind() == SyntaxKind::TypeArgumentList {
+                        last_found = Some(inner);
+                    }
+                }
+            }
+            if child.kind() == SyntaxKind::TypeArgumentList {
+                last_found = Some(child);
+            }
+        }
+
+        last_found
+    }
+
+    let type_arg_list = find_last_type_arg_list(node)?;
+
+    // Resolve each type in the TypeArgumentList
+    let mut type_args = Vec::new();
+
+    for child in type_arg_list.children() {
+        if child.kind() == SyntaxKind::Ty {
+            let mut resolver = TypeResolver::new(
+                ctx.db,
+                ctx.diagnostics,
+                ctx.file_id,
+                ctx.source,
+                ctx.function_id,
+            );
+            let ty = resolver.resolve(&child);
+            type_args.push(ty);
+        }
+    }
+
+    // Return Some even if empty - the presence of [] means explicit type args were provided
+    Some(type_args)
+}
+
+/// Apply type arguments to a function type, returning the instantiated type.
+///
+/// This validates that:
+/// - The symbol is a generic function
+/// - The number of type arguments matches the number of type parameters
+///
+/// Returns None if type arguments can't be applied (with diagnostics emitted).
+fn apply_type_args_to_function(
+    symbol_id: semantic_tree::symbol::SymbolId,
+    _original_ty: &Ty,
+    type_args: &[Ty],
+    span: &Span,
+    ctx: &mut BodyResolutionContext,
+) -> Option<Ty> {
+    // Get the symbol
+    let symbol = ctx.db.symbol_by_id(symbol_id)?;
+
+    // Check if it's a function with type parameters
+    let func_sym = symbol.as_any().downcast_ref::<FunctionSymbol>()?;
+    let type_params = func_sym.type_parameters();
+    let function_name = symbol.metadata().name().value.clone();
+
+    // Validate: function must be generic if type args are provided
+    if type_params.is_empty() {
+        ctx.diagnostics.add_diagnostic(
+            NotGenericError {
+                span: span.clone(),
+                type_name: function_name,
+            }
+            .into_diagnostic(ctx.file_id),
+        );
+        return None;
+    }
+
+    // Validate: type arg count must match type param count
+    if type_args.len() < type_params.len() {
+        ctx.diagnostics.add_diagnostic(
+            TooFewTypeArgumentsError {
+                span: span.clone(),
+                type_name: function_name,
+                min_expected: type_params.len(),
+                got: type_args.len(),
+            }
+            .into_diagnostic(ctx.file_id),
+        );
+        return None;
+    }
+
+    if type_args.len() > type_params.len() {
+        ctx.diagnostics.add_diagnostic(
+            TooManyTypeArgumentsError {
+                span: span.clone(),
+                type_name: function_name,
+                max_expected: type_params.len(),
+                got: type_args.len(),
+            }
+            .into_diagnostic(ctx.file_id),
+        );
+        return None;
+    }
+
+    // Build substitutions from type parameters to provided type arguments
+    let mut substitutions = Substitutions::new();
+    for (param, arg_ty) in type_params.iter().zip(type_args.iter()) {
+        substitutions.insert(param.metadata().id(), arg_ty.clone());
+    }
+
+    // Get the callable behavior to get the function type
+    let callable = get_callable_behavior(&symbol)?;
+
+    // Build the instantiated function type
+    let params: Vec<Ty> = callable
+        .parameters()
+        .iter()
+        .map(|p| substitute_type(&p.ty, &substitutions))
+        .collect();
+    let return_type = substitute_type(callable.return_type(), &substitutions);
+
+    Some(Ty::function(params, return_type, span.clone()))
 }

@@ -65,7 +65,7 @@ impl Validator for GenericsValidator {
                 if let Some(func_sym) = symbol_ref.as_any().downcast_ref::<FunctionSymbol>() {
                     let type_params = func_sym.type_parameters();
                     validate_type_parameters(type_params, ctx);
-                    validate_where_clause(func_sym.where_clause(), type_params, ctx);
+                    validate_where_clause(&func_sym.where_clause(), type_params, ctx);
                 }
             }
             KestrelSymbolKind::Protocol => {
